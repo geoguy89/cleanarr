@@ -388,3 +388,21 @@ table.detections td { padding: 4px 8px; border-top: 1px solid var(--line); }
 }
 
 .security { max-width: 78ch; }
+
+/* A choice between two or three whole things, rather than a dropdown that
+   hides the options you did not already know about. The complaint that led to
+   this was "I'm still not seeing an option for a Whisper server" - it was
+   there, behind a select, which is the same as not being there. */
+.pickrow { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.pick {
+  flex: 1 1 220px; display: flex; flex-direction: row; align-items: flex-start;
+  gap: 10px; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 9px; padding: 13px 15px; color: var(--text);
+}
+.pick:hover { border-color: var(--accent-dim); }
+.pick:has(input:checked) { border-color: var(--accent); background: var(--surface-2); }
+.pick input { width: auto; margin-top: 3px; flex: none; }
+.pick span { display: flex; flex-direction: column; gap: 3px; }
+.pick strong { font-size: .95rem; font-weight: 650; }
+.pick em { font-style: normal; color: var(--muted); font-size: .84rem; line-height: 1.45; }

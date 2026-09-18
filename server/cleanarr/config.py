@@ -103,8 +103,14 @@ class Settings:
 
     # Plex is told to look again once a file changes, so the new track appears
     # without waiting for a scheduled scan.
+    # Which media server to tell about a changed file, and to wait for.
+    # One of: none | plex | jellyfin. Neither is required - the cleaned track
+    # appears either way, just after that server next scans on its own.
+    media_server: str = "none"
     plex_url: str = ""
     plex_token: str = ""
+    jellyfin_url: str = ""
+    jellyfin_api_key: str = ""
     # When to hold the queue for Plex. Only a VIDEO transcode competes for the
     # GPU that transcribing and judging use; a direct play costs the server
     # nothing, so waiting for one would be waiting for no reason.
@@ -137,6 +143,8 @@ class Settings:
             data["plex_token"] = "********"
         if data.get("asr_api_key"):
             data["asr_api_key"] = "********"
+        if data.get("jellyfin_api_key"):
+            data["jellyfin_api_key"] = "********"
         # The hash, its salt and the cookie key never leave the server. The
         # username is fine to show - the settings page displays who is signed
         # in - but everything that could be used to forge a session is dropped
@@ -158,6 +166,11 @@ def load() -> Settings:
         raw["hold_policy"] = ("video_transcode" if raw.pop("pause_while_plex_playing")
                               else "never")
     raw.pop("pause_while_plex_playing", None)
+    # media_server arrived when Jellyfin did. An install that already had a
+    # Plex address configured meant Plex, so say so rather than silently
+    # switching it off.
+    if "media_server" not in raw and raw.get("plex_url"):
+        raw["media_server"] = "plex"
     for key, value in raw.items():
         if key in ("sonarr", "radarr") and isinstance(value, dict):
             setattr(settings, key, ArrConfig(**value))

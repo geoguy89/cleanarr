@@ -169,7 +169,7 @@ class Pipeline:
 
         freed = max(0, before - path.stat().st_size)
         db.forget_cleaned(str(path))
-        note = arr.plex_refresh(settings.plex_url, settings.plex_token, str(path))
+        note = arr.refresh_for(settings, str(path))
         return {"status": "done", "muted": 0, "added_bytes": 0,
                 "message": f"removed the cleaned track · {freed / 1e6:.0f} MB back · "
                            f"Plex: {note}"}
@@ -258,7 +258,7 @@ class Pipeline:
             added = (media.track_bytes(candidate, new_track.audio_index)
                      if new_track else 0)
             media.swap_in(candidate, path, keep_backup=settings.keep_backup)
-            note = arr.plex_refresh(settings.plex_url, settings.plex_token, str(path))
+            note = arr.refresh_for(settings, str(path))
             return {"status": "done", "muted": len(matches), "added_bytes": added,
                     "message": f"added “{settings.track_title}” · "
                                f"{len(matches)} muted · {added / 1e6:.0f} MB · "
