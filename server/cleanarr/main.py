@@ -381,8 +381,7 @@ def get_settings():
     data = settings.public()
     data["available_categories"] = [
         {"key": k, "label": words.CATEGORY_LABELS[k]} for k in words.CATEGORIES]
-    data["hold_policies"] = [{"key": k, "label": v}
-                             for k, v in arr.HOLD_POLICIES.items()]
+    data["hold_policies"] = arr.hold_policies(settings.media_server)
     return data
 
 
@@ -883,7 +882,8 @@ def clean_anyway():
     return {"override": True}
 
 
-@app.get("/api/plex/sessions")
+@app.get("/api/media/sessions")
+@app.get("/api/plex/sessions")   # the old name, for a cached page
 def plex_sessions():
     """What Plex is doing, and whether that is holding the queue."""
     settings = config.load()

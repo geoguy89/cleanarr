@@ -310,12 +310,25 @@ def plex_sessions(plex_url: str, token: str) -> list[PlexSession]:
 
 
 # What counts as a reason to wait.
+# The policies read back the name of whichever server is configured. They used
+# to say "Plex" regardless, which on a Jellyfin install looked like the option
+# simply was not there - the behaviour was always server-agnostic, only the
+# wording was not.
 HOLD_POLICIES = {
     "never": "Never wait - clean whenever there is work",
-    "video_transcode": "Wait only while Plex is transcoding video (it needs the GPU)",
-    "any_transcode": "Wait while Plex is transcoding anything",
+    "video_transcode": "Wait only while {server} is transcoding video (it needs the GPU)",
+    "any_transcode": "Wait while {server} is transcoding anything",
     "playing": "Wait while anything at all is playing",
 }
+
+SERVER_NAMES = {"plex": "Plex", "jellyfin": "Jellyfin", "none": "your media server"}
+
+
+def hold_policies(media_server: str = "none") -> list[dict]:
+    """The wait options, named for the server actually in use."""
+    name = SERVER_NAMES.get(media_server, SERVER_NAMES["none"])
+    return [{"key": key, "label": label.format(server=name)}
+            for key, label in HOLD_POLICIES.items()]
 
 
 def should_hold(sessions: list[PlexSession], policy: str) -> tuple[bool, str]:
