@@ -1,0 +1,64 @@
+<?xml version="1.0"?>
+<!--
+  Unraid user template for Cleanarr.
+
+  Lives on the flash at:
+    /boot/config/plugins/dockerMan/templates-user/my-Cleanarr.xml
+
+  It gives the container an icon, a WebUI link and a working Edit dialog in the
+  Docker tab. The settings here mirror docker/docker-compose.yml exactly - if
+  you change a port or a path in one, change it in the other, because either
+  can recreate the container.
+
+  The image is built locally (docker compose build), so Unraid's "check for
+  updates" has no registry to ask and will say it cannot check. That is
+  expected, not a fault.
+-->
+<Container version="2">
+  <Name>cleanarr</Name>
+  <Repository>cleanarr:latest</Repository>
+  <Registry/>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support/>
+  <Project/>
+  <Overview>
+    Adds a second audio track, "Cleaned - English", to shows and movies from
+    Sonarr and Radarr, with the profanity muted. One file, extra track: the
+    original audio is untouched and stays the default, and the clean one is
+    picked from the audio menu in Plex.
+
+    Built locally from /mnt/user/appdata/cleanarr-src - rebuild with:
+    cd /mnt/user/appdata/cleanarr-src/docker &amp;&amp; docker compose up -d --build
+  </Overview>
+  <Category>MediaApp:Video Tools:Utilities</Category>
+  <WebUI>http://[IP]:[PORT:8477]/</WebUI>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/geoguy89/cleanarr/main/web/icon.png</Icon>
+  <ExtraParams>--runtime=nvidia --restart=unless-stopped</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>An NVIDIA GPU, Sonarr and Radarr, and Ollama for the second opinion on ambiguous words.</Requires>
+  <Config Name="WebUI" Target="8477" Default="8477" Mode="tcp"
+          Description="The Cleanarr web interface." Type="Port"
+          Display="always" Required="true" Mask="false">8477</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/cleanarr" Mode="rw"
+          Description="Settings, the job database and the cached transcripts."
+          Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/cleanarr</Config>
+  <Config Name="Media" Target="/data" Default="/mnt/user/data" Mode="rw"
+          Description="Must be mounted at the SAME path Sonarr and Radarr use, or the file paths they report will not resolve here."
+          Type="Path" Display="always" Required="true" Mask="false">/mnt/user/data</Config>
+  <Config Name="TZ" Target="TZ" Default="America/New_York" Mode=""
+          Description="Timezone." Type="Variable"
+          Display="always" Required="false" Mask="false">America/New_York</Config>
+  <Config Name="NVIDIA_VISIBLE_DEVICES" Target="NVIDIA_VISIBLE_DEVICES" Default="all" Mode=""
+          Description="The GPU used to transcribe. 'all', or a specific GPU UUID from nvidia-smi -L."
+          Type="Variable" Display="always" Required="true" Mask="false">all</Config>
+  <Config Name="NVIDIA_DRIVER_CAPABILITIES" Target="NVIDIA_DRIVER_CAPABILITIES" Default="compute,utility" Mode=""
+          Description="What the container may use the driver for." Type="Variable"
+          Display="advanced" Required="true" Mask="false">compute,utility</Config>
+</Container>

@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Runtime state, never source. config.yaml holds API keys, the Plex token and
+# the password hash; the database holds the job history; the cache holds
+# gigabytes of model weights.
+config.yaml
+*.sqlite
+*.sqlite-*
+cache/
+dist/
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

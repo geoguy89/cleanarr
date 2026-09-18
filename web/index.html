@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cleanarr</title>
+<link rel="icon" href="/static/icon.png?v=4">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=4">
+<meta name="application-name" content="Cleanarr">
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#12141a">
+<meta name="color-scheme" content="dark">
+<!-- So it opens without browser chrome when added to a phone's home screen. -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cleanarr">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="gate" class="gate" hidden>
+  <form id="gate-form" class="gate-box">
+    <img src="/static/icon.png?v=4" alt="" class="gate-logo">
+    <h1 class="gate-title">Cleanarr</h1>
+    <p id="gate-blurb" class="muted"></p>
+    <label>Username<input id="gate-user" autocomplete="username" autocapitalize="none"></label>
+    <label>Password<input id="gate-pass" type="password" autocomplete="current-password"></label>
+    <label id="gate-confirm-row" hidden>Password again
+      <input id="gate-confirm" type="password" autocomplete="new-password"></label>
+    <button id="gate-submit" type="submit">Sign in</button>
+    <p id="gate-error" class="gate-error" hidden></p>
+  </form>
+</div>
+
+
+<header>
+  <h1><img src="/static/icon.png?v=4" alt=""> Cleanarr</h1>
+  <nav>
+    <button class="tab active" data-view="home">Home</button>
+    <button class="tab" data-view="shows">Shows</button>
+    <button class="tab" data-view="upcoming">Upcoming</button>
+    <button class="tab" data-view="movies">Movies</button>
+    <button class="tab" data-view="queue">Queue <span id="queue-count" class="pill"></span></button>
+    <button class="tab" data-view="cleaned">Cleaned <span id="cleaned-count" class="pill"></span></button>
+    <button class="tab" data-view="settings">Settings</button>
+  </nav>
+  <div id="status" class="status"></div>
+</header>
+
+<main>
+  <section id="view-home" class="view active">
+    <div id="home-summary" class="summary"></div>
+    <h2 class="section-head">Episodes that just landed
+      <span class="muted">newest first, straight from Sonarr</span></h2>
+    <div id="home-episodes" class="list"></div>
+    <h2 class="section-head">Films that just landed
+      <span class="muted">newest first, straight from Radarr</span></h2>
+    <div id="home-movies" class="grid-posters"></div>
+  </section>
+
+  <section id="view-shows" class="view">
+    <div class="toolbar">
+      <input id="show-search" type="search" placeholder="Search shows…" autocomplete="off">
+      <select id="show-filter">
+        <option value="all">All shows</option>
+        <option value="cleaned">Has cleaned episodes</option>
+        <option value="monitored">Auto-cleaning</option>
+        <option value="untouched">Not cleaned yet</option>
+        <option value="nofiles">Nothing on disk yet</option>
+      </select>
+      <select id="show-sort">
+        <option value="title">A to Z</option>
+        <option value="recent">Recently added</option>
+      </select>
+      <span id="show-count" class="muted"></span>
+    </div>
+    <div id="show-grid" class="grid-posters"></div>
+  </section>
+
+  <section id="view-upcoming" class="view">
+    <div class="toolbar">
+      <select id="calendar-days">
+        <option value="7">Next 7 days</option>
+        <option value="14">Next 14 days</option>
+        <option value="21" selected>Next 3 weeks</option>
+        <option value="60">Next 2 months</option>
+      </select>
+      <select id="calendar-filter">
+        <option value="all">Everything airing</option>
+        <option value="missing">Not downloaded yet</option>
+        <option value="monitored">Shows I clean</option>
+        <option value="unmonitored">Shows I don't clean</option>
+      </select>
+      <span id="calendar-count" class="muted"></span>
+    </div>
+    <p class="muted" style="margin:0 0 14px">Straight from Sonarr's calendar.
+      Tick <strong>Clean it</strong> on anything here and every episode of that
+      show is cleaned as it is downloaded — no need to come back once it airs.</p>
+    <div id="calendar-list"></div>
+  </section>
+
+  <section id="view-movies" class="view">
+    <div class="toolbar">
+      <input id="movie-search" type="search" placeholder="Search movies…" autocomplete="off">
+      <select id="movie-filter">
+        <option value="all">All movies</option>
+        <option value="cleaned">Cleaned</option>
+        <option value="untouched">Not cleaned yet</option>
+      </select>
+      <select id="movie-sort">
+        <option value="title">A to Z</option>
+        <option value="recent">Recently added</option>
+      </select>
+      <span id="movie-count" class="muted"></span>
+    </div>
+    <div id="movie-grid" class="grid-posters"></div>
+  </section>
+
+  <section id="view-queue" class="view">
+    <div class="toolbar">
+      <span id="stats" class="muted"></span>
+      <span id="queue-hold" class="muted"></span>
+      <button id="clean-anyway" class="small ghost" hidden>Clean anyway</button>
+      <button id="check-new" class="small ghost">Check for new episodes</button>
+      <button id="clear-queue" class="small ghost">Empty the queue</button>
+      <button id="purge-cancelled" class="small ghost" hidden>Remove cancelled</button>
+      <button id="retry-failed" class="small ghost" hidden>Retry failed</button>
+      <button id="purge-failed" class="small ghost" hidden>Remove failed</button>
+    </div>
+    <div id="monitor-status" class="muted" style="margin-bottom:10px"></div>
+    <div id="selection-bar" class="selection-bar" hidden>
+      <span id="selection-count"></span>
+      <button class="small ghost" data-bulk="top" title="Run these first">⤒ First</button>
+      <button class="small ghost" data-bulk="up">▲ Up</button>
+      <button class="small ghost" data-bulk="down">▼ Down</button>
+      <button class="small ghost" data-bulk="bottom" title="Run these last">⤓ Last</button>
+      <button class="small ghost" data-bulk="cancel">Cancel these</button>
+      <button class="small ghost" data-bulk="clear">Clear selection</button>
+    </div>
+    <div id="job-list" class="list"></div>
+  </section>
+
+  <section id="view-cleaned" class="view">
+    <div class="toolbar">
+      <input id="cleaned-search" type="search" placeholder="Search what's been cleaned…" autocomplete="off">
+      <span id="cleaned-stats" class="muted"></span>
+      <button id="remove-all" class="small ghost" hidden>Remove every cleaned track</button>
+    </div>
+    <div id="cleaned-list" class="list"></div>
+  </section>
+
+  <section id="view-settings" class="view">
+    <form id="settings-form">
+
+      <h2>1 · Your library</h2>
+      <p class="help">Cleanarr never changes anything in Sonarr or Radarr — it only
+        asks them what you own and where the files are. The API key is on each
+        of their <em>Settings → General</em> pages.</p>
+      <div class="grid">
+        <label>Sonarr address<input name="sonarr.url" placeholder="http://192.168.1.10:8989"></label>
+        <label>Sonarr API key<input name="sonarr.api_key" type="password" autocomplete="off"></label>
+        <label>Radarr address<input name="radarr.url" placeholder="http://192.168.1.10:7878"></label>
+        <label>Radarr API key<input name="radarr.api_key" type="password" autocomplete="off"></label>
+      </div>
+      <div class="row">
+        <button type="button" class="ghost" data-test="sonarr">Test Sonarr</button>
+        <button type="button" class="ghost" data-test="radarr">Test Radarr</button>
+        <span id="test-result" class="muted"></span>
+      </div>
+      <div class="callout">
+        <strong>The files have to be at the same path here as they are there.</strong>
+        Cleanarr opens the exact path Sonarr reports. If Sonarr says
+        <code>/data/media/tv/…</code> then this container needs <code>/data</code>
+        mounted the same way. Matching the mounts is much less trouble than
+        translating paths afterwards.
+      </div>
+
+      <h2>2 · What gets silenced</h2>
+      <p class="help">Four lists, each switchable. Matching is whole-word, so
+        “class” and “cockpit” are never caught by the words inside them.</p>
+      <div id="categories" class="checks"></div>
+      <div class="grid">
+        <label>Always silence, one per line
+          <textarea name="custom_words" rows="3" placeholder="a word this household does not want"></textarea></label>
+        <label>Never silence, one per line
+          <textarea name="allow_words" rows="3" placeholder="a name or word that keeps getting caught"></textarea></label>
+      </div>
+      <p class="help">A phrase silences only the profane word inside it — “oh my
+        god” mutes “god” and leaves “oh my” audible, so the track is not chopped
+        about more than it needs to be.</p>
+
+      <h2>3 · Listening</h2>
+      <p class="help">Cleanarr has to hear the episode before it can mute
+        anything. Two ways to do that — run the speech model here, or hand the
+        audio to a Whisper server you already have.</p>
+      <div class="grid">
+        <label>Where the listening happens
+          <select name="asr_backend" id="asr-backend">
+            <option value="builtin">In this container — needs an NVIDIA GPU</option>
+            <option value="remote">On a Whisper server I already run</option>
+          </select></label>
+      </div>
+
+      <div id="asr-builtin">
+        <div class="callout">
+          <strong>Whisper runs inside this container — nothing external is
+          involved.</strong> The model weights are the one thing not in the
+          image: they come from Hugging Face the first time they are needed and
+          are kept in your config folder, so they survive updates. Left alone
+          that download happens silently during your first clean and looks like
+          a stalled job, so fetch it here and watch it happen.
+        </div>
+        <div id="model-list" class="model-list"></div>
+      </div>
+
+      <div id="asr-remote" hidden>
+        <div class="callout">
+          <strong>The server must return word-level timestamps.</strong>
+          Cleanarr mutes half a second around one word; given only line-level
+          timings the best it could do is blank four seconds of dialogue to
+          catch one syllable. Anything that speaks the OpenAI transcription API
+          with <code>timestamp_granularities[]=word</code> works —
+          <em>speaches</em>, <em>faster-whisper-server</em>, LocalAI. Test below
+          before you rely on it.
+        </div>
+        <div class="grid">
+          <label>Whisper server address
+            <input name="asr_url" placeholder="http://192.168.1.10:8000"></label>
+          <label>Model on that server
+            <input name="asr_remote_model" list="asr-model-options"
+                   placeholder="Systran/faster-whisper-medium.en">
+            <datalist id="asr-model-options"></datalist></label>
+          <label>API key (blank if it needs none)
+            <input name="asr_api_key" type="password" autocomplete="off"></label>
+        </div>
+        <div class="row">
+          <button type="button" class="ghost" id="asr-list">List its models</button>
+          <button type="button" class="ghost" id="asr-test">Test the Whisper server</button>
+          <span id="asr-result" class="muted"></span>
+        </div>
+        <p class="help">The audio goes over as 16 kHz mono WAV — about 85 MB for
+          a 45-minute episode, so keep this on your own network.</p>
+      </div>
+      <div class="grid">
+        <label>Skip over silence
+          <select name="trim_silence">
+            <option value="false">No — listen to the whole thing (recommended)</option>
+            <option value="true">Yes</option>
+          </select></label>
+        <label>Keep a backup of each original
+          <select name="keep_backup"><option value="false">No</option><option value="true">Yes</option></select></label>
+      </div>
+      <details class="explain">
+        <summary>Why only medium.en, and what “skip over silence” costs</summary>
+        <p><strong>medium.en is the only model offered, and that is a decision
+          rather than a limitation.</strong> It hears about 2½ minutes of a
+          half-hour episode per run and it is what everything here was tuned
+          against.</p>
+        <p><strong>large-v3</strong> sounds like it should be better and is not.
+          Measured on one real episode it took 50% longer and caught
+          <em>fewer</em> swears — it favours tidy prose, and tidy prose smooths
+          swearing away. <strong>small.en</strong> is about twice as fast and
+          misses noticeably more. Offering three choices where two are worse
+          only invites picking a worse one.</p>
+        <p>If you disagree, <code>model:</code> in <code>config.yaml</code> still
+          takes any faster-whisper name. It is this page that has an opinion,
+          not the code. Only <code>.en</code> models make sense here because
+          everything downstream assumes English.</p>
+        <p><strong>Skip over silence</strong> lets the model throw away quiet
+          passages before listening. On one 43-minute episode that lost 19 real
+          profanities — five “fucking”, a “bitch”, three “hell” — and saved no
+          time at all. Leave it off. Changing it makes previously-heard files be
+          heard again.</p>
+      </details>
+
+      <h2>4 · Muting</h2>
+      <p class="help">How the silence is applied. The defaults are fine; these
+        matter if a mute clips a neighbouring word or lets a syllable through.</p>
+      <div class="grid">
+        <label>Silence starts this early (seconds)<input name="pad_start" type="number" step="0.01" min="0" max="1"></label>
+        <label>Silence ends this late (seconds)<input name="pad_end" type="number" step="0.01" min="0" max="1"></label>
+        <label>Fade at each edge (seconds)<input name="fade" type="number" step="0.005" min="0" max="0.2"></label>
+        <label>Name of the new track<input name="track_title"></label>
+      </div>
+
+      <h2>5 · Second opinion <span class="optional">optional</span></h2>
+      <div class="callout">
+        <strong>This is your own Ollama, on your own hardware.</strong>
+        Cleanarr does not bundle one and nothing is sent anywhere else — you
+        give it an address and it asks that machine. If the address is blank,
+        this whole step is skipped.
+      </div>
+      <div class="callout">
+        <strong>You almost certainly do not need this.</strong>
+        Measured over 196 checks on a real library it changed the outcome
+        <em>twice</em>, and each check costs 30–100 seconds. Leave the word box
+        below empty and Cleanarr never contacts Ollama at all.
+      </div>
+      <details class="explain">
+        <summary>What it is, and the one case it exists for</summary>
+        <p>Speech recognition writes homophones. A scene in <em>The Bear</em>
+          about drywall and joint compound produced <strong>nine mutes of
+          “cock”</strong> — the word was <strong>“caulk”</strong>. No word list
+          can fix that, because the transcript genuinely says the rude one.</p>
+        <p>So a word you list below is sent to a local language model with the
+          sentence around it, and is only left in if the model can name the
+          ordinary word it heard instead. Anything it cannot answer stays muted.
+          Nothing leaves your network — Ollama runs on your own hardware.</p>
+        <p><strong>Leave the list empty to turn it off.</strong> Then every word
+          on the lists is simply muted, cleaning is much faster, and no model is
+          needed. Put a word on the list only when you have actually seen it
+          caught wrongly.</p>
+      </details>
+      <div class="grid">
+        <label>Double-check these words in context, one per line
+          <textarea name="check_in_context" rows="4" placeholder="empty = off (recommended)"></textarea></label>
+      </div>
+      <div class="grid">
+        <label>Ollama address (blank turns this off)<input name="judge_url" placeholder="http://192.168.1.10:11434"></label>
+        <label>Model<input name="judge_model" placeholder="qwen3.5:9b"></label>
+        <label>CPU threads it may use
+          <select name="judge_threads">
+            <option value="2">2 — leaves the server usable (recommended)</option>
+            <option value="4">4 — a little faster</option>
+            <option value="0">No limit — fastest, and you will notice</option>
+          </select></label>
+      </div>
+      <div class="row">
+        <button type="button" class="ghost" id="judge-check">Check Ollama</button>
+        <button type="button" class="ghost" id="judge-pull" hidden>Download the model</button>
+        <span id="judge-result" class="muted"></span>
+      </div>
+
+      <h2>6 · Plex <span class="optional">optional</span></h2>
+      <p class="help">Two jobs: tell Plex to re-read a file so the new track
+        appears without waiting for a scan, and hold the queue while Plex needs
+        the GPU. A direct play costs nothing, so by default only a
+        <em>video</em> transcode makes cleaning wait.</p>
+      <div class="grid">
+        <label>Plex address<input name="plex_url" placeholder="http://192.168.1.10:32400"></label>
+        <label>Plex token<input name="plex_token" type="password" autocomplete="off"></label>
+        <label>When to wait
+          <select name="hold_policy" id="hold-policy"></select></label>
+      </div>
+      <div id="plex-now" class="muted"></div>
+
+      <div class="row"><button type="submit">Save settings</button><span id="save-result" class="muted"></span></div>
+    </form>
+
+    <h2>7 · Who can use this</h2>
+    <div id="security" class="security"></div>
+
+    <h2>8 · Install it on a phone</h2>
+    <div class="security">
+      <p class="help">Cleanarr can be installed as a real app — its own icon,
+        its own window, no browser bar. Open this page on the phone, then use
+        the button below or your browser's <em>Install app</em> menu item.</p>
+      <div class="row">
+        <button type="button" class="small" id="install-app" hidden>Install Cleanarr</button>
+        <span id="install-note" class="muted"></span>
+      </div>
+      <div class="callout" id="install-https" hidden>
+        <strong>Browsers only offer a real install over HTTPS.</strong>
+        On a plain <code>http://</code> address, Chrome and Brave will give you
+        a bookmark with a browser bar rather than an app. Putting Cleanarr
+        behind a reverse proxy with a certificate — Nginx Proxy Manager,
+        Caddy, Traefik — is what unlocks it, and it is worth doing anyway if
+        you have set a password.
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="scrim" class="scrim" hidden></div>
+<div id="drawer" class="drawer" hidden>
+  <div class="drawer-head">
+    <h2 id="drawer-title"></h2>
+    <button id="clean-show" class="small" hidden>Clean everything not cleaned yet</button>
+    <button id="remove-show" class="small ghost" hidden>Remove all cleaned tracks</button>
+    <label id="monitor-toggle" class="switch-label" hidden
+           title="Episodes downloaded from now on are cleaned when they arrive. Nothing already on disk is touched.">
+      <input type="checkbox" id="monitor-check"> Clean newly downloaded episodes
+    </label>
+    <button id="drawer-close" class="ghost">Close</button>
+  </div>
+  <div id="drawer-body"></div>
+</div>
+
+<div id="ask" class="modal" hidden>
+  <div class="modal-box">
+    <h3 id="ask-title"></h3>
+    <p id="ask-body" class="muted"></p>
+    <div class="row" id="ask-actions"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

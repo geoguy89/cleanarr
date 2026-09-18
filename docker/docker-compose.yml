@@ -1,0 +1,43 @@
+services:
+  cleanarr:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: cleanarr:latest
+    container_name: cleanarr
+    restart: unless-stopped
+    # Docker's default is 10 seconds and then SIGKILL. A job in the middle of
+    # ffmpeg will not be done in ten, so a redeploy used to kill the worker
+    # partway through and leave the write-ahead log to be recovered on the way
+    # back up. Nothing is corrupted by that - WAL is crash-safe - but it makes
+    # a redeploy during a clean messier than it needs to be.
+    stop_grace_period: 45s
+    ports:
+      - "8477:8477"
+    volumes:
+      - /mnt/user/appdata/cleanarr:/config
+      # The same mount Sonarr and Radarr use, at the same path, so the file
+      # paths they report can be opened here without translating anything.
+      - /mnt/user/data:/data
+    # Under contention the server should favour Plex, not this. Shares only
+    # matter when the CPU is actually full, so cleaning still gets the whole
+    # machine when nothing else wants it.
+    cpu_shares: 512
+    environment:
+      - TZ=America/New_York
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    # Unraid reads these off the container itself, so the Docker tab shows the
+    # icon and a working WebUI link even for a container it did not create.
+    # The matching user template (my-Cleanarr.xml on the flash) is what makes
+    # the Edit dialog work; keep the two in step if you change ports or paths.
+    labels:
+      net.unraid.docker.webui: "http://[IP]:[PORT:8477]/"
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/geoguy89/cleanarr/main/web/icon.png"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
