@@ -1,3 +1,16 @@
+<!--
+  This is the text for the Docker Hub page, kept here so it lives with the
+  project rather than only in a web form.
+
+  It is NOT published automatically. Docker Hub's description API wants a JWT
+  from a username and PASSWORD; a personal access token is refused, and putting
+  an account password in a CI secret to save one paste is a poor trade - the
+  token is scoped and revocable, the password is not.
+
+  So when this changes, paste it into:
+  https://hub.docker.com/repository/docker/geoguy89/cleanarr/general
+-->
+
 # Cleanarr
 
 Cleanarr is an \*arr-inspired, *vibe-coded* application for anyone who wants
