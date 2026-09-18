@@ -56,11 +56,19 @@ services:
               capabilities: [gpu]
 ```
 
-Then open `http://<host>:8477` and work down Settings.
+### Or with docker run
 
-> **Also on GitHub Container Registry:** `ghcr.io/geoguy89/cleanarr:latest`.
-> Worth preferring — Docker Hub rate-limits anonymous pulls to 100 per six
-> hours per IP, and GHCR does not.
+```bash
+docker run -d   --name cleanarr   --restart unless-stopped   --runtime nvidia   -e NVIDIA_VISIBLE_DEVICES=all   -e NVIDIA_DRIVER_CAPABILITIES=compute,utility   -e TZ=America/New_York   -p 8477:8477   -v /path/to/appdata/cleanarr:/config   -v /path/to/media:/data   geoguy89/cleanarr:latest
+```
+
+Then open `http://<host>:8477` and work down Settings. Drop the `--runtime`
+and `NVIDIA_*` lines if you have no NVIDIA card — it falls back to the CPU on
+its own.
+
+> **Also on GitHub Container Registry** as `ghcr.io/geoguy89/cleanarr:latest`,
+> if you would rather pull from there. Docker Hub rate-limits anonymous pulls
+> to 100 per six hours per IP; GHCR does not.
 
 ---
 
