@@ -75,7 +75,7 @@ what has already downloaded and how long after airing it arrived. Tick
 ```yaml
 services:
   cleanarr:
-    image: cleanarr:latest
+    image: ghcr.io/geoguy89/cleanarr:latest
     container_name: cleanarr
     restart: unless-stopped
     stop_grace_period: 45s
@@ -115,7 +115,7 @@ docker run -d \
   -p 8477:8477 \
   -v /path/to/appdata/cleanarr:/config \
   -v /path/to/media:/data \
-  cleanarr:latest
+  ghcr.io/geoguy89/cleanarr:latest
 ```
 
 ### Unraid
@@ -134,12 +134,21 @@ container path as `/data` unless theirs differs.
 > updates* has no registry to ask. That is expected, not a fault — rebuild with
 > `docker compose up -d --build`.
 
-### Building it
+### Building it yourself
+
+The published image is `linux/amd64` only, because its CUDA base has no arm64
+build. Building locally also gets you whatever is on `main` rather than the
+last release.
 
 ```bash
 git clone https://github.com/geoguy89/cleanarr.git
 cd cleanarr/docker && docker compose up -d --build
 ```
+
+That compose file carries its own `build:` section, so it compiles the image
+instead of pulling one. Use it if `docker compose up -d` on the example above
+fails with **pull access denied** — that means the registry does not have the
+image yet, not that you lack permission.
 
 ### Hardware
 
