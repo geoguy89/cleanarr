@@ -1286,27 +1286,6 @@ async function pullJudge() {
    Who can use this
    =========================================================================== */
 
-/* Tell the person the truth about why Install is or is not on offer. */
-function renderInstallState() {
-  const note = document.querySelector('#install-note');
-  const https = document.querySelector('#install-https');
-  if (!note) return;
-  const standalone = window.matchMedia('(display-mode: standalone)').matches
-    || window.navigator.standalone === true;
-  const secure = window.isSecureContext;
-  https.hidden = secure;
-  if (standalone) {
-    note.textContent = 'Already running as an installed app.';
-  } else if (!secure) {
-    note.textContent = 'Not available on this address — see below.';
-  } else if (installPrompt) {
-    note.textContent = '';
-  } else {
-    note.textContent = 'If no button appears, use the browser menu — '
-      + 'Install app, or Add to Home screen.';
-  }
-}
-
 function renderSecurity() {
   const on = !!(window.__auth && window.__auth.configured);
   $('#security').innerHTML = on ? `
@@ -1402,6 +1381,8 @@ document.addEventListener('click', async (event) => {
 
 /* Which media server's fields to show. "Neither" hides the wait policy too -
    there is nothing to wait for. */
+const SERVER_NAMES = { plex: 'Plex', jellyfin: 'Jellyfin', none: 'your media server' };
+
 function renderMediaServer() {
   const chosen = $$('input[name="media_server"]').find((r) => r.checked);
   const which = chosen ? chosen.value : 'none';
@@ -1409,6 +1390,24 @@ function renderMediaServer() {
   $('#server-jellyfin').hidden = which !== 'jellyfin';
   $('#hold-row').hidden = which === 'none';
   if (which === 'none') $('#plex-now').textContent = '';
+
+  // The wait options name the server, so they are rebuilt whenever the choice
+  // changes - otherwise switching to Jellyfin leaves them saying Plex until the
+  // page is reloaded, which reads as "there is no Jellyfin option".
+  //
+  // Built from this template rather than by rewriting whatever the API sent.
+  // That version depended on a regex here matching the server's own wording,
+  // and quietly did nothing when it did not. One place owns the words.
+  const name = SERVER_NAMES[which] || SERVER_NAMES.none;
+  const select = $('#hold-policy');
+  const keep = select.value;
+  select.innerHTML = [
+    ['never', 'Never wait — clean whenever there is work'],
+    ['video_transcode', `Wait only while ${name} is transcoding video (it needs the GPU)`],
+    ['any_transcode', `Wait while ${name} is transcoding anything`],
+    ['playing', 'Wait while anything at all is playing'],
+  ].map(([key, label]) => `<option value="${key}">${escapeHtml(label)}</option>`).join('');
+  if (keep) select.value = keep;
 }
 $$('input[name="media_server"]').forEach((r) =>
   r.addEventListener('change', () => { renderMediaServer(); plexNow(); }));
@@ -1463,7 +1462,7 @@ $('#asr-test').addEventListener('click', async () => {
 // -------------------------------------------------------------- settings
 async function plexNow() {
   try {
-    const data = await api('/api/plex/sessions');
+    const data = await api('/api/media/sessions');
     $('#plex-now').innerHTML = data.sessions.length
       ? `Right now: ${data.sessions.map((s) => escapeHtml(s.description)).join('; ')}
          ${data.holding ? '— the queue is waiting' : '— not a reason to wait'}`
@@ -1501,7 +1500,6 @@ async function loadSettings() {
   window.__auth = { configured: !!settings.auth_enabled,
                     username: settings.auth_user || '' };
   renderSecurity();
-  renderInstallState();
   loadModels();
   set('custom_words', (settings.custom_words || []).join('\n'));
   set('allow_words', (settings.allow_words || []).join('\n'));
@@ -1574,25 +1572,6 @@ if ('serviceWorker' in navigator) {
       .catch((err) => console.info('[cleanarr] no service worker:', err.message));
   });
 }
-
-/* Chrome fires this instead of showing its own prompt, so the offer has to be
-   made somewhere. The button lives in Settings rather than in everyone's face. */
-let installPrompt = null;
-window.addEventListener('beforeinstallprompt', (event) => {
-  event.preventDefault();
-  installPrompt = event;
-  const button = document.querySelector('#install-app');
-  if (button) button.hidden = false;
-});
-
-document.addEventListener('click', async (event) => {
-  if (event.target.id !== 'install-app') return;
-  if (!installPrompt) return;
-  installPrompt.prompt();
-  await installPrompt.userChoice;
-  installPrompt = null;
-  event.target.hidden = true;
-});
 
 // ------------------------------------------------------------------ boot
 async function boot() {

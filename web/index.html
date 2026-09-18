@@ -240,7 +240,13 @@
 
       <div id="asr-remote" hidden>
         <div class="callout">
-          <strong>The server must return word-level timestamps.</strong>
+          <strong>Almost any Whisper model will do — but the SERVER matters.</strong>
+          Model size is your choice: whatever that machine already has is fine,
+          and bigger is not automatically better. What is not optional is that
+          the server returns <em>word-level</em> timestamps.
+        </div>
+        <div class="callout">
+          <strong>Why word timestamps are the whole requirement.</strong>
           Cleanarr mutes half a second around one word; given only line-level
           timings the best it could do is blank four seconds of dialogue to
           catch one syllable. Anything that speaks the OpenAI transcription API
@@ -410,24 +416,6 @@
     <h2>7 · Who can use this</h2>
     <div id="security" class="security"></div>
 
-    <h2>8 · Install it on a phone</h2>
-    <div class="security">
-      <p class="help">Cleanarr can be installed as a real app — its own icon,
-        its own window, no browser bar. Open this page on the phone, then use
-        the button below or your browser's <em>Install app</em> menu item.</p>
-      <div class="row">
-        <button type="button" class="small" id="install-app" hidden>Install Cleanarr</button>
-        <span id="install-note" class="muted"></span>
-      </div>
-      <div class="callout" id="install-https" hidden>
-        <strong>Browsers only offer a real install over HTTPS.</strong>
-        On a plain <code>http://</code> address, Chrome and Brave will give you
-        a bookmark with a browser bar rather than an app. Putting Cleanarr
-        behind a reverse proxy with a certificate — Nginx Proxy Manager,
-        Caddy, Traefik — is what unlocks it, and it is worth doing anyway if
-        you have set a password.
-      </div>
-    </div>
   </section>
 
 </main>
