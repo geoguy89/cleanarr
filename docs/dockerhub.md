@@ -59,7 +59,17 @@ services:
 ### Or with docker run
 
 ```bash
-docker run -d   --name cleanarr   --restart unless-stopped   --runtime nvidia   -e NVIDIA_VISIBLE_DEVICES=all   -e NVIDIA_DRIVER_CAPABILITIES=compute,utility   -e TZ=America/New_York   -p 8477:8477   -v /path/to/appdata/cleanarr:/config   -v /path/to/media:/data   tswillette/cleanarr:latest
+docker run -d \
+  --name cleanarr \
+  --restart unless-stopped \
+  --runtime nvidia \
+  -e NVIDIA_VISIBLE_DEVICES=all \
+  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+  -e TZ=America/New_York \
+  -p 8477:8477 \
+  -v /path/to/appdata/cleanarr:/config \
+  -v /path/to/media:/data \
+  tswillette/cleanarr:latest
 ```
 
 Then open `http://<host>:8477` and work down Settings. Drop the `--runtime`
