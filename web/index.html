@@ -211,14 +211,14 @@
       <p class="help">Cleanarr has to hear the episode before it can mute
         anything. Two ways to do that — run the speech model here, or hand the
         audio to a Whisper server you already have.</p>
-      <div class="pickrow">
-        <label class="pick">
+      <div class="choices">
+        <label class="choice">
           <input type="radio" name="asr_backend" value="builtin" checked>
           <span><strong>Run Whisper here</strong>
             <em>Self-hosted inside this container. Needs an NVIDIA GPU. The
               model downloads once.</em></span>
         </label>
-        <label class="pick">
+        <label class="choice">
           <input type="radio" name="asr_backend" value="remote">
           <span><strong>Use my own Whisper server</strong>
             <em>Send the audio to a Whisper server you already run. No model
@@ -367,18 +367,18 @@
         both list audio tracks by title, so “Cleaned - English” appears in the
         audio menu of either — nothing here is Plex-specific.
       </div>
-      <div class="pickrow">
-        <label class="pick">
+      <div class="choices">
+        <label class="choice">
           <input type="radio" name="media_server" value="none" checked>
           <span><strong>Neither</strong><em>Cleanarr will not talk to a media
             server at all.</em></span>
         </label>
-        <label class="pick">
+        <label class="choice">
           <input type="radio" name="media_server" value="plex">
           <span><strong>Plex</strong><em>Refresh by path, and read what is
             transcoding.</em></span>
         </label>
-        <label class="pick">
+        <label class="choice">
           <input type="radio" name="media_server" value="jellyfin">
           <span><strong>Jellyfin</strong><em>Same two things, via the Jellyfin
             API.</em></span>
