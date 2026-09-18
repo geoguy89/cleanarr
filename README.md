@@ -1,8 +1,8 @@
 # Cleanarr
 
-Cleanarr is an *arr-inspired application for anyone who wants to mute profanity
-from their media — a way to carry on enjoying your content without the foul
-language.
+Cleanarr is an \*arr-inspired, *vibe-coded* application for anyone who wants
+to mute profanity from their media — a way to carry on enjoying your content
+without the foul language.
 
 It adds a second audio track, **“Cleaned - English”**, to shows and movies you
 already own, with the profanity muted. The original track is untouched and
@@ -24,7 +24,7 @@ towards silence: when anything is uncertain, the word gets muted.
 
 | | |
 |---|---|
-| **GPU** | An NVIDIA GPU with the container toolkit — or none at all, if you point Cleanarr at a Whisper server you already run. |
+| **GPU** | Optional. An NVIDIA GPU is much faster, but CPU works, and an AMD card can be used through a separate Whisper server. See [Hardware](#hardware). |
 | **Sonarr / Radarr** | Addresses and API keys. Read-only; Cleanarr never writes to either. |
 | **Media** | Mounted at the **same paths** Sonarr and Radarr report. See [Paths](#paths). |
 | **Disk** | ~1.5 GB for the speech model, plus roughly 90 MB per cleaned 25-minute episode. |
@@ -105,13 +105,33 @@ git clone https://github.com/geoguy89/cleanarr.git
 cd cleanarr/docker && docker compose up -d --build
 ```
 
-### Without a GPU
+### Hardware
 
-Cleanarr needs no GPU if something else does the listening. Install as above
-without the `nvidia` runtime and device lines, then under **Settings →
-Listening** choose **Use my own Whisper server** and give it the address of a
-[speaches](https://github.com/speaches-ai/speaches), `faster-whisper-server` or
-LocalAI instance.
+The listening is the only demanding part, and there are three ways to do it.
+
+| | How | Speed |
+|---|---|---|
+| **NVIDIA GPU** | Add the runtime and device lines above | ~85 s for a 25-minute episode |
+| **CPU only** | Drop those lines; it falls back on its own | Several times slower — usually still faster than watching the episode |
+| **AMD GPU** | Not directly. Run a Whisper server that supports it and point Cleanarr at that | Depends on the server |
+
+**On AMD:** faster-whisper runs on CTranslate2, which has CPU and CUDA
+backends and no ROCm. There is nothing Cleanarr can do about that in-process.
+But [whisper.cpp](https://github.com/ggml-org/whisper.cpp) has Vulkan and ROCm
+support, and anything exposing the OpenAI transcription API works here — so an
+AMD card is perfectly usable, just through a server rather than inside this
+container.
+
+**CPU only** needs no configuration: with no NVIDIA runtime present, Cleanarr
+detects that and uses the CPU. Expect minutes rather than seconds per episode,
+and consider queueing overnight rather than cleaning something you are about to
+watch.
+
+**To use a separate Whisper server**, install without the `nvidia` runtime and
+device lines, then under **Settings → Listening** choose **Use my own Whisper
+server** and give it the address of a
+[speaches](https://github.com/speaches-ai/speaches), `faster-whisper-server`,
+whisper.cpp or LocalAI instance.
 
 > That server must return **word-level** timestamps. Cleanarr mutes half a
 > second around one word; with only line-level timings the best it could do is

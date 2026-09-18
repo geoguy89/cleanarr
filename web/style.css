@@ -393,16 +393,20 @@ table.detections td { padding: 4px 8px; border-top: 1px solid var(--line); }
    hides the options you did not already know about. The complaint that led to
    this was "I'm still not seeing an option for a Whisper server" - it was
    there, behind a select, which is the same as not being there. */
-.pickrow { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
-.pick {
-  flex: 1 1 220px; display: flex; flex-direction: row; align-items: flex-start;
-  gap: 10px; cursor: pointer;
+.choices { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 18px; }
+.choice {
+  flex: 1 1 240px; display: flex; flex-direction: row; align-items: flex-start;
+  gap: 11px; cursor: pointer;
   background: var(--surface); border: 1px solid var(--line);
-  border-radius: 9px; padding: 13px 15px; color: var(--text);
+  border-radius: 9px; padding: 14px 16px; color: var(--text);
+  /* Named `.choice`, not `.pick`: `.pick` is the tick box on a queued job and
+     carries a 1.15 scale, which grew each of these and pushed it into its
+     neighbour. */
+  transform: none;
 }
-.pick:hover { border-color: var(--accent-dim); }
-.pick:has(input:checked) { border-color: var(--accent); background: var(--surface-2); }
-.pick input { width: auto; margin-top: 3px; flex: none; }
-.pick span { display: flex; flex-direction: column; gap: 3px; }
-.pick strong { font-size: .95rem; font-weight: 650; }
-.pick em { font-style: normal; color: var(--muted); font-size: .84rem; line-height: 1.45; }
+.choice:hover { border-color: var(--accent-dim); }
+.choice:has(input:checked) { border-color: var(--accent); background: var(--surface-2); }
+.choice input { width: auto; margin: 3px 0 0; flex: none; transform: none; }
+.choice span { display: flex; flex-direction: column; gap: 3px; }
+.choice strong { font-size: .95rem; font-weight: 650; }
+.choice em { font-style: normal; color: var(--muted); font-size: .84rem; line-height: 1.45; }
