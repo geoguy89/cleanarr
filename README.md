@@ -20,6 +20,42 @@ towards silence: when anything is uncertain, the word gets muted.
 
 ---
 
+## What it looks like
+
+**Home** — what has landed lately, and what it has cost so far.
+
+![Home](docs/images/home.jpg)
+
+**Your library**, laid out the way Sonarr and Radarr do it. Badges show what is
+cleaned, queued, auto-cleaning, or has nothing on disk yet.
+
+![Shows](docs/images/shows.jpg)
+
+**Inside a show**, seasons collapse like Sonarr's. Clean one episode, a season,
+everything not done yet, or *from here on* — and take a cleaned track back out
+just as easily.
+
+![Episodes](docs/images/episodes.jpg)
+
+**Every mute is on the record.** Each cleaned file lists what was silenced and
+when, so a wrong call can be found rather than guessed at — and anything the
+second opinion left in is shown too, with its reason.
+
+![Job details](docs/images/details.jpg)
+
+**Cleaned** is the searchable history: when, how many words, and what the extra
+tracks are costing in disk.
+
+![Cleaned](docs/images/cleaned.jpg)
+
+**Upcoming** is Sonarr's calendar without leaving the app — what airs when,
+what has already downloaded and how long after airing it arrived. Tick
+*Clean it* and that show cleans itself from then on.
+
+![Upcoming](docs/images/upcoming.jpg)
+
+---
+
 ## Requirements
 
 | | |
@@ -113,14 +149,16 @@ The listening is the only demanding part, and there are three ways to do it.
 |---|---|---|
 | **NVIDIA GPU** | Add the runtime and device lines above | ~85 s for a 25-minute episode |
 | **CPU only** | Drop those lines; it falls back on its own | Several times slower — usually still faster than watching the episode |
-| **AMD GPU** | Not directly. Run a Whisper server that supports it and point Cleanarr at that | Depends on the server |
+| **AMD GPU** | The built-in Whisper still installs and runs — on the CPU, not the card. To use the card, point Cleanarr at a Whisper server that supports it | CPU speed, or the server's |
 
-**On AMD:** faster-whisper runs on CTranslate2, which has CPU and CUDA
-backends and no ROCm. There is nothing Cleanarr can do about that in-process.
-But [whisper.cpp](https://github.com/ggml-org/whisper.cpp) has Vulkan and ROCm
-support, and anything exposing the OpenAI transcription API works here — so an
-AMD card is perfectly usable, just through a server rather than inside this
-container.
+**On AMD:** you can still install normally and download the model — nothing
+is blocked. It simply will not use your card. faster-whisper runs on
+CTranslate2, which has CPU and CUDA backends and no ROCm, so the GPU sits idle
+and the work lands on the CPU.
+
+To actually use an AMD card, run something that supports it and point Cleanarr
+at that: [whisper.cpp](https://github.com/ggml-org/whisper.cpp) has Vulkan and
+ROCm backends, and anything exposing the OpenAI transcription API works here.
 
 **CPU only** needs no configuration: with no NVIDIA runtime present, Cleanarr
 detects that and uses the CPU. Expect minutes rather than seconds per episode,

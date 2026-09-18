@@ -842,7 +842,8 @@ async function loadJobs() {
   $('#queue-hold').textContent = data.holding ? `⏸ ${data.holding}` : '';
   $('#clean-anyway').hidden = !data.holding;
   $('#purge-cancelled').hidden = !data.cancelled;
-  $('#purge-cancelled').textContent = `Remove ${data.cancelled} cancelled`;
+  $('#purge-cancelled').textContent =
+    `Clear ${data.cancelled} cancelled from the list`;
   $('#retry-failed').hidden = !data.failed;
   $('#retry-failed').textContent = `Retry ${data.failed} failed`;
   $('#purge-failed').hidden = !data.failed;
@@ -889,7 +890,7 @@ async function loadJobs() {
           <button class="small ghost" data-move="${j.id}" data-where="bottom" title="Do this one last">⤓</button>
         </span>` : ''}
       ${j.muted ? `<button class="small ghost" data-job="${j.id}">${j.muted} muted</button>` : ''}
-      ${j.status === 'failed'
+      ${(j.status === 'failed' || j.status === 'cancelled')
         ? `<button class="small ghost" data-retry="${j.id}">Retry</button>` : ''}
       ${(j.status === 'queued' || j.status === 'running')
         ? `<button class="small ghost" data-cancel="${j.id}">Cancel</button>` : ''}

@@ -267,21 +267,27 @@ def move_many(job_ids: list[int], where: str) -> int:
     return len(chosen)
 
 
-def retry_failed(job_ids: list[int] | None = None) -> int:
-    """Put failed jobs back in the queue, at the back.
+def retry_failed(job_ids: list[int] | None = None,
+                 statuses: tuple[str, ...] = ("failed", "cancelled")) -> int:
+    """Put failed or cancelled jobs back in the queue, at the back.
 
-    A failure leaves the file exactly as it was - nothing is changed until the
-    verified swap at the end - so retrying is always safe, whatever went wrong.
+    Neither leaves a mark on the file - nothing is changed until the verified
+    swap at the end - so putting one back is always safe, whatever happened.
+    Cancelled is included because "I stopped that, actually put it back" is the
+    most common reason to look at the queue at all.
     """
     conn = connect()
     tail = _queue_edge(front=False)
+    marks_status = ",".join("?" * len(statuses))
     if job_ids:
         marks = ",".join("?" * len(job_ids))
         rows = conn.execute(
-            f"SELECT id FROM job WHERE status='failed' AND id IN ({marks})",
-            [int(i) for i in job_ids]).fetchall()
+            f"SELECT id FROM job WHERE status IN ({marks_status}) AND id IN ({marks})",
+            [*statuses, *[int(i) for i in job_ids]]).fetchall()
     else:
-        rows = conn.execute("SELECT id FROM job WHERE status='failed' ORDER BY id").fetchall()
+        rows = conn.execute(
+            f"SELECT id FROM job WHERE status IN ({marks_status}) ORDER BY id",
+            list(statuses)).fetchall()
     for offset, row in enumerate(rows):
         conn.execute(
             "UPDATE job SET status='queued', progress=0, stage='', message='retrying',"
@@ -321,7 +327,11 @@ def get(job_id: int) -> sqlite3.Row | None:
 # Cleaned page and cancelled ones are nobody's business - leaving either here
 # buries the handful of rows that actually need looking at. Failures stay,
 # because a failure is outstanding work that needs a person.
-QUEUE_STATUSES = ("running", "queued", "failed")
+# What the Queue page shows. Cancelled belongs here: the page offers to
+# "Remove 1 cancelled", and being told something was cancelled while being
+# shown neither what it was nor a way to put it back is worse than not
+# mentioning it. A cancelled job is usually one somebody wants to reinstate.
+QUEUE_STATUSES = ("running", "queued", "failed", "cancelled")
 
 
 def recent(limit: int = 100, status: str | None = None,
