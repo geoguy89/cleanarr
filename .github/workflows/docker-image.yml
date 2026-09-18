@@ -83,28 +83,6 @@ jobs:
             type=sha,format=short
 
 
-      # Docker Hub will not read the GitHub README on its own - that needs the
-      # paid automated-builds feature - so the page looks abandoned unless
-      # somebody pastes text into a form. This writes it instead, from a file
-      # kept in the repository, so it can never drift out of date.
-      #
-      # A separate, shorter file rather than README.md: the README's images are
-      # relative paths, which resolve on GitHub and break on Docker Hub.
-      #
-      # continue-on-error because Docker Hub's description endpoint is fussier
-      # about tokens than its registry is. A rejected description must not fail
-      # a build that has already published a working image.
-      - name: Update the Docker Hub description
-        if: env.DOCKERHUB_USERNAME != ''
-        continue-on-error: true
-        uses: peter-evans/dockerhub-description@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}
-          short-description: "Adds a muted-profanity audio track to shows and movies you already own, driven from Sonarr and Radarr."
-          readme-filepath: ./docs/dockerhub.md
-
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
