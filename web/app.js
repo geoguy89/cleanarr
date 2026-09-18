@@ -1399,12 +1399,28 @@ document.addEventListener('click', async (event) => {
 
 
 /* Which half of the Listening section applies. */
+
+/* Which media server's fields to show. "Neither" hides the wait policy too -
+   there is nothing to wait for. */
+function renderMediaServer() {
+  const chosen = $$('input[name="media_server"]').find((r) => r.checked);
+  const which = chosen ? chosen.value : 'none';
+  $('#server-plex').hidden = which !== 'plex';
+  $('#server-jellyfin').hidden = which !== 'jellyfin';
+  $('#hold-row').hidden = which === 'none';
+  if (which === 'none') $('#plex-now').textContent = '';
+}
+$$('input[name="media_server"]').forEach((r) =>
+  r.addEventListener('change', () => { renderMediaServer(); plexNow(); }));
+
 function renderAsrBackend() {
-  const remote = $('#asr-backend').value === 'remote';
+  const chosen = $$('input[name="asr_backend"]').find((r) => r.checked);
+  const remote = chosen && chosen.value === 'remote';
   $('#asr-remote').hidden = !remote;
   $('#asr-builtin').hidden = remote;
 }
-$('#asr-backend').addEventListener('change', renderAsrBackend);
+$$('input[name="asr_backend"]').forEach((r) =>
+  r.addEventListener('change', renderAsrBackend));
 
 
 /* Ask the remote server what it has, rather than making people guess its
@@ -1472,7 +1488,13 @@ async function loadSettings() {
   set('plex_token', settings.plex_token);
   set('keep_backup', String(!!settings.keep_backup));
   set('trim_silence', String(!!settings.trim_silence));
-  set('asr_backend', settings.asr_backend || 'builtin');
+  const backend = settings.asr_backend || 'builtin';
+  $$('input[name="asr_backend"]').forEach((r) => { r.checked = r.value === backend; });
+  const server = settings.media_server || 'none';
+  $$('input[name="media_server"]').forEach((r) => { r.checked = r.value === server; });
+  set('jellyfin_url', settings.jellyfin_url);
+  set('jellyfin_api_key', settings.jellyfin_api_key);
+  renderMediaServer();
   set('asr_url', settings.asr_url); set('asr_api_key', settings.asr_api_key);
   set('asr_remote_model', settings.asr_remote_model);
   renderAsrBackend();
@@ -1511,7 +1533,12 @@ $('#settings-form').addEventListener('submit', async (event) => {
     track_title: form.elements.track_title.value.trim() || 'Cleaned - English',
     keep_backup: form.elements.keep_backup.value === 'true',
     trim_silence: form.elements.trim_silence.value === 'true',
-    asr_backend: form.elements.asr_backend.value,
+    asr_backend: ($$('input[name="asr_backend"]').find((r) => r.checked)
+                  || {}).value || 'builtin',
+    media_server: ($$('input[name="media_server"]').find((r) => r.checked)
+                   || {}).value || 'none',
+    jellyfin_url: form.elements.jellyfin_url.value.trim(),
+    jellyfin_api_key: form.elements.jellyfin_api_key.value.trim(),
     asr_url: form.elements.asr_url.value.trim(),
     asr_api_key: form.elements.asr_api_key.value.trim(),
     asr_remote_model: form.elements.asr_remote_model.value.trim(),

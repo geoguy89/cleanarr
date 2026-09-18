@@ -402,6 +402,7 @@ def put_settings(payload: dict):
                 "fade", "model", "device", "compute_type", "trim_silence", "keep_backup",
                 "asr_backend", "asr_url", "asr_remote_model",
                 "track_title", "path_map", "plex_url", "judge_url", "judge_model",
+                "media_server", "jellyfin_url",
                 "judge_threads", "judge_keep_alive", "bitrate_surround",
                 "bitrate_stereo", "ffmpeg_threads", "hold_policy",
                 "check_in_context"):
@@ -412,6 +413,9 @@ def put_settings(payload: dict):
     # Same masking rule as the other secrets: all-stars means "leave it".
     if "asr_api_key" in payload and set(str(payload["asr_api_key"])) != {"*"}:
         settings.asr_api_key = payload["asr_api_key"]
+    if ("jellyfin_api_key" in payload
+            and set(str(payload["jellyfin_api_key"])) != {"*"}):
+        settings.jellyfin_api_key = payload["jellyfin_api_key"]
     config.save(settings)
     return config.load().public()
 
@@ -883,7 +887,7 @@ def clean_anyway():
 def plex_sessions():
     """What Plex is doing, and whether that is holding the queue."""
     settings = config.load()
-    sessions = arr.plex_sessions(settings.plex_url, settings.plex_token)
+    sessions = arr.sessions_for(settings)
     hold, why = arr.should_hold(sessions, settings.hold_policy)
     return {
         "sessions": [{"who": s.who, "what": s.what, "state": s.state,

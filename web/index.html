@@ -168,12 +168,30 @@
         <span id="test-result" class="muted"></span>
       </div>
       <div class="callout">
-        <strong>The files have to be at the same path here as they are there.</strong>
-        Cleanarr opens the exact path Sonarr reports. If Sonarr says
-        <code>/data/media/tv/…</code> then this container needs <code>/data</code>
-        mounted the same way. Matching the mounts is much less trouble than
-        translating paths afterwards.
+        <strong>There is no “media folder” to set — Sonarr and Radarr say where
+        every file is, and Cleanarr opens exactly that path.</strong>
+        This applies to both: TV paths come from Sonarr, film paths from Radarr,
+        per file. So this container has to see them at the <em>same</em> paths
+        those two report. If Sonarr says <code>/data/media/tv/…</code> and
+        Radarr says <code>/data/media/movies/…</code>, mount <code>/data</code>
+        here exactly as they have it. Matching the mounts is far less trouble
+        than translating paths afterwards.
       </div>
+      <details class="explain">
+        <summary>What if my mounts can’t match?</summary>
+        <p>A job that fails with <em>“… not found from this container”</em> is
+          almost always this: the path is right, but it means something
+          different inside this container than inside Sonarr’s.</p>
+        <p>There is an escape hatch. <code>path_map</code> in
+          <code>config.yaml</code> rewrites the start of a path, so a Sonarr
+          that reports <code>/media/tv/…</code> against a container that mounts
+          it at <code>/data/tv/…</code> is handled with:</p>
+        <p><code>path_map:<br>&nbsp;&nbsp;"/media": "/data"</code></p>
+        <p>It is deliberately not on this page. It is a workaround for a
+          mismatch worth fixing properly, and putting it here would invite
+          people to translate paths rather than mount them correctly — which
+          then quietly breaks the next time a library moves.</p>
+      </details>
 
       <h2>2 · What gets silenced</h2>
       <p class="help">Four lists, each switchable. Matching is whole-word, so
@@ -193,12 +211,19 @@
       <p class="help">Cleanarr has to hear the episode before it can mute
         anything. Two ways to do that — run the speech model here, or hand the
         audio to a Whisper server you already have.</p>
-      <div class="grid">
-        <label>Where the listening happens
-          <select name="asr_backend" id="asr-backend">
-            <option value="builtin">In this container — needs an NVIDIA GPU</option>
-            <option value="remote">On a Whisper server I already run</option>
-          </select></label>
+      <div class="pickrow">
+        <label class="pick">
+          <input type="radio" name="asr_backend" value="builtin" checked>
+          <span><strong>Run Whisper here</strong>
+            <em>Self-hosted inside this container. Needs an NVIDIA GPU. The
+              model downloads once.</em></span>
+        </label>
+        <label class="pick">
+          <input type="radio" name="asr_backend" value="remote">
+          <span><strong>Use my own Whisper server</strong>
+            <em>Send the audio to a Whisper server you already run. No model
+              and no GPU needed here.</em></span>
+        </label>
       </div>
 
       <div id="asr-builtin">
@@ -331,14 +356,49 @@
         <span id="judge-result" class="muted"></span>
       </div>
 
-      <h2>6 · Plex <span class="optional">optional</span></h2>
-      <p class="help">Two jobs: tell Plex to re-read a file so the new track
-        appears without waiting for a scan, and hold the queue while Plex needs
-        the GPU. A direct play costs nothing, so by default only a
-        <em>video</em> transcode makes cleaning wait.</p>
-      <div class="grid">
-        <label>Plex address<input name="plex_url" placeholder="http://192.168.1.10:32400"></label>
-        <label>Plex token<input name="plex_token" type="password" autocomplete="off"></label>
+      <h2>6 · Media server <span class="optional">optional</span></h2>
+      <p class="help">Two jobs, and neither is required — the cleaned track
+        shows up either way, just after the next scan. Connecting one lets
+        Cleanarr say “this file changed” so the track appears at once, and lets
+        it pause while your server is busy transcoding on the same GPU.</p>
+      <div class="callout">
+        <strong>The cleaned track works in both.</strong> It is an ordinary
+        extra audio stream in the same file, with a title. Plex and Jellyfin
+        both list audio tracks by title, so “Cleaned - English” appears in the
+        audio menu of either — nothing here is Plex-specific.
+      </div>
+      <div class="pickrow">
+        <label class="pick">
+          <input type="radio" name="media_server" value="none" checked>
+          <span><strong>Neither</strong><em>Cleanarr will not talk to a media
+            server at all.</em></span>
+        </label>
+        <label class="pick">
+          <input type="radio" name="media_server" value="plex">
+          <span><strong>Plex</strong><em>Refresh by path, and read what is
+            transcoding.</em></span>
+        </label>
+        <label class="pick">
+          <input type="radio" name="media_server" value="jellyfin">
+          <span><strong>Jellyfin</strong><em>Same two things, via the Jellyfin
+            API.</em></span>
+        </label>
+      </div>
+      <div id="server-plex" hidden>
+        <div class="grid">
+          <label>Plex address<input name="plex_url" placeholder="http://192.168.1.10:32400"></label>
+          <label>Plex token<input name="plex_token" type="password" autocomplete="off"></label>
+        </div>
+      </div>
+      <div id="server-jellyfin" hidden>
+        <div class="grid">
+          <label>Jellyfin address<input name="jellyfin_url" placeholder="http://192.168.1.10:8096"></label>
+          <label>Jellyfin API key<input name="jellyfin_api_key" type="password" autocomplete="off"></label>
+        </div>
+        <p class="help">Make a key in Jellyfin under
+          <em>Dashboard → Advanced → API Keys</em>.</p>
+      </div>
+      <div class="grid" id="hold-row" hidden>
         <label>When to wait
           <select name="hold_policy" id="hold-policy"></select></label>
       </div>

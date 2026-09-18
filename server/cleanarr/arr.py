@@ -360,3 +360,105 @@ def plex_refresh(plex_url: str, token: str, path: str) -> str:
         return "no Plex library contains that path"
     except (httpx.HTTPError, ValueError, KeyError) as exc:
         return f"refresh failed: {exc}"
+
+
+# ---------------------------------------------------------------------------
+#  Jellyfin
+# ---------------------------------------------------------------------------
+#  The same two jobs Plex does - tell it a file changed, and say whether it is
+#  busy enough to be worth waiting for - against a different API.
+#
+#  The cleaned track itself needs nothing special: it is a standard extra audio
+#  stream in the same container, with a title. Jellyfin lists audio tracks and
+#  shows their titles exactly as Plex does, so "Cleaned - English" appears in
+#  its audio menu without this file being involved at all.
+
+def jellyfin_sessions(url: str, api_key: str) -> list[PlexSession]:
+    """Who is watching, as the same shape the Plex path returns.
+
+    Reusing PlexSession is deliberate: the hold policy, the wording on the
+    Queue page and the settings dropdown are all written against it, and a
+    parallel type would mean saying all of that twice.
+    """
+    if not url or not api_key:
+        return []
+    try:
+        resp = httpx.get(f"{url.rstrip('/')}/Sessions",
+                         headers={"X-Emby-Token": api_key,
+                                  "Accept": "application/json"},
+                         timeout=10.0)
+        resp.raise_for_status()
+        rows = resp.json() or []
+    except (httpx.HTTPError, ValueError):
+        return []       # a check that cannot run is not a reason to stop work
+
+    out: list[PlexSession] = []
+    for row in rows:
+        item = row.get("NowPlayingItem") or {}
+        if not item:
+            continue
+        play = row.get("PlayState") or {}
+        if play.get("IsPaused"):
+            continue
+
+        # Jellyfin reports what it is doing per stream. Absent TranscodingInfo
+        # means a direct play, which costs the server nothing.
+        info = row.get("TranscodingInfo") or {}
+        if not info:
+            video = audio = "directplay"
+        else:
+            video = "copy" if info.get("IsVideoDirect") else "transcode"
+            audio = "copy" if info.get("IsAudioDirect") else "transcode"
+
+        title = item.get("Name") or "something"
+        if item.get("SeriesName"):
+            title = f"{item['SeriesName']} - {title}"
+
+        out.append(PlexSession(
+            who=row.get("UserName") or "someone",
+            what=title,
+            state="playing",
+            video_decision=video,
+            audio_decision=audio,
+            hardware=bool(info.get("HardwareAccelerationType")),
+        ))
+    return out
+
+
+def jellyfin_refresh(url: str, api_key: str, path: str) -> str:
+    """Tell Jellyfin one file changed.
+
+    /Library/Media/Updated names the path, so Jellyfin re-reads that one file
+    rather than walking the whole library - which on a large collection is the
+    difference between a second and twenty minutes of disk thrashing.
+    """
+    if not url or not api_key:
+        return "not configured"
+    try:
+        resp = httpx.post(
+            f"{url.rstrip('/')}/Library/Media/Updated",
+            headers={"X-Emby-Token": api_key},
+            json={"Updates": [{"Path": path, "UpdateType": "Modified"}]},
+            timeout=TIMEOUT)
+        if resp.status_code >= 400:
+            return f"refresh failed: {resp.status_code}"
+        return "told Jellyfin the file changed"
+    except httpx.HTTPError as exc:
+        return f"refresh failed: {exc}"
+
+
+def sessions_for(settings) -> list[PlexSession]:
+    """Whichever media server is configured, or nothing."""
+    if settings.media_server == "jellyfin":
+        return jellyfin_sessions(settings.jellyfin_url, settings.jellyfin_api_key)
+    if settings.media_server == "plex":
+        return plex_sessions(settings.plex_url, settings.plex_token)
+    return []
+
+
+def refresh_for(settings, path: str) -> str:
+    if settings.media_server == "jellyfin":
+        return jellyfin_refresh(settings.jellyfin_url, settings.jellyfin_api_key, path)
+    if settings.media_server == "plex":
+        return plex_refresh(settings.plex_url, settings.plex_token, path)
+    return "no media server configured"

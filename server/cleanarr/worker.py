@@ -168,7 +168,7 @@ class Worker:
             # shortly. A direct play is not a reason to wait - see should_hold.
             settings = config.load()
             if not self.override:
-                sessions = arr.plex_sessions(settings.plex_url, settings.plex_token)
+                sessions = arr.sessions_for(settings)
                 hold, why = arr.should_hold(sessions, settings.hold_policy)
                 if hold:
                     self.holding = why
