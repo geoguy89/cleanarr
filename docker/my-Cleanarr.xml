@@ -20,13 +20,13 @@
 <Container version="2">
   <Name>cleanarr</Name>
   <Repository>ghcr.io/geoguy89/cleanarr:latest</Repository>
-  <Registry/>
+  <Registry>https://github.com/geoguy89/cleanarr/pkgs/container/cleanarr</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
-  <Support/>
-  <Project/>
+  <Support>https://github.com/geoguy89/cleanarr/issues</Support>
+  <Project>https://github.com/geoguy89/cleanarr</Project>
   <Overview>
     Adds a second audio track, "Cleaned - English", to shows and movies from
     Sonarr and Radarr, with the profanity muted. One file, extra track: the
@@ -38,13 +38,18 @@
   </Overview>
   <Category>MediaApp:Video Tools:Utilities</Category>
   <WebUI>http://[IP]:[PORT:8477]/</WebUI>
-  <TemplateURL/>
+  <TemplateURL>https://raw.githubusercontent.com/geoguy89/cleanarr/main/docker/my-Cleanarr.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/geoguy89/cleanarr/main/web/icon.png</Icon>
   <ExtraParams>--runtime=nvidia --restart=unless-stopped</ExtraParams>
   <PostArgs/>
   <CPUset/>
   <DonateText/>
   <DonateLink/>
+  <Date>2026-09-18</Date>
+  <Changes>
+### 1.0.0
+- First public release.
+  </Changes>
   <Requires>An NVIDIA GPU, Sonarr and Radarr, and Ollama for the second opinion on ambiguous words.</Requires>
   <Config Name="WebUI" Target="8477" Default="8477" Mode="tcp"
           Description="The Cleanarr web interface." Type="Port"

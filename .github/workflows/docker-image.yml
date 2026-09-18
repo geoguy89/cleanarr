@@ -20,8 +20,11 @@ on:
   workflow_dispatch:
 
 env:
-  REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # Surfaced here because the `secrets` context cannot be tested in a step's
+  # `if:`. Empty when Docker Hub has not been set up, which is how the mirror
+  # gets skipped rather than failing the build.
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
 jobs:
   build:
@@ -46,15 +49,33 @@ jobs:
       - name: Sign in to ghcr.io
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Docker Hub is a mirror, not the primary. Linking a GitHub account to
+      # Docker Hub does not publish anything by itself - automated builds are
+      # a paid feature - so this pushes with an access token instead.
+      #
+      # The whole step is skipped when the secrets are absent, so the build
+      # never fails just because Docker Hub was not set up.
+      - name: Sign in to Docker Hub
+        id: dockerhub
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Work out the tags
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # Both registries get the same tags. docker/metadata-action takes a
+          # list, and build-push-action pushes to every name it produces.
+          images: |
+            ghcr.io/${{ env.IMAGE_NAME }}
+            name=docker.io/${{ env.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }},enable=${{ steps.dockerhub.outcome == 'success' }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
