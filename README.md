@@ -102,6 +102,10 @@ services:
 docker compose up -d
 ```
 
+> Also on Docker Hub as `geoguy89/cleanarr:latest` if you prefer it. GHCR is
+> the better default: Docker Hub rate-limits anonymous pulls to 100 per six
+> hours per IP, and an install that fails on that gives a confusing error.
+
 ### docker run
 
 ```bash
