@@ -74,17 +74,6 @@ something that seemed obvious. A few worth knowing before you change them:
 * **The second opinion is off by default.** Over 196 checks it changed the
   outcome twice, at 30-100 seconds each.
 
-## Installing it on a phone
-
-Cleanarr is a progressive web app: its own icon, its own window, no browser
-bar. Open it on the phone and use **Settings -> Install it on a phone**, or the
-browser's own *Install app* menu item.
-
-> **Browsers only offer a real install over HTTPS.** On a plain `http://` LAN
-> address, Chrome and Brave give you a bookmark with a browser bar instead of
-> an app. Put Cleanarr behind a reverse proxy with a certificate - Nginx Proxy
-> Manager, Caddy, Traefik - and the install offer appears. Worth doing anyway
-> if you have set a password.
 
 ## Running it
 
