@@ -10,13 +10,16 @@
   you change a port or a path in one, change it in the other, because either
   can recreate the container.
 
-  The image is built locally (docker compose build), so Unraid's "check for
-  updates" has no registry to ask and will say it cannot check. That is
-  expected, not a fault.
+  The image comes from GitHub's container registry, so Unraid's "check for
+  updates" works normally: it asks ghcr.io whether :latest has moved and offers
+  the update in the Docker tab.
+
+  To run your own build instead, change Repository to a local tag and build
+  the image yourself from the docker/ folder of the repository.
 -->
 <Container version="2">
   <Name>cleanarr</Name>
-  <Repository>cleanarr:latest</Repository>
+  <Repository>ghcr.io/geoguy89/cleanarr:latest</Repository>
   <Registry/>
   <Network>bridge</Network>
   <MyIP/>
