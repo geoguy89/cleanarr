@@ -130,9 +130,9 @@ to remember, and a working **Edit** dialog for ports, paths and variables.
 Set **Media** to the same host path Sonarr and Radarr use, and leave its
 container path as `/data` unless theirs differs.
 
-> The image is built locally rather than pulled, so Unraid's *check for
-> updates* has no registry to ask. That is expected, not a fault — rebuild with
-> `docker compose up -d --build`.
+> **Updates work normally.** The template pulls from ghcr.io, so Unraid's
+> *check for updates* asks the registry and offers the new image in the Docker
+> tab, the same as any other container.
 
 ### Building it yourself
 
