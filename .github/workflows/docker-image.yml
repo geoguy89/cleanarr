@@ -19,6 +19,16 @@ on:
       - "docs/images/**"
   workflow_dispatch:
 
+# Two pushes in quick succession used to build in parallel, both racing to
+# write :latest - and whichever finished last won, not whichever was newer. A
+# slow first build could therefore leave :latest pointing at the older commit,
+# silently, with both runs green.
+#
+# One at a time per branch, and a new push cancels the one it supersedes.
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   IMAGE_NAME: ${{ github.repository }}
   # Surfaced here because the `secrets` context cannot be tested in a step's
