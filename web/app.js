@@ -1390,6 +1390,43 @@ const SERVER_NAMES = { plex: 'Plex', jellyfin: 'Jellyfin', none: 'your media ser
    Only Sonarr knows what has not aired yet, so on Plex or Jellyfin the tab is
    hidden rather than shown empty - an empty calendar invites the question
    "why is this broken", and the honest answer is that it cannot exist. */
+
+/* One set of Plex fields and one set of Jellyfin fields, moved to whichever
+   section needs them.
+ 
+   Duplicating the inputs would be simpler to write and worse to use: two boxes
+   bound to the same setting drift apart, and whichever was typed in last wins
+   silently. Moving the node means there is only ever one truth.
+ 
+   Which section wins: the library, because that is the first thing a new
+   install sets and it is no use telling someone to scroll for it. */
+function placeServerFields() {
+  const lib = ($$('input[name="library_source"]').find((r) => r.checked) || {}).value || 'arr';
+  const srv = ($$('input[name="media_server"]').find((r) => r.checked) || {}).value || 'none';
+  const libHost = $('#lib-server-fields');
+  const srvHost = $('#media-server-fields');
+  if (!libHost || !srvHost) return;
+
+  ['plex', 'jellyfin'].forEach((name) => {
+    const block = $(`#server-${name}`);
+    if (!block) return;
+    if (lib === name) {
+      libHost.appendChild(block);
+      block.hidden = false;
+    } else if (srv === name) {
+      srvHost.appendChild(block);
+      block.hidden = false;
+    } else {
+      block.hidden = true;
+    }
+  });
+
+  // When the same server does both jobs, say so rather than leaving step 6
+  // looking unfinished.
+  const shared = $('#server-shared');
+  if (shared) shared.hidden = !(srv !== 'none' && srv === lib);
+}
+
 function renderLibrarySource() {
   const chosen = $$('input[name="library_source"]').find((r) => r.checked);
   const which = chosen ? chosen.value : 'arr';
@@ -1397,6 +1434,8 @@ function renderLibrarySource() {
   $('#lib-server').hidden = which === 'arr';
   $('#test-plex').hidden = which !== 'plex';
   $('#test-jellyfin').hidden = which !== 'jellyfin';
+
+  placeServerFields();
 
   const upcoming = $$('.tab').find((t) => t.dataset.view === 'upcoming');
   if (upcoming) upcoming.hidden = which !== 'arr';
@@ -1424,8 +1463,7 @@ $$('input[name="library_source"]').forEach((r) =>
 function renderMediaServer() {
   const chosen = $$('input[name="media_server"]').find((r) => r.checked);
   const which = chosen ? chosen.value : 'none';
-  $('#server-plex').hidden = which !== 'plex';
-  $('#server-jellyfin').hidden = which !== 'jellyfin';
+  placeServerFields();
   $('#hold-row').hidden = which === 'none';
   if (which === 'none') $('#plex-now').textContent = '';
 

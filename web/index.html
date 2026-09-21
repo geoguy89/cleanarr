@@ -191,11 +191,9 @@
       </div>
 
       <div id="lib-server" hidden>
-        <div class="callout">
-          <strong>Set the address and key in step 6</strong>, further down — the
-          same ones used to refresh the library and to wait while it is
-          transcoding. There is no second set to keep in step.
-        </div>
+        <div id="lib-server-fields"></div>
+        <p class="help">These are the same details used further down to refresh
+          the library and to pause while it is transcoding — one set, not two.</p>
         <div class="row">
           <button type="button" class="ghost" data-test="plex" id="test-plex">Test Plex</button>
           <button type="button" class="ghost" data-test="jellyfin" id="test-jellyfin">Test Jellyfin</button>
@@ -425,6 +423,7 @@
             API.</em></span>
         </label>
       </div>
+      <div id="media-server-fields"></div>
       <div id="server-plex" hidden>
         <div class="grid">
           <label>Plex address<input name="plex_url" placeholder="http://192.168.1.10:32400"></label>
@@ -439,6 +438,8 @@
         <p class="help">Make a key in Jellyfin under
           <em>Dashboard → Advanced → API Keys</em>.</p>
       </div>
+      <p class="help" id="server-shared" hidden>Using the address and key from
+        step 1 — the same server is doing both jobs.</p>
       <div class="grid" id="hold-row" hidden>
         <label>When to wait
           <select name="hold_policy" id="hold-policy"></select></label>
