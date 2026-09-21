@@ -1,0 +1,21 @@
+# The build only needs server/ and web/. Everything else is context the daemon
+# has to upload and then ignore - and docs/images alone is 424KB of screenshots.
+.git
+.github
+docs
+dist
+README.md
+LICENSE
+*.md
+
+__pycache__
+*.py[cod]
+.venv
+venv
+
+# Never let runtime state into an image: config.yaml holds API keys and the
+# password hash, and the cache holds gigabytes of model weights.
+config.yaml
+*.sqlite
+*.sqlite-*
+cache/
