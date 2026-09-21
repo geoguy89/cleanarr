@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import arr, asr, config, db, pipeline
+from . import arr, asr, config, db, library, pipeline
 
 # How long an idle queue holds the speech model before handing its ~2GB back.
 # Was ten minutes, which left the card two gigabytes down long after the last
@@ -111,15 +111,17 @@ class Worker:
         settings = config.load()
         self.last_monitor_check = time.time()
         watched = db.monitors("sonarr")
-        if not watched or not settings.sonarr.url:
+        if not watched:
             return 0
-        client = arr.Sonarr(settings.sonarr.url, settings.sonarr.api_key)
+        # Whichever source the library comes from answers this the same way:
+        # here are the show's episodes, and when each one arrived.
+        source = library.build(settings)
         known = db.job_paths()
         queued = 0
         for row in watched:
             try:
-                episodes = client.episodes(int(row["source_id"]))
-            except (arr.ArrError, ValueError):
+                episodes = source.episodes(row["source_id"])
+            except (arr.ArrError, library.LibraryError, ValueError):
                 continue
             mode = (row["mode"] if "mode" in row.keys() else "catch_up") or "catch_up"
             for episode in episodes:

@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import arr, auth, config, db, judge, media, words
+from . import arr, auth, config, db, judge, library, media, words
 from .worker import Worker
 
 WEB_DIR = Path(os.environ.get("CLEANARR_WEB", "/app/web"))
@@ -401,7 +401,7 @@ def put_settings(payload: dict):
                 "fade", "model", "device", "compute_type", "trim_silence", "keep_backup",
                 "asr_backend", "asr_url", "asr_remote_model",
                 "track_title", "path_map", "plex_url", "judge_url", "judge_model",
-                "media_server", "jellyfin_url",
+                "media_server", "jellyfin_url", "library_source",
                 "judge_threads", "judge_keep_alive", "bitrate_surround",
                 "bitrate_stereo", "ffmpeg_threads", "hold_policy",
                 "check_in_context"):
@@ -427,6 +427,13 @@ def test_service(service: str):
             return arr.Sonarr(settings.sonarr.url, settings.sonarr.api_key).test()
         if service == "radarr":
             return arr.Radarr(settings.radarr.url, settings.radarr.api_key).test()
+        if service == "plex":
+            return library.PlexLibrary(settings.plex_url, settings.plex_token).test()
+        if service == "jellyfin":
+            return library.JellyfinLibrary(settings.jellyfin_url,
+                                           settings.jellyfin_api_key).test()
+    except library.LibraryError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=200)
     except arr.ArrError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=200)
     raise HTTPException(404, "no such service")
@@ -476,11 +483,14 @@ def _import_dates(client: arr.Sonarr) -> dict[int, str]:
 @app.get("/api/series")
 def series():
     settings = config.load()
-    client = arr.Sonarr(settings.sonarr.url, settings.sonarr.api_key)
-    landed = _import_dates(client)
+    source = library.build(settings)
+    # Only Sonarr keeps an import history to sort by; a media server carries
+    # the date on the item itself, which `added` already holds.
+    landed = (_import_dates(source.sonarr)
+              if getattr(source, "name", "") == "arr" else {})
     try:
-        items = client.series()
-    except arr.ArrError as exc:
+        items = source.shows()
+    except (arr.ArrError, library.LibraryError) as exc:
         raise HTTPException(502, str(exc))
 
     # Mark up each show from the job history, matching on the show's folder.
@@ -488,6 +498,9 @@ def series():
     known = db.job_paths()
     watched = {row["source_id"] for row in db.monitors("sonarr")}
     for show in items:
+        # Plex does not report a show's folder, so fall back to matching the
+        # episodes this show actually has once they have been listed. Until
+        # then a show simply shows no counts rather than wrong ones.
         folder = (show.get("path") or "").rstrip("/") + "/"
         statuses = [s for p, s in known.items() if folder != "/" and p.startswith(folder)]
         show["cleaned"] = sum(1 for s in statuses if s in ("done", "skipped"))
@@ -496,10 +509,12 @@ def series():
         show["monitored"] = str(show["id"]) in watched
         # When something last arrived for this show. Falls back to the day the
         # show itself was added, which is all Sonarr offers for a back catalogue
-        # imported before its history was being kept.
+        # imported before its history was being kept - and is what a media
+        # server reports directly.
         show["latest"] = landed.get(show["id"]) or show.get("added", "")
 
-    threading.Thread(target=_warm_posters, args=("sonarr", [s["id"] for s in items]),
+    threading.Thread(target=_warm_posters,
+                     args=(_poster_source(settings, "show"), [s["id"] for s in items]),
                      daemon=True).start()
     return {"items": items}
 
@@ -518,19 +533,21 @@ def home(limit: int = 12):
 
     # Asked at the same time: neither answer depends on the other, and this is
     # the page that opens first.
-    from_sonarr = POOL.submit(
-        arr.Sonarr(settings.sonarr.url, settings.sonarr.api_key).recent_imports, limit)
-    from_radarr = POOL.submit(
-        arr.Radarr(settings.radarr.url, settings.radarr.api_key).movies)
+    source = library.build(settings)
+    shows_label = "Sonarr" if source.name == "arr" else source.name.title()
+    films_label = "Radarr" if source.name == "arr" else source.name.title()
+
+    recent = POOL.submit(source.recent_episodes, limit)
+    all_films = POOL.submit(source.movies)
     try:
-        episodes = from_sonarr.result()
-    except arr.ArrError as exc:
-        problems.append(f"Sonarr: {exc}")
+        episodes = recent.result()
+    except (arr.ArrError, library.LibraryError) as exc:
+        problems.append(f"{shows_label}: {exc}")
     try:
-        films = sorted((m for m in from_radarr.result() if m.get("added")),
+        films = sorted((m for m in all_films.result() if m.get("added")),
                        key=lambda m: m["added"], reverse=True)[:limit]
-    except arr.ArrError as exc:
-        problems.append(f"Radarr: {exc}")
+    except (arr.ArrError, library.LibraryError) as exc:
+        problems.append(f"{films_label}: {exc}")
 
     # One lookup for both lists: a poster wall of "already cleaned" badges is
     # the whole point of showing them here.
@@ -539,10 +556,11 @@ def home(limit: int = 12):
     watched = {(r["source"], r["source_id"]) for r in db.monitors()}
     for item in episodes:
         item["monitored"] = ("sonarr", str(item["series_id"])) in watched
-    for group, source in ((episodes, "sonarr"), (films, "radarr")):
+    problems = [p for p in problems if p]
+    for group, kind in ((episodes, "show"), (films, "movie")):
         for item in group:
             job = known.get(item["path"]) or {}
-            item["source"] = source
+            item["source"] = _poster_source(settings, kind)
             item["job_status"] = job.get("status", "")
             item["muted"] = job.get("muted")
             item["cleaned_at"] = job.get("finished_at")
@@ -566,6 +584,10 @@ def calendar(days: int = 21):
     something starts on Friday is the moment you decide it should arrive clean.
     """
     settings = config.load()
+    # Only Sonarr knows what has not aired yet - a media server can only see
+    # what it already has - so this is empty rather than wrong for the others.
+    if settings.library_source != "arr":
+        return {"items": [], "days": days, "unavailable": True}
     try:
         items = arr.Sonarr(settings.sonarr.url,
                            settings.sonarr.api_key).calendar(max(1, min(days, 90)))
@@ -578,11 +600,11 @@ def calendar(days: int = 21):
 
 
 @app.get("/api/series/{series_id}/episodes")
-def episodes(series_id: int):
+def episodes(series_id: str):
     settings = config.load()
     try:
-        items = arr.Sonarr(settings.sonarr.url, settings.sonarr.api_key).episodes(series_id)
-    except arr.ArrError as exc:
+        items = library.build(settings).episodes(series_id)
+    except (arr.ArrError, library.LibraryError) as exc:
         raise HTTPException(502, str(exc))
     known = db.cleaned_paths([e["path"] for e in items])
     for episode in items:
@@ -599,8 +621,8 @@ def episodes(series_id: int):
 def movies():
     settings = config.load()
     try:
-        items = arr.Radarr(settings.radarr.url, settings.radarr.api_key).movies()
-    except arr.ArrError as exc:
+        items = library.build(settings).movies()
+    except (arr.ArrError, library.LibraryError) as exc:
         raise HTTPException(502, str(exc))
     known = db.cleaned_paths([m["path"] for m in items])
     for movie in items:
@@ -611,7 +633,8 @@ def movies():
         movie["cleaned_at"] = job.get("finished_at")
         movie["latest"] = movie.get("added", "")
 
-    threading.Thread(target=_warm_posters, args=("radarr", [m["id"] for m in items]),
+    threading.Thread(target=_warm_posters,
+                     args=(_poster_source(settings, "movie"), [m["id"] for m in items]),
                      daemon=True).start()
     return {"items": items}
 
@@ -638,13 +661,39 @@ def _poster_path(source: str, item_id: int | str) -> Path:
     return folder / f"{source}-{item_id}.jpg"
 
 
+def _poster_source(settings, kind: str) -> str:
+    """Which service to ask for artwork, and the cache namespace it uses.
+
+    Namespaced so switching library source does not serve one service's
+    artwork under another's ids - they number their items differently.
+    """
+    if settings.library_source in ("plex", "jellyfin"):
+        return settings.library_source
+    return "sonarr" if kind == "show" else "radarr"
+
+
 def _fetch_poster(source: str, item_id: int | str, settings) -> bool:
-    arr_config = settings.sonarr if source == "sonarr" else settings.radarr
-    if not arr_config.url:
-        return False
     cached = _poster_path(source, item_id)
     if cached.exists() and cached.stat().st_size > 0:
         return True
+
+    # A media server serves its own artwork, and has it for everything it
+    # knows about - including files Sonarr never imported.
+    if source in ("plex", "jellyfin"):
+        try:
+            data = library.build(settings).poster(str(item_id))
+        except Exception:  # noqa: BLE001
+            return False
+        if not data:
+            return False
+        tmp = cached.with_suffix(".part")
+        tmp.write_bytes(data)
+        tmp.replace(cached)
+        return True
+
+    arr_config = settings.sonarr if source == "sonarr" else settings.radarr
+    if not arr_config.url:
+        return False
     # Both Sonarr and Radarr serve artwork at /api/v3/mediacover/<id>/poster.jpg
     # - with no "series" or "movie" segment, which 404s.
     url = f"{arr_config.url.rstrip('/')}/api/v3/mediacover/{item_id}/poster.jpg"

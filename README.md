@@ -61,7 +61,7 @@ what has already downloaded and how long after airing it arrived. Tick
 | | |
 |---|---|
 | **GPU** | Optional. An NVIDIA GPU is much faster, but CPU works, and an AMD card can be used through a separate Whisper server. See [Hardware](#hardware). |
-| **Sonarr / Radarr** | Addresses and API keys. Read-only; Cleanarr never writes to either. |
+| **A library** | Sonarr and Radarr, **or** Plex, **or** Jellyfin. Read-only either way — Cleanarr never writes to any of them. |
 | **Media** | Mounted at the **same paths** Sonarr and Radarr report. See [Paths](#paths). |
 | **Disk** | ~1.5 GB for the speech model, plus roughly 90 MB per cleaned 25-minute episode. |
 | **Ollama** | Optional, off by default. See [The second opinion](#the-second-opinion). |
@@ -208,6 +208,25 @@ order things need doing.
    do not control.
 
 Then clean a single episode before turning it loose on a season.
+
+### Where the library comes from
+
+Cleanarr needs one thing: a list of what you own and where each file is.
+Three things can answer that, chosen in **Settings → Your library**.
+
+| Source | Needs | Notes |
+|---|---|---|
+| **Sonarr + Radarr** (default) | both, with API keys | Knows the most. The **only** one that can fill the Upcoming calendar, because it is the only one that knows what has not aired yet. |
+| **Plex** | address + token | No \*arr apps needed. Artwork comes from Plex too. |
+| **Jellyfin** | address + API key | Same again. |
+
+Everything else works identically whichever you pick, including cleaning new
+episodes automatically — both media servers record when an item was added,
+which is the same signal Sonarr's import history gives. The **Upcoming** tab
+hides itself on Plex and Jellyfin rather than showing an empty page.
+
+The Plex and Jellyfin credentials are the same ones used for refreshing the
+library and pausing while it transcodes; there is no second set to keep in step.
 
 ### Paths
 

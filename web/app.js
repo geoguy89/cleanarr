@@ -1384,6 +1384,43 @@ document.addEventListener('click', async (event) => {
    there is nothing to wait for. */
 const SERVER_NAMES = { plex: 'Plex', jellyfin: 'Jellyfin', none: 'your media server' };
 
+
+/* Which library fields apply, and whether Upcoming means anything.
+
+   Only Sonarr knows what has not aired yet, so on Plex or Jellyfin the tab is
+   hidden rather than shown empty - an empty calendar invites the question
+   "why is this broken", and the honest answer is that it cannot exist. */
+function renderLibrarySource() {
+  const chosen = $$('input[name="library_source"]').find((r) => r.checked);
+  const which = chosen ? chosen.value : 'arr';
+  $('#lib-arr').hidden = which !== 'arr';
+  $('#lib-server').hidden = which === 'arr';
+  $('#test-plex').hidden = which !== 'plex';
+  $('#test-jellyfin').hidden = which !== 'jellyfin';
+
+  const upcoming = $$('.tab').find((t) => t.dataset.view === 'upcoming');
+  if (upcoming) upcoming.hidden = which !== 'arr';
+
+  // A media server reports the path as IT sees it, which is a common place to
+  // come unstuck: Plex in a container may call the same file something else
+  // again. Say so where the mismatch would bite.
+  const note = $('#path-note');
+  if (note) {
+    note.textContent = which === 'arr'
+      ? ' TV paths come from Sonarr, film paths from Radarr.'
+      : ` Note that ${which === 'plex' ? 'Plex' : 'Jellyfin'} reports paths as `
+        + 'it sees them, so if it runs in a container too, both it and Cleanarr '
+        + 'need the same mount.';
+  }
+}
+$$('input[name="library_source"]').forEach((r) =>
+  r.addEventListener('change', () => {
+    renderLibrarySource();
+    // The lists came from somewhere else a moment ago; drop them so the next
+    // visit fetches from the new source rather than showing the old one.
+    state.shows = []; state.movies = []; state.home = null; state.calendar = null;
+  }));
+
 function renderMediaServer() {
   const chosen = $$('input[name="media_server"]').find((r) => r.checked);
   const which = chosen ? chosen.value : 'none';
@@ -1494,6 +1531,9 @@ async function loadSettings() {
   $$('input[name="media_server"]').forEach((r) => { r.checked = r.value === server; });
   set('jellyfin_url', settings.jellyfin_url);
   set('jellyfin_api_key', settings.jellyfin_api_key);
+  const libSource = settings.library_source || 'arr';
+  $$('input[name="library_source"]').forEach((r) => { r.checked = r.value === libSource; });
+  renderLibrarySource();
   renderMediaServer();
   set('asr_url', settings.asr_url); set('asr_api_key', settings.asr_api_key);
   set('asr_remote_model', settings.asr_remote_model);
@@ -1534,6 +1574,8 @@ $('#settings-form').addEventListener('submit', async (event) => {
     trim_silence: form.elements.trim_silence.value === 'true',
     asr_backend: ($$('input[name="asr_backend"]').find((r) => r.checked)
                   || {}).value || 'builtin',
+    library_source: ($$('input[name="library_source"]').find((r) => r.checked)
+                     || {}).value || 'arr',
     media_server: ($$('input[name="media_server"]').find((r) => r.checked)
                    || {}).value || 'none',
     jellyfin_url: form.elements.jellyfin_url.value.trim(),

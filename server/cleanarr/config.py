@@ -30,6 +30,18 @@ class ArrConfig:
 
 @dataclass
 class Settings:
+    # Where the list of shows and films comes from.
+    #
+    # "arr" is the default and knows the most - only Sonarr can say what has
+    # not aired yet, so only it can fill the Upcoming calendar. But plenty of
+    # people run a media server and nothing else, and telling them to install
+    # two more services to mute swearing is not a reasonable answer.
+    #
+    # One of: arr | plex | jellyfin. The Plex and Jellyfin credentials are the
+    # same ones used for refreshing and the transcode hold - there is no second
+    # set to keep in step.
+    library_source: str = "arr"
+
     sonarr: ArrConfig = field(default_factory=ArrConfig)
     radarr: ArrConfig = field(default_factory=ArrConfig)
 
