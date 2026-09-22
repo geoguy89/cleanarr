@@ -275,8 +275,13 @@ def hardware():
         "device": chosen,
         "effective": effective,
         "compute_type": settings.compute_type,
+        # Said plainly because "no CUDA device" reads like a misconfiguration
+        # to someone with a perfectly good AMD card, and it is not one.
         "note": ("An NVIDIA GPU is available." if cuda
-                 else "No CUDA device found, so this runs on the CPU."),
+                 else "No NVIDIA GPU found, so listening runs on the CPU. "
+                      "CUDA is NVIDIA-only and the speech engine has no AMD "
+                      "backend, so an AMD card cannot be used here - point "
+                      "Cleanarr at your own Whisper server to use one."),
     }
 
 
