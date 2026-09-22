@@ -153,25 +153,23 @@
     <form id="settings-form">
 
       <h2>1 · Your library</h2>
-      <p class="help">Cleanarr needs one thing: a list of what you own and where
-        each file is. Any of these can answer that, and it never changes
-        anything in whichever you pick — it only reads.</p>
+      <p class="help">Where your list of shows and films comes from. Read-only
+        — Cleanarr never changes anything in it.</p>
       <div class="choices">
         <label class="choice">
           <input type="radio" name="library_source" value="arr" checked>
           <span><strong>Sonarr and Radarr</strong>
-            <em>Knows the most — the only one that can show what has not aired
-              yet, so the Upcoming calendar needs it.</em></span>
+            <em>Knows the most. Needed for the Upcoming calendar.</em></span>
         </label>
         <label class="choice">
           <input type="radio" name="library_source" value="plex">
           <span><strong>Plex</strong>
-            <em>No Sonarr or Radarr needed. Artwork comes from Plex too.</em></span>
+            <em>No \*arr apps needed. Artwork comes from Plex too.</em></span>
         </label>
         <label class="choice">
           <input type="radio" name="library_source" value="jellyfin">
           <span><strong>Jellyfin</strong>
-            <em>Same again, straight from Jellyfin.</em></span>
+            <em>No \*arr apps needed. Artwork comes from Jellyfin too.</em></span>
         </label>
       </div>
 
@@ -192,8 +190,8 @@
 
       <div id="lib-server" hidden>
         <div id="lib-server-fields"></div>
-        <p class="help">These are the same details used further down to refresh
-          the library and to pause while it is transcoding — one set, not two.</p>
+        <p class="help">The same details used further down for refreshing and
+          transcode pauses — one set, not two.</p>
         <div class="row">
           <button type="button" class="ghost" data-test="plex" id="test-plex">Test Plex</button>
           <button type="button" class="ghost" data-test="jellyfin" id="test-jellyfin">Test Jellyfin</button>
@@ -202,30 +200,22 @@
       <div class="row"><span id="test-result" class="muted"></span></div>
       <div class="callout">
         <strong>There is no “media folder” to set.</strong>
-        Whichever source you picked above reports where every file is,
-        per file, and Cleanarr opens exactly that path. So this container has to
-        see your media at the <em>same</em> paths that source reports — if it
-        says <code>/data/media/tv/…</code>, mount <code>/data</code> here
-        exactly as it has it. Matching the mounts is far less trouble than
-        translating paths afterwards.
+        Your library reports where each file is, and Cleanarr opens that path.
+        Mount your media into this container; if the paths don’t match, the
+        check below will say so and offer a rule.
         <span id="path-note"></span>
       </div>
       <div id="path-report" class="path-report"></div>
 
       <details class="explain" id="path-map-box">
         <summary>My paths don’t match — translate them</summary>
-        <p>The library reports where each file is <em>as it sees it</em>. When
-          Sonarr and this container both mount the same <code>/data</code>,
-          those paths just work. A Plex or Jellyfin server on another machine
-          is a different story — it may reach storage over its own NFS mount,
-          and its paths mean nothing here. The symptom is the library browsing
-          perfectly while every job fails with
-          <em>“… not found from this container”</em>.</p>
-        <p>Matching the mounts is still the cleaner fix. When you can’t,
-          rewrite the start of the path: a server that reports
-          <code>/mnt/tank/media/tv/…</code> against a container that mounts it
-          at <code>/data/tv/…</code> needs one rule, <code>/mnt/tank/media</code>
-          → <code>/data</code>. One rule covers everything under it.</p>
+        <p>A rule rewrites the start of a path. A server reporting
+          <code>/mnt/tank/media/tv/…</code> against media mounted here at
+          <code>/data/tv/…</code> needs one rule:
+          <code>/mnt/tank/media</code> → <code>/data</code>. One rule covers
+          everything under it.</p>
+        <p>The media still has to be reachable from this container — NFS or SMB
+          from another machine is fine, it just has to be mounted.</p>
         <div id="path-rules"></div>
         <div class="row">
           <button type="button" id="path-add" class="ghost">Add a rule</button>
@@ -254,51 +244,39 @@
         about more than it needs to be.</p>
 
       <h2>3 · Listening</h2>
-      <p class="help">Cleanarr has to hear the episode before it can mute
-        anything. Two ways to do that — run the speech model here, or hand the
-        audio to a Whisper server you already have.</p>
+      <p class="help">Run the speech model here, or hand the audio to a
+        Whisper server you already have.</p>
       <div class="choices">
         <label class="choice">
           <input type="radio" name="asr_backend" value="builtin" checked>
           <span><strong>Run Whisper here</strong>
-            <em>Self-hosted inside this container. Needs an NVIDIA GPU. The
-              model downloads once.</em></span>
+            <em>Self-hosted in this container. The model downloads once. An
+              NVIDIA GPU is much faster; CPU works.</em></span>
         </label>
         <label class="choice">
           <input type="radio" name="asr_backend" value="remote">
           <span><strong>Use my own Whisper server</strong>
-            <em>Send the audio to a Whisper server you already run. No model
-              and no GPU needed here.</em></span>
+            <em>No model or GPU needed here.</em></span>
         </label>
       </div>
 
       <div id="asr-builtin">
         <div class="callout">
-          <strong>Whisper runs inside this container — nothing external is
-          involved.</strong> The model weights are the one thing not in the
-          image: they come from Hugging Face the first time they are needed and
-          are kept in your config folder, so they survive updates. Left alone
-          that download happens silently during your first clean and looks like
-          a stalled job, so fetch it here and watch it happen.
+          <strong>Download the model now.</strong> Left alone it downloads
+          silently during your first clean, which looks like a stalled job. It
+          is kept in your config folder and survives updates.
         </div>
         <div id="model-list" class="model-list"></div>
       </div>
 
       <div id="asr-remote" hidden>
         <div class="callout">
-          <strong>Almost any Whisper model will do — but the SERVER matters.</strong>
-          Model size is your choice: whatever that machine already has is fine,
-          and bigger is not automatically better. What is not optional is that
-          the server returns <em>word-level</em> timestamps.
-        </div>
-        <div class="callout">
-          <strong>Why word timestamps are the whole requirement.</strong>
-          Cleanarr mutes half a second around one word; given only line-level
-          timings the best it could do is blank four seconds of dialogue to
-          catch one syllable. Anything that speaks the OpenAI transcription API
-          with <code>timestamp_granularities[]=word</code> works —
-          <em>speaches</em>, <em>faster-whisper-server</em>, LocalAI. Test below
-          before you rely on it.
+          <strong>The server must return word-level timestamps.</strong>
+          Cleanarr mutes half a second around one word; with line-level timings
+          it would have to blank four seconds of dialogue to catch one
+          syllable. Anything speaking the OpenAI transcription API with
+          <code>timestamp_granularities[]=word</code> works — speaches,
+          faster-whisper-server, LocalAI. Any model size is fine; test below.
         </div>
         <div class="grid">
           <label>Whisper server address
@@ -315,8 +293,8 @@
           <button type="button" class="ghost" id="asr-test">Test the Whisper server</button>
           <span id="asr-result" class="muted"></span>
         </div>
-        <p class="help">The audio goes over as 16 kHz mono WAV — about 85 MB for
-          a 45-minute episode, so keep this on your own network.</p>
+        <p class="help">Audio goes over as 16 kHz mono WAV, ~85 MB per
+          45-minute episode. Keep it on your own network.</p>
       </div>
       <div class="grid">
         <label>Skip over silence
@@ -362,16 +340,11 @@
 
       <h2>5 · Second opinion <span class="optional">optional</span></h2>
       <div class="callout">
-        <strong>This is your own Ollama, on your own hardware.</strong>
-        Cleanarr does not bundle one and nothing is sent anywhere else — you
-        give it an address and it asks that machine. If the address is blank,
-        this whole step is skipped.
-      </div>
-      <div class="callout">
         <strong>You almost certainly do not need this.</strong>
-        Measured over 196 checks on a real library it changed the outcome
-        <em>twice</em>, and each check costs 30–100 seconds. Leave the word box
-        below empty and Cleanarr never contacts Ollama at all.
+        Over 196 checks on a real library it changed the outcome <em>twice</em>,
+        at 30–100 seconds each. Leave the word box below empty and Ollama is
+        never contacted. It is your own Ollama, on your own hardware — nothing
+        is sent anywhere else.
       </div>
       <details class="explain">
         <summary>What it is, and the one case it exists for</summary>
@@ -409,15 +382,13 @@
       </div>
 
       <h2>6 · Media server <span class="optional">optional</span></h2>
-      <p class="help">Two jobs, and neither is required — the cleaned track
-        shows up either way, just after the next scan. Connecting one lets
-        Cleanarr say “this file changed” so the track appears at once, and lets
-        it pause while your server is busy transcoding on the same GPU.</p>
+      <p class="help">Optional. Connecting one makes the cleaned track appear
+        at once instead of at the next scan, and lets Cleanarr pause while your
+        server is transcoding on the same GPU.</p>
       <div class="callout">
         <strong>The cleaned track works in both.</strong> It is an ordinary
-        extra audio stream in the same file, with a title. Plex and Jellyfin
-        both list audio tracks by title, so “Cleaned - English” appears in the
-        audio menu of either — nothing here is Plex-specific.
+        extra audio stream with a title, so “Cleaned - English” shows up in the
+        audio menu of Plex or Jellyfin. Nothing here is Plex-specific.
       </div>
       <div class="choices">
         <label class="choice">
