@@ -214,6 +214,92 @@ def release_vram(url: str, timeout: float = 20.0) -> list[str]:
     return let_go
 
 
+# Which API a given address speaks, remembered after the first successful call
+# so the fallback is paid for once rather than on every question.
+_style: dict[str, str] = {}
+
+
+def api_style(url: str) -> str:
+    """"ollama" or "openai", whichever that address answers to."""
+    return _style.get(url.rstrip("/"), "")
+
+
+def _ask(url: str, model: str, prompt: str, timeout: float,
+         threads: int, keep_alive: str) -> str:
+    """One question, one answer, whichever API the server speaks."""
+    base = url.rstrip("/")
+    known = _style.get(base)
+
+    if known != "openai":
+        try:
+            raw = _ask_ollama(base, model, prompt, timeout, threads, keep_alive)
+            _style[base] = "ollama"
+            return raw
+        except httpx.HTTPStatusError as exc:
+            # 404/405 means no native endpoint - an OpenAI-compatible server.
+            # Anything else is a real failure and must not be retried as a
+            # different protocol, or a busy Ollama looks like a missing one.
+            if exc.response.status_code not in (404, 405) or known == "ollama":
+                raise
+
+    raw = _ask_openai(base, model, prompt, timeout)
+    _style[base] = "openai"
+    return raw
+
+
+def _ask_ollama(base: str, model: str, prompt: str, timeout: float,
+                threads: int, keep_alive: str) -> str:
+    resp = httpx.post(
+        base + "/api/generate",
+        json={
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "think": True,
+            # Hand the VRAM back after the last question, so a film starting
+            # on Plex has the card to transcode with.
+            "keep_alive": keep_alive,
+            # Thinking and the answer share num_predict; too small and the
+            # answer comes back empty after a minute of work. num_gpu forces
+            # every layer onto the GPU - left to itself Ollama will quietly put
+            # half the model on the CPU and peg eight cores for four minutes.
+            # num_thread caps what is left: measured 5.5 cores at default,
+            # 1.7 at two threads, for 25s versus 37s of work.
+            "options": {"temperature": 0, "num_ctx": 16384,
+                        "num_predict": 16384, "num_gpu": 99,
+                        **({"num_thread": threads} if threads else {})},
+        },
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return (resp.json() or {}).get("response", "")
+
+
+def _ask_openai(base: str, model: str, prompt: str, timeout: float) -> str:
+    """Chat completions, for a server that already hosts your Whisper.
+
+    None of Ollama's knobs exist here - no keep_alive, no thread cap - because
+    the API has nowhere to put them. On a shared GPU that is a real difference,
+    which is why the native path is still preferred when it answers.
+    """
+    endpoint = base if base.endswith("/chat/completions") else (
+        base + ("/chat/completions" if base.endswith("/v1")
+                else "/v1/chat/completions"))
+    resp = httpx.post(
+        endpoint,
+        json={"model": model, "temperature": 0,
+              "messages": [{"role": "user", "content": prompt}]},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    body = resp.json() or {}
+    choices = body.get("choices") or [{}]
+    message = choices[0].get("message") or {}
+    # Some servers put the chain of thought in its own field and leave content
+    # empty; the verdict is parsed out of either.
+    return str(message.get("content") or message.get("reasoning_content") or "")
+
+
 def adjudicate(items: list[dict], url: str, model: str,
                timeout: float = TIMEOUT, max_questions: int = 12,
                threads: int = 2, keep_alive: str = "30s",
@@ -259,31 +345,9 @@ def adjudicate(items: list[dict], url: str, model: str,
         if progress:
             progress(position, len(asked), _word_of(item["line"]))
         try:
-            resp = httpx.post(
-                url.rstrip("/") + "/api/generate",
-                json={
-                    "model": model,
-                    "prompt": PROMPT + f'{item["n"]}. {item["line"]}',
-                    "stream": False,
-                    "think": True,
-                    # Hand the VRAM back after the last question, so a film
-                    # starting on Plex has the card to transcode with.
-                    "keep_alive": "0s" if last else keep_alive,
-                    # Thinking and the answer share num_predict; too small and
-                    # the answer comes back empty after a minute of work.
-                    # num_gpu forces every layer onto the GPU - left to itself
-                    # Ollama will quietly put half the model on the CPU and peg
-                    # eight cores for four minutes. num_thread caps what is
-                    # left: measured 5.5 cores at default, 1.7 at two threads,
-                    # for 25s versus 37s of work.
-                    "options": {"temperature": 0, "num_ctx": 16384,
-                                "num_predict": 16384, "num_gpu": 99,
-                                **({"num_thread": threads} if threads else {})},
-                },
-                timeout=timeout,
-            )
-            resp.raise_for_status()
-            raw = (resp.json() or {}).get("response", "")
+            raw = _ask(url, model, PROMPT + f'{item["n"]}. {item["line"]}',
+                       timeout=timeout, threads=threads,
+                       keep_alive="0s" if last else keep_alive)
         except (httpx.HTTPError, ValueError, KeyError):
             continue
         answers = _parse(raw)

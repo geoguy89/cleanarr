@@ -19,6 +19,13 @@ class ArrError(RuntimeError):
     pass
 
 
+def _jf_headers(api_key: str) -> dict:
+    """See library.jellyfin_headers - Jellyfin 12 only takes the
+    Authorization form, older servers take either."""
+    from .library import jellyfin_headers
+    return jellyfin_headers(api_key)
+
+
 @dataclass
 class Client:
     url: str
@@ -380,8 +387,8 @@ def plex_refresh(plex_url: str, token: str, path: str) -> str:
                     httpx.get(f"{base}/library/sections/{section['key']}/refresh",
                               params={"path": str(path.rsplit("/", 1)[0])},
                               headers={"X-Plex-Token": token}, timeout=TIMEOUT)
-                    return f"refreshed {section.get('title', section['key'])}"
-        return "no Plex library contains that path"
+                    return f"Plex: refreshed {section.get('title', section['key'])}"
+        return "Plex: no library contains that path"
     except (httpx.HTTPError, ValueError, KeyError) as exc:
         return f"refresh failed: {exc}"
 
@@ -408,7 +415,7 @@ def jellyfin_sessions(url: str, api_key: str) -> list[PlexSession]:
         return []
     try:
         resp = httpx.get(f"{url.rstrip('/')}/Sessions",
-                         headers={"X-Emby-Token": api_key,
+                         headers={**_jf_headers(api_key),
                                   "Accept": "application/json"},
                          timeout=10.0)
         resp.raise_for_status()
@@ -461,12 +468,12 @@ def jellyfin_refresh(url: str, api_key: str, path: str) -> str:
     try:
         resp = httpx.post(
             f"{url.rstrip('/')}/Library/Media/Updated",
-            headers={"X-Emby-Token": api_key},
+            headers=_jf_headers(api_key),
             json={"Updates": [{"Path": path, "UpdateType": "Modified"}]},
             timeout=TIMEOUT)
         if resp.status_code >= 400:
             return f"refresh failed: {resp.status_code}"
-        return "told Jellyfin the file changed"
+        return "Jellyfin: told it the file changed"
     except httpx.HTTPError as exc:
         return f"refresh failed: {exc}"
 

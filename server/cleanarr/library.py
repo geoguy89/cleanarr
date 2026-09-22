@@ -39,6 +39,21 @@ class LibraryError(RuntimeError):
     pass
 
 
+def jellyfin_headers(api_key: str) -> dict:
+    """Both auth schemes, because Jellyfin changed which one it accepts.
+
+    Jellyfin 12 rejects X-Emby-Token and api_key= outright (401) and takes only
+    the MediaBrowser Authorization header. Older servers accept either. Sending
+    both costs nothing and works on every version.
+    """
+    return {
+        "Authorization": f'MediaBrowser Token="{api_key}", '
+                         'Client="Cleanarr", Device="Cleanarr", '
+                         'DeviceId="cleanarr", Version="1.0"',
+        "X-Emby-Token": api_key,
+    }
+
+
 def _iso(epoch: int | float | None) -> str:
     """Plex counts seconds since 1970; everything here speaks ISO-8601."""
     if not epoch:
@@ -242,7 +257,7 @@ class JellyfinLibrary:
             raise LibraryError("Jellyfin address and API key are not set")
         try:
             resp = httpx.get(f"{self.url.rstrip('/')}{path}", params=params,
-                             headers={"X-Emby-Token": self.api_key,
+                             headers={**jellyfin_headers(self.api_key),
                                       "Accept": "application/json"},
                              timeout=TIMEOUT)
         except httpx.HTTPError as exc:
@@ -329,7 +344,7 @@ class JellyfinLibrary:
         try:
             resp = httpx.get(f"{self.url.rstrip('/')}/Items/{item_id}/Images/Primary",
                              params={"maxWidth": 400},
-                             headers={"X-Emby-Token": self.api_key}, timeout=TIMEOUT)
+                             headers=jellyfin_headers(self.api_key), timeout=TIMEOUT)
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             raise LibraryError(f"no artwork: {exc}") from exc

@@ -175,7 +175,7 @@ class Pipeline:
         note = arr.refresh_for(settings, reported or str(path))
         return {"status": "done", "muted": 0, "added_bytes": 0,
                 "message": f"removed the cleaned track · {freed / 1e6:.0f} MB back · "
-                           f"Plex: {note}"}
+                           f"{note}"}
 
     # -- the work ---------------------------------------------------------
     def run(self, job_id: int, path: Path, force: bool = False,
@@ -269,7 +269,7 @@ class Pipeline:
             return {"status": "done", "muted": len(matches), "added_bytes": added,
                     "message": f"added “{settings.track_title}” · "
                                f"{len(matches)} muted · {added / 1e6:.0f} MB · "
-                               f"Plex: {note}",
+                               f"{note}",
                     "cached_transcript": transcript.cached}
         finally:
             shutil.rmtree(work, ignore_errors=True)

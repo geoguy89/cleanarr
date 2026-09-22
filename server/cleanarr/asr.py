@@ -181,14 +181,20 @@ def transcribe_remote(audio: Path, url: str, model: str, api_key: str = "",
     # a timeout in the middle throws away all the work done so far.
     with audio.open("rb") as handle:
         files = {"file": (audio.name, handle, "audio/wav")}
-        data = [
-            ("model", model),
-            ("language", "en"),
-            ("response_format", "verbose_json"),
-            # Repeated key, not a comma list: this is how the OpenAI API spells
-            # an array in multipart, and servers that copy it expect the same.
-            ("timestamp_granularities[]", "word"),
-        ]
+        data = {
+            "model": model,
+            "language": "en",
+            "response_format": "verbose_json",
+            # A list value, which httpx emits as a repeated field. That is how
+            # the OpenAI API spells an array in multipart, and servers copying
+            # it expect the same.
+            #
+            # This was a list of 2-tuples, which httpx does not accept
+            # alongside `files=` - it raised TypeError before the request was
+            # ever sent, so pointing Cleanarr at a Whisper server failed every
+            # time with a message about bytes-like objects.
+            "timestamp_granularities[]": ["word"],
+        }
         try:
             resp = httpx.post(_remote_endpoint(url), files=files, data=data,
                               headers=headers, timeout=timeout)
