@@ -201,23 +201,83 @@ def _set_session(response: Response, token: str, request: Request) -> None:
 BUILTIN_MODEL = "medium.en"
 MODEL_SIZES = {"medium.en": "1.5 GB"}
 
-_downloading: dict[str, str] = {}
+# name -> total bytes expected, 0 if we could not find out
+_downloading: dict[str, int] = {}
+
+
+def _repo(name: str) -> str:
+    return f"Systran/faster-whisper-{name}"
 
 
 def _model_dir(name: str) -> Path:
     return CACHE_DIR / "models" / f"models--Systran--faster-whisper-{name}"
 
 
-def _on_disk(name: str) -> int:
-    """Bytes the model occupies, or 0 if it has not been fetched."""
+def _files(name: str):
     folder = _model_dir(name)
     if not folder.exists():
-        return 0
+        return []
     # Symlinks are skipped, not followed. A Hugging Face cache stores each file
     # once under blobs/ and links to it from snapshots/, so counting both
     # reports every model at twice its real size.
-    return sum(f.stat().st_size for f in folder.rglob("*")
-               if f.is_file() and not f.is_symlink())
+    return [f for f in folder.rglob("*") if f.is_file() and not f.is_symlink()]
+
+
+def _on_disk(name: str) -> int:
+    """Bytes the model occupies, part-downloaded ones included."""
+    return sum(f.stat().st_size for f in _files(name))
+
+
+def _is_complete(name: str) -> bool:
+    """Every blob finished writing.
+
+    Hugging Face writes to `<sha>.incomplete` and renames on success, so one
+    of those left behind means the download stopped partway. Treating that as
+    ready is how a restart mid-download turned into a job failing at load time.
+    """
+    files = _files(name)
+    if not files:
+        return False
+    return not any(f.name.endswith(".incomplete") for f in files)
+
+
+def _expected_bytes(name: str) -> int:
+    """Total size of the model, asked of Hugging Face once per download.
+
+    Not hardcoded: a number that quietly goes stale produces a bar that stops
+    at 94% or races past 100%, which is worse than no bar.
+    """
+    try:
+        resp = httpx.get(f"https://huggingface.co/api/models/{_repo(name)}",
+                         params={"blobs": "true"}, timeout=20.0)
+        resp.raise_for_status()
+        return sum(int(f.get("size") or 0)
+                   for f in (resp.json().get("siblings") or []))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+@app.get("/api/hardware")
+def hardware():
+    """What Whisper will actually run on, and why.
+
+    Worth stating plainly: "auto" is right for almost everyone, but when it
+    picks CPU on a machine that has a GPU, the only way to find out used to be
+    timing a job.
+    """
+    from . import asr as _asr
+    settings = config.load()
+    cuda = _asr._cuda_available()
+    chosen = settings.device
+    effective = ("cuda" if cuda else "cpu") if chosen == "auto" else chosen
+    return {
+        "cuda_available": cuda,
+        "device": chosen,
+        "effective": effective,
+        "compute_type": settings.compute_type,
+        "note": ("An NVIDIA GPU is available." if cuda
+                 else "No CUDA device found, so this runs on the CPU."),
+    }
 
 
 @app.get("/api/models")
@@ -227,14 +287,26 @@ def list_models():
     return {
         "selected": settings.model,
         "folder": str(CACHE_DIR / "models"),
-        "items": [{
-            "name": name,
-            "approx_size": MODEL_SIZES.get(name, ""),
-            "bytes": _on_disk(name),
-            "ready": _on_disk(name) > 0,
-            "downloading": _downloading.get(name, ""),
-        } for name in offered],
+        "items": [_model_row(name) for name in offered],
     }
+
+
+def _model_row(name: str) -> dict:
+    here = _on_disk(name)
+    total = _downloading.get(name)
+    row = {
+        "name": name,
+        "approx_size": MODEL_SIZES.get(name, ""),
+        "bytes": here,
+        "ready": _is_complete(name),
+        "downloading": name in _downloading,
+        "total": total or 0,
+    }
+    # Only claim a percentage when both numbers are real. A bar that invents
+    # its own progress is worse than a spinner.
+    if row["downloading"] and total:
+        row["percent"] = max(0.0, min(100.0, round(100.0 * here / total, 1)))
+    return row
 
 
 @app.post("/api/models/{name}/download")
@@ -242,11 +314,13 @@ def download_model(name: str):
     """Fetch a model now, rather than during the first job."""
     if name in _downloading:
         return {"started": False, "already": True}
-    if _on_disk(name):
+    if _is_complete(name):
         return {"started": False, "ready": True}
 
     def fetch() -> None:
-        _downloading[name] = "downloading"
+        # Asked before the download starts so the bar has a denominator from
+        # the first poll rather than jumping into existence halfway through.
+        _downloading[name] = _expected_bytes(name)
         try:
             from faster_whisper.utils import download_model as pull
             pull(name, cache_dir=str(CACHE_DIR / "models"))

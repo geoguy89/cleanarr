@@ -267,6 +267,15 @@
           is kept in your config folder and survives updates.
         </div>
         <div id="model-list" class="model-list"></div>
+        <div class="grid">
+          <label>Run it on
+            <select name="device">
+              <option value="auto">Whatever is available (recommended)</option>
+              <option value="cuda">NVIDIA GPU</option>
+              <option value="cpu">CPU</option>
+            </select></label>
+        </div>
+        <p class="help" id="hardware-note"></p>
       </div>
 
       <div id="asr-remote" hidden>

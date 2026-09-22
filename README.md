@@ -153,6 +153,9 @@ Listening is the only demanding part.
 | **CPU only** | Several times slower. Queue it overnight. |
 | **AMD GPU** | Runs, but on the CPU — see below |
 
+Cleanarr picks GPU or CPU on its own. **Settings → Listening** shows which it
+found and lets you force either.
+
 faster-whisper runs on CTranslate2, which has CPU and CUDA backends and **no
 ROCm**, so an AMD card sits idle. To use one, run something that supports it —
 [whisper.cpp](https://github.com/ggml-org/whisper.cpp) has Vulkan and ROCm

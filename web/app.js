@@ -1274,7 +1274,12 @@ async function loadModels() {
           : `not downloaded · about ${escapeHtml(m.approx_size)}`}</div>
       </div>
       ${m.downloading
-        ? '<span class="chip pending">downloading…</span>'
+        ? (m.percent !== undefined
+          ? `<div class="dl">
+               <div class="bar"><span style="width:${m.percent}%"></span></div>
+               <span class="chip pending">${m.percent}% · ${size(m.bytes)} of ${size(m.total)}</span>
+             </div>`
+          : `<span class="chip pending">downloading… ${size(m.bytes)}</span>`)
         : (m.ready
           ? '<span class="chip done">ready</span>'
           : `<button type="button" class="small" data-get-model="${escapeHtml(m.name)}">Download</button>`)}
@@ -1285,7 +1290,7 @@ async function loadModels() {
   // Keep refreshing only while something is actually coming down.
   if (data.items.some((m) => m.downloading)) {
     clearTimeout(loadModels._t);
-    loadModels._t = setTimeout(loadModels, 3000);
+    loadModels._t = setTimeout(loadModels, 1500);
   }
 }
 
@@ -1625,7 +1630,9 @@ async function loadSettings() {
   refreshPathReport();
   set('asr_url', settings.asr_url); set('asr_api_key', settings.asr_api_key);
   set('asr_remote_model', settings.asr_remote_model);
+  set('device', settings.device || 'auto');
   renderAsrBackend();
+  loadHardware();
   window.__auth = { configured: !!settings.auth_enabled,
                     username: settings.auth_user || '' };
   renderSecurity();
@@ -1671,6 +1678,7 @@ $('#settings-form').addEventListener('submit', async (event) => {
     asr_url: form.elements.asr_url.value.trim(),
     asr_api_key: form.elements.asr_api_key.value.trim(),
     asr_remote_model: form.elements.asr_remote_model.value.trim(),
+    device: form.elements.device.value,
     plex_url: form.elements.plex_url.value.trim(),
     plex_token: form.elements.plex_token.value.trim(),
     judge_url: form.elements.judge_url.value.trim(),
@@ -1859,3 +1867,29 @@ async function tryOnePath() {
 $('#path-add')?.addEventListener('click', () => $('#path-rules').appendChild(pathRuleRow()));
 $('#path-recheck')?.addEventListener('click', refreshPathReport);
 $('#path-try-go')?.addEventListener('click', tryOnePath);
+
+
+/* What Whisper will actually run on. "Auto" is right for almost everyone, but
+   when it lands on the CPU on a machine with a GPU, the only way to find out
+   used to be timing a job. */
+async function loadHardware() {
+  const note = $('#hardware-note');
+  if (!note) return;
+  try {
+    const h = await api('/api/hardware');
+    const running = h.effective === 'cuda' ? 'the GPU' : 'the CPU';
+    let msg = `${h.note} Right now this runs on ${running}.`;
+    if (h.device === 'cuda' && !h.cuda_available) {
+      msg += ' You have forced GPU, but there is no CUDA device — jobs will fail.';
+      note.className = 'help bad';
+    } else {
+      note.className = 'help';
+    }
+    note.textContent = msg;
+  } catch (err) {
+    note.textContent = '';
+  }
+}
+$('#settings-form')?.addEventListener('change', (e) => {
+  if (e.target && e.target.name === 'device') loadHardware();
+});
