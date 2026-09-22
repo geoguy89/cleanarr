@@ -1,4 +1,14 @@
 /* Cleanarr UI: a poster wall of the library, a queue, and the settings. */
+
+/* Which service serves a poster. Plex and Jellyfin serve their own artwork;
+   with the *arr apps it is Sonarr for shows and Radarr for films. The server
+   names the source on each item - the fallback is only for a response from an
+   older build. */
+function posterUrl(item, kind) {
+  const src = item.source || (kind === 'show' ? 'sonarr' : 'radarr');
+  const id = item.id !== undefined ? item.id : item.series_id;
+  return `/api/poster?source=${encodeURIComponent(src)}&id=${encodeURIComponent(id)}`;
+}
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
@@ -201,7 +211,7 @@ async function loadHome() {
   $('#home-episodes').innerHTML = data.episodes.map((e, index) => `
     <div class="card">
       <img class="thumb" loading="lazy" alt=""
-           src="/api/poster?source=sonarr&id=${e.series_id}"
+           src="${posterUrl(e, 'show')}"
            onerror="this.classList.add('missing');this.removeAttribute('src')">
       <div class="grow">
         <div class="title">${escapeHtml(e.series)}
@@ -300,7 +310,7 @@ function renderCalendar() {
       ${byDay.get(key).map((e) => `
         <div class="card">
           <img class="thumb" loading="lazy" alt=""
-               src="/api/poster?source=sonarr&id=${e.series_id}"
+               src="${posterUrl(e, 'show')}"
                onerror="this.classList.add('missing');this.removeAttribute('src')">
           <div class="grow">
             <div class="title">${escapeHtml(e.series)}
@@ -398,7 +408,7 @@ function posterCard(item, kind) {
   return `
     <div class="poster" ${attr}="${value}" data-title="${escapeHtml(item.title)}">
       <img class="art" loading="lazy" alt=""
-           src="/api/poster?source=${kind === 'show' ? 'sonarr' : 'radarr'}&id=${item.id}"
+           src="${posterUrl(item, kind)}"
            onerror="this.classList.add('missing');this.removeAttribute('src');
                     this.dataset.initial='${escapeHtml((item.title || '?')[0])}'">
       <div class="corner">${chips.join('')}</div>
@@ -1573,6 +1583,8 @@ async function loadSettings() {
   $$('input[name="library_source"]').forEach((r) => { r.checked = r.value === libSource; });
   renderLibrarySource();
   renderMediaServer();
+  renderPathRules(settings.path_map);
+  refreshPathReport();
   set('asr_url', settings.asr_url); set('asr_api_key', settings.asr_api_key);
   set('asr_remote_model', settings.asr_remote_model);
   renderAsrBackend();
@@ -1628,6 +1640,7 @@ $('#settings-form').addEventListener('submit', async (event) => {
     judge_threads: Number(form.elements.judge_threads.value),
     check_in_context: lines('check_in_context'),
     hold_policy: form.elements.hold_policy.value,
+    path_map: collectPathRules(),
   };
   try {
     await api('/api/settings', { method: 'PUT', body: JSON.stringify(payload) });
@@ -1668,3 +1681,143 @@ setInterval(() => { if ($('#gate').hidden) loadJobs(); }, 3000);
 setInterval(() => {
   if ($('#view-home').classList.contains('active')) loadHome();
 }, 60000);
+
+
+/* ---------------------------------------------------------------------------
+   Path mapping
+
+   The library says where a file is; this container has to be able to open it.
+   Those agree when both mount the same media at the same place, and routinely
+   do not when the library is a media server on another host.
+
+   Shows what the library reported, what it resolves to here, whether that
+   exists, and a guess at the rule when it does not.
+   --------------------------------------------------------------------------- */
+
+function pathRuleRow(from = '', to = '') {
+  const row = document.createElement('div');
+  row.className = 'path-rule';
+  row.innerHTML = `
+    <input type="text" class="rule-from" placeholder="the library says" value="${escapeHtml(from)}">
+    <span class="arrow">&rarr;</span>
+    <input type="text" class="rule-to" placeholder="Cleanarr sees" value="${escapeHtml(to)}">
+    <button type="button" class="ghost rule-drop" title="Remove">&times;</button>`;
+  row.querySelector('.rule-drop').addEventListener('click', () => row.remove());
+  return row;
+}
+
+function collectPathRules() {
+  const map = {};
+  $$('#path-rules .path-rule').forEach((row) => {
+    const from = row.querySelector('.rule-from').value.trim();
+    const to = row.querySelector('.rule-to').value.trim();
+    if (from && to) map[from] = to;
+  });
+  return map;
+}
+
+function renderPathRules(map) {
+  const host = $('#path-rules');
+  if (!host) return;
+  host.innerHTML = '';
+  Object.entries(map || {}).forEach(([from, to]) => host.appendChild(pathRuleRow(from, to)));
+}
+
+function addPathRule(from, to) {
+  const host = $('#path-rules');
+  if (!host) return;
+  // Don't stack a second rule for a prefix that already has one.
+  const existing = $$('#path-rules .rule-from').find((i) => i.value.trim() === from);
+  if (existing) {
+    existing.closest('.path-rule').querySelector('.rule-to').value = to;
+  } else {
+    host.appendChild(pathRuleRow(from, to));
+  }
+  $('#path-map-box').open = true;
+}
+
+async function refreshPathReport() {
+  const host = $('#path-report');
+  if (!host) return;
+  host.innerHTML = '<p class="help">Checking where your media is…</p>';
+  let data;
+  try {
+    data = await api('/api/paths');
+  } catch (err) {
+    host.innerHTML = `<p class="help bad">Could not check paths: ${escapeHtml(String(err))}</p>`;
+    return;
+  }
+  if (data.error) {
+    host.innerHTML = `<p class="help bad">${escapeHtml(data.error)}</p>`;
+    return;
+  }
+  if (!data.roots.length) {
+    host.innerHTML = '<p class="help">No libraries reported yet. Save your server '
+      + 'details above first.</p>';
+    return;
+  }
+  const bad = data.roots.filter((r) => !r.ok);
+  const rows = data.roots.map((r) => `
+    <tr class="${r.ok ? 'ok' : 'bad'}">
+      <td>${r.ok ? '✓' : '✗'}</td>
+      <td>${escapeHtml(r.library || '')}</td>
+      <td><code>${escapeHtml(r.path)}</code></td>
+      <td><code>${escapeHtml(r.mapped)}</code></td>
+      <td>${r.ok ? 'reachable'
+        : (r.suggestion
+            ? `not here — found <code>${escapeHtml(r.suggestion)}</code>
+               <button type="button" class="ghost use-rule"
+                 data-from="${escapeHtml((r.rule || {}).from || '')}"
+                 data-to="${escapeHtml((r.rule || {}).to || '')}">Use this</button>`
+            : 'not reachable from this container')}</td>
+    </tr>`).join('');
+  host.innerHTML = `
+    <table class="paths">
+      <thead><tr><th></th><th>Library</th><th>It says</th><th>We look in</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${bad.length
+      ? `<p class="help bad">${bad.length} of ${data.roots.length} library folders
+         cannot be opened from this container. Jobs for anything in them will fail
+         with “not found”. Either mount them at the same paths, or add a rule below.</p>`
+      : '<p class="help good">Every library folder is reachable from this container.</p>'}
+    <p class="help">This container can see: ${
+      data.visible.map((v) => `<code>${escapeHtml(v)}</code>`).join(' ') || 'nothing mounted'}</p>`;
+
+  $$('#path-report .use-rule').forEach((b) => b.addEventListener('click', () => {
+    addPathRule(b.dataset.from, b.dataset.to);
+  }));
+}
+
+async function tryOnePath() {
+  const out = $('#path-try-result');
+  const path = $('#path-try').value.trim();
+  if (!path) { out.textContent = 'Paste a path first.'; return; }
+  out.textContent = 'Checking…';
+  try {
+    // Checked against the rules on screen, not the saved ones, so a rule can
+    // be proved before it is saved.
+    const r = await api('/api/paths/check', {
+      method: 'POST',
+      body: JSON.stringify({ path, path_map: collectPathRules() }),
+    });
+    out.className = 'help ' + (r.ok ? 'good' : 'bad');
+    out.innerHTML = escapeHtml(r.message)
+      + (!r.ok && r.suggestion
+          ? ` <button type="button" class="ghost use-rule"
+                data-from="${escapeHtml((r.rule || {}).from || '')}"
+                data-to="${escapeHtml((r.rule || {}).to || '')}">Use <code>${
+                escapeHtml(r.suggestion)}</code></button>`
+          : '');
+    $$('#path-try-result .use-rule').forEach((b) => b.addEventListener('click', () => {
+      addPathRule(b.dataset.from, b.dataset.to);
+    }));
+  } catch (err) {
+    out.className = 'help bad';
+    out.textContent = String(err);
+  }
+}
+
+$('#path-add')?.addEventListener('click', () => $('#path-rules').appendChild(pathRuleRow()));
+$('#path-recheck')?.addEventListener('click', refreshPathReport);
+$('#path-try-go')?.addEventListener('click', tryOnePath);

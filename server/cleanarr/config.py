@@ -108,9 +108,9 @@ class Settings:
     # Files
     keep_backup: bool = False
     track_title: str = "Cleaned - English"
-    # Sonarr and Radarr report paths as their own containers see them. Ours
-    # match, because we mount the same /data - but a different setup can map
-    # them here: {"/data": "/media"}.
+    # The library reports paths as it sees them. Where this container sees the
+    # same media somewhere else, rewrite the start of the path here:
+    # {"/mnt/tank/media": "/data"}. Longest matching prefix wins.
     path_map: dict = field(default_factory=dict)
 
     # Plex is told to look again once a file changes, so the new track appears
@@ -201,8 +201,15 @@ def save(settings: Settings) -> None:
 
 
 def map_path(path: str, mapping: dict) -> str:
-    """Translate a path Sonarr reported into one this container can open."""
-    for src, dest in (mapping or {}).items():
-        if path.startswith(src):
-            return dest + path[len(src):]
-    return path
+    """Translate a path the library reported into one this container can open.
+
+    Longest prefix wins, so a rule for "/media/tv" is not shadowed by one for
+    "/media" depending on which was written first.
+    """
+    best = ""
+    for src in (mapping or {}):
+        if src and path.startswith(src) and len(src) > len(best):
+            best = src
+    if not best:
+        return path
+    return str(mapping[best]) + path[len(best):]

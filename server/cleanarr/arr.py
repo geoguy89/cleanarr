@@ -44,6 +44,17 @@ class Client:
         return {"ok": True, "app": status.get("appName", ""),
                 "version": status.get("version", "")}
 
+    def root_folders(self) -> list[dict]:
+        """Library roots, as this app sees them.
+
+        Used to show, side by side, where the library says the files are and
+        where this container can actually reach them.
+        """
+        try:
+            return [{"path": r.get("path", "")} for r in (self._get("rootfolder") or [])]
+        except ArrError:
+            return []
+
 
 class Sonarr(Client):
     def series(self) -> list[dict]:

@@ -48,10 +48,20 @@ class AudioStream:
     language: str
     title: str
     default: bool
+    handler: str = ""
 
     @property
     def is_cleaned(self) -> bool:
-        return self.title.strip().lower() == CLEAN_TITLE.lower()
+        """Is this our track?
+
+        Two fields, because MP4 has no per-track title: ffmpeg accepts
+        `-metadata:s:a:N title=` on an MP4 and drops it at mux time. MP4 does
+        keep `handler_name`, so the marker is written to both and read from
+        either. Untouched tracks carry handler_name "SoundHandler", so matching
+        on it cannot claim a track we did not make.
+        """
+        return CLEAN_TITLE.lower() in (
+            self.title.strip().lower(), self.handler.strip().lower())
 
 
 @dataclass
@@ -94,6 +104,7 @@ def probe(path: str | Path) -> Probe:
             language=str(tags.get("language", "")),
             title=str(tags.get("title", "")),
             default=bool((s.get("disposition") or {}).get("default")),
+            handler=str(tags.get("handler_name", "")),
         ))
         ai += 1
     return Probe(
@@ -261,6 +272,8 @@ def build_cleaned_file(original: Probe, track: AudioStream,
             # Only the new stream is encoded; everything else is copied.
             f"-c:a:{new_index}", args[1], f"-b:a:{new_index}", args[3],
             f"-metadata:s:a:{new_index}", f"title={title}",
+            # MP4 drops the title and keeps this one. Harmless on Matroska.
+            f"-metadata:s:a:{new_index}", f"handler_name={title}",
             f"-metadata:s:a:{new_index}", f"language={language}",
             f"-disposition:a:{new_index}", "0",
             # A muxer option, so it belongs after the inputs - see add_track.
@@ -327,6 +340,8 @@ def add_track(original: Probe, cleaned_audio: Path, dest: Path,
             # trusting the flag.
             "-max_interleave_delta", "0",
             f"-metadata:s:a:{new_index}", f"title={title}",
+            # MP4 drops the title and keeps this one. Harmless on Matroska.
+            f"-metadata:s:a:{new_index}", f"handler_name={title}",
             f"-metadata:s:a:{new_index}", f"language={language}",
             f"-disposition:a:{new_index}", "0",
             "-progress", "pipe:1", "-nostats", str(dest)]

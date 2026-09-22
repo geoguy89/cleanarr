@@ -25,6 +25,7 @@ services:
     cpu_shares: 512
     environment:
       - TZ=America/New_York
+      # NVIDIA only. Harmless without a GPU, but see the deploy block below.
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     # Unraid reads these off the container itself, so the Docker tab shows the
@@ -34,10 +35,20 @@ services:
     labels:
       net.unraid.docker.webui: "http://[IP]:[PORT:8477]/"
       net.unraid.docker.icon: "https://raw.githubusercontent.com/geoguy89/cleanarr/main/web/icon.png"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # ---- NVIDIA GPU: uncomment these six lines if you have one ----
+    #
+    # Off by default: Docker will not start a container whose device
+    # reservation cannot be met, so these lines break startup on a host with no
+    # NVIDIA GPU or no container toolkit. Without them Whisper runs on the CPU.
+    #
+    # An AMD GPU cannot be used either way - CTranslate2 has CUDA and CPU
+    # backends and no ROCm one. Point Cleanarr at a separate Whisper server
+    # instead, in Settings.
+    #
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]

@@ -210,20 +210,33 @@
         translating paths afterwards.
         <span id="path-note"></span>
       </div>
-      <details class="explain">
-        <summary>What if my mounts can’t match?</summary>
-        <p>A job that fails with <em>“… not found from this container”</em> is
-          almost always this: the path is right, but it means something
-          different inside this container than inside Sonarr’s.</p>
-        <p>There is an escape hatch. <code>path_map</code> in
-          <code>config.yaml</code> rewrites the start of a path, so a Sonarr
-          that reports <code>/media/tv/…</code> against a container that mounts
-          it at <code>/data/tv/…</code> is handled with:</p>
-        <p><code>path_map:<br>&nbsp;&nbsp;"/media": "/data"</code></p>
-        <p>It is deliberately not on this page. It is a workaround for a
-          mismatch worth fixing properly, and putting it here would invite
-          people to translate paths rather than mount them correctly — which
-          then quietly breaks the next time a library moves.</p>
+      <div id="path-report" class="path-report"></div>
+
+      <details class="explain" id="path-map-box">
+        <summary>My paths don’t match — translate them</summary>
+        <p>The library reports where each file is <em>as it sees it</em>. When
+          Sonarr and this container both mount the same <code>/data</code>,
+          those paths just work. A Plex or Jellyfin server on another machine
+          is a different story — it may reach storage over its own NFS mount,
+          and its paths mean nothing here. The symptom is the library browsing
+          perfectly while every job fails with
+          <em>“… not found from this container”</em>.</p>
+        <p>Matching the mounts is still the cleaner fix. When you can’t,
+          rewrite the start of the path: a server that reports
+          <code>/mnt/tank/media/tv/…</code> against a container that mounts it
+          at <code>/data/tv/…</code> needs one rule, <code>/mnt/tank/media</code>
+          → <code>/data</code>. One rule covers everything under it.</p>
+        <div id="path-rules"></div>
+        <div class="row">
+          <button type="button" id="path-add" class="ghost">Add a rule</button>
+          <button type="button" id="path-recheck" class="ghost">Re-check</button>
+        </div>
+        <label>Try one path
+          <input type="text" id="path-try"
+                 placeholder="paste a path the library reported">
+        </label>
+        <div class="row"><button type="button" id="path-try-go" class="ghost">Check this path</button></div>
+        <div id="path-try-result" class="help"></div>
       </details>
 
       <h2>2 · What gets silenced</h2>

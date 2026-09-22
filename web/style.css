@@ -410,3 +410,53 @@ table.detections td { padding: 4px 8px; border-top: 1px solid var(--line); }
 .choice span { display: flex; flex-direction: column; gap: 3px; }
 .choice strong { font-size: .95rem; font-weight: 650; }
 .choice em { font-style: normal; color: var(--muted); font-size: .84rem; line-height: 1.45; }
+
+/* Path mapping ------------------------------------------------------------
+   A diagnosis, not decoration: the point of this table is that one glance
+   says whether the paths the library reports can be opened from in here. */
+.path-report { margin: 0.75rem 0 0.25rem; }
+
+table.paths {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+  margin-bottom: 0.5rem;
+}
+table.paths th {
+  text-align: left;
+  font-weight: 600;
+  opacity: 0.65;
+  padding: 0.25rem 0.5rem 0.25rem 0;
+}
+table.paths td {
+  padding: 0.3rem 0.5rem 0.3rem 0;
+  border-top: 1px solid var(--line, #2a2a2a);
+  vertical-align: top;
+}
+table.paths td:first-child { width: 1.2rem; }
+table.paths tr.ok  td:first-child { color: #5cb85c; }
+table.paths tr.bad td:first-child { color: #d9534f; }
+table.paths code { word-break: break-all; }
+
+.help.good { color: #5cb85c; }
+.help.bad  { color: #d9534f; }
+
+.path-rule {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.35rem 0;
+}
+.path-rule input { flex: 1 1 0; min-width: 0; }
+.path-rule .arrow { opacity: 0.6; }
+.path-rule .rule-drop { flex: 0 0 auto; line-height: 1; }
+
+@media (max-width: 620px) {
+  .path-rule { flex-wrap: wrap; }
+  .path-rule input { flex-basis: 100%; }
+  .path-rule .arrow { display: none; }
+  table.paths thead { display: none; }
+  table.paths tr { display: grid; grid-template-columns: 1.2rem 1fr; }
+  table.paths td { border-top: none; }
+  table.paths tr + tr td:first-child { border-top: 1px solid var(--line, #2a2a2a); }
+}

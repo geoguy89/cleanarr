@@ -513,8 +513,11 @@ def series():
         # server reports directly.
         show["latest"] = landed.get(show["id"]) or show.get("added", "")
 
+    source = _poster_source(settings, "show")
+    for show in items:
+        show["source"] = source
     threading.Thread(target=_warm_posters,
-                     args=(_poster_source(settings, "show"), [s["id"] for s in items]),
+                     args=(source, [s["id"] for s in items]),
                      daemon=True).start()
     return {"items": items}
 
@@ -633,8 +636,11 @@ def movies():
         movie["cleaned_at"] = job.get("finished_at")
         movie["latest"] = movie.get("added", "")
 
+    source = _poster_source(settings, "movie")
+    for movie in items:
+        movie["source"] = source
     threading.Thread(target=_warm_posters,
-                     args=(_poster_source(settings, "movie"), [m["id"] for m in items]),
+                     args=(source, [m["id"] for m in items]),
                      daemon=True).start()
     return {"items": items}
 
@@ -728,7 +734,8 @@ def _warm_posters(source: str, ids: list[int]) -> None:
 
 
 @app.get("/api/poster")
-def poster(source: str, id: int):
+def poster(source: str, id: str):
+    # String, not int: Jellyfin item ids are 32-character hex.
     if not _fetch_poster(source, id, config.load()):
         raise HTTPException(404, "no poster")
     return FileResponse(str(_poster_path(source, id)), media_type="image/jpeg",
@@ -793,6 +800,133 @@ def _webhook_check() -> None:
         worker.nudge()
     except Exception as exc:  # noqa: BLE001
         print(f"[cleanarr] webhook check failed: {exc}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+#  Path mapping
+#
+#  The library reports paths as IT sees them. Those work unchanged when the
+#  source and this container mount the same media at the same place; a media
+#  server on another host, or one reaching storage over its own mount, reports
+#  paths that mean nothing here. The symptom is every job failing with "not
+#  found from this container" while the library browses perfectly, so the
+#  mapping is visible, checkable and guessable rather than hand-edited.
+# ---------------------------------------------------------------------------
+
+def _visible_roots() -> list[str]:
+    """Top-level directories this container can actually see.
+
+    Excludes the ones every container has, so what is left is the media mounts.
+    """
+    skip = {"proc", "sys", "dev", "etc", "bin", "sbin", "lib", "lib64", "usr",
+            "var", "run", "tmp", "root", "home", "opt", "boot", "srv", "media"}
+    out = []
+    for child in sorted(Path("/").iterdir()):
+        if child.name in skip or not child.is_dir():
+            continue
+        out.append("/" + child.name)
+    return out
+
+
+def _suggest(reported: str, visible: list[str]) -> tuple[str, str]:
+    """Find where a reported path lives here, and say which part matched.
+
+    Returns (the ancestor of the reported path that was located, where it is
+    locally), or ("", "").
+
+    Searched two ways. Walking up the reported path handles a file this
+    container has never seen, where ".../media/tv" still resolves. Walking in
+    from the left of what remains handles a mount at a different depth:
+    "/mnt/tank/media/tv" under a mounted /data is /data/media/tv.
+
+    Deepest ancestor first, so the rule is the most specific one that resolves
+    rather than a shallow coincidence.
+    """
+    parts = [p for p in reported.strip("/").split("/") if p]
+    for end in range(len(parts), 0, -1):
+        prefix = parts[:end]
+        for root in visible:
+            for start in range(len(prefix)):
+                candidate = Path(root, *prefix[start:])
+                try:
+                    if candidate.is_dir():
+                        return "/" + "/".join(prefix), str(candidate)
+                except OSError:
+                    continue
+    return "", ""
+
+
+@app.get("/api/paths")
+def path_report():
+    """Where the library says the media is, and whether we can reach it."""
+    settings = config.load()
+    visible = _visible_roots()
+    try:
+        roots = library.build(settings).roots()
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc), "visible": visible, "roots": [],
+                "path_map": settings.path_map or {}}
+
+    out = []
+    for r in roots:
+        reported = r.get("path", "")
+        mapped = config.map_path(reported, settings.path_map)
+        ok = Path(mapped).is_dir()
+        row = {**r, "mapped": mapped, "ok": ok, "suggestion": ""}
+        if not ok:
+            matched, found = _suggest(reported, visible)
+            if found:
+                row["suggestion"] = found
+                # The rule is the part that differs, not the whole path, so one
+                # rule covers every show under that root - and it is built from
+                # the ancestor that actually matched, not the full path.
+                row["rule"] = _common_rule(matched, found)
+        out.append(row)
+    return {"roots": out, "visible": visible,
+            "path_map": settings.path_map or {},
+            "source": getattr(settings, "library_source", "arr")}
+
+
+def _common_rule(reported: str, found: str) -> dict:
+    """Trim the matching tail off both sides to get the shortest rule."""
+    a, b = reported.rstrip("/").split("/"), found.rstrip("/").split("/")
+    while a and b and a[-1] == b[-1]:
+        a.pop()
+        b.pop()
+    return {"from": "/".join(a) or "/", "to": "/".join(b) or "/"}
+
+
+@app.post("/api/paths/check")
+def path_check(payload: dict):
+    """Resolve one path the way a job would, and say what happened."""
+    settings = config.load()
+    reported = (payload.get("path") or "").strip()
+    if not reported:
+        raise HTTPException(400, "no path given")
+    mapping = payload.get("path_map")
+    if mapping is None:
+        mapping = settings.path_map
+    mapped = config.map_path(reported, mapping)
+    target = Path(mapped)
+    if target.exists():
+        return {"ok": True, "mapped": mapped,
+                "kind": "directory" if target.is_dir() else "file",
+                "message": f"Found it at {mapped}"}
+    # How far up the tree it did get: "the mount is there but the show is not"
+    # is a different problem from "nothing is mounted here".
+    deepest = ""
+    probe = target
+    while probe != probe.parent:
+        probe = probe.parent
+        if probe.exists():
+            deepest = str(probe)
+            break
+    matched, suggestion = _suggest(reported, _visible_roots())
+    return {"ok": False, "mapped": mapped, "deepest_existing": deepest,
+            "suggestion": suggestion,
+            "rule": _common_rule(matched, suggestion) if suggestion else None,
+            "message": (f"{mapped} is not there. This container can see "
+                        f"as far as {deepest or '/'}.")}
 
 
 @app.get("/api/file")

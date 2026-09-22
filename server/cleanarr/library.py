@@ -202,6 +202,23 @@ class PlexLibrary:
         out.sort(key=lambda e: e["added"], reverse=True)
         return out[:limit]
 
+    def roots(self) -> list[dict]:
+        """Every folder Plex has a library in, as Plex sees it.
+
+        Plex reports paths from inside its own container, which need not match
+        ours; these are what the path check in Settings compares against.
+        """
+        out = []
+        for d in (self._get("/library/sections").get("Directory") or []):
+            if d.get("type") not in ("show", "movie"):
+                continue
+            for loc in (d.get("Location") or []):
+                if loc.get("path"):
+                    out.append({"library": d.get("title", ""),
+                                "kind": d.get("type"),
+                                "path": loc["path"]})
+        return out
+
     def test(self) -> dict:
         container = self._get("/library/sections")
         kinds = [d.get("type") for d in (container.get("Directory") or [])]
@@ -342,6 +359,18 @@ class JellyfinLibrary:
             })
         return out
 
+    def roots(self) -> list[dict]:
+        """Folders Jellyfin has libraries in, as Jellyfin sees them."""
+        out = []
+        for f in (self._get("/Library/VirtualFolders") or []):
+            kind = {"tvshows": "show", "movies": "movie"}.get(
+                f.get("CollectionType", ""), f.get("CollectionType", ""))
+            if kind not in ("show", "movie"):
+                continue
+            for path in (f.get("Locations") or []):
+                out.append({"library": f.get("Name", ""), "kind": kind, "path": path})
+        return out
+
     def test(self) -> dict:
         info = self._get("/System/Info")
         return {"ok": True, "app": info.get("ServerName") or "Jellyfin",
@@ -377,6 +406,16 @@ class ArrLibrary:
 
     def recent_episodes(self, limit: int = 12) -> list[dict]:
         return self.sonarr.recent_imports(limit)
+
+    def roots(self) -> list[dict]:
+        """Root folders, as each *arr app sees them."""
+        out = []
+        for app, kind in ((self.sonarr, "show"), (self.radarr, "movie")):
+            for r in (getattr(app, "root_folders", lambda: [])() or []):
+                if r.get("path"):
+                    out.append({"library": r.get("path", ""), "kind": kind,
+                                "path": r["path"]})
+        return out
 
 
 PlexLibrary.has_calendar = False

@@ -83,19 +83,12 @@ services:
       - "8477:8477"
     volumes:
       - /path/to/appdata/cleanarr:/config
-      # Must match how Sonarr and Radarr see your media.
+      # Cleanarr opens files at the paths your library reports. Mount your
+      # media so those paths work here too - and when you can't, Settings has
+      # a path translator that checks itself.
       - /path/to/media:/data
     environment:
       - TZ=America/New_York
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 ```
 
 ```bash
@@ -112,15 +105,35 @@ docker compose up -d
 docker run -d \
   --name cleanarr \
   --restart unless-stopped \
-  --runtime nvidia \
-  -e NVIDIA_VISIBLE_DEVICES=all \
-  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
   -e TZ=America/New_York \
   -p 8477:8477 \
   -v /path/to/appdata/cleanarr:/config \
   -v /path/to/media:/data \
   ghcr.io/geoguy89/cleanarr:latest
 ```
+
+**With an NVIDIA GPU** add the lines below as well - transcription is several
+times faster. Add them **only** if you have one: Docker refuses to start a
+container whose device reservation cannot be met, so on a machine without an
+NVIDIA card, or without the container toolkit installed, these stop Cleanarr
+running at all and the error says nothing about Cleanarr. Leave them out and
+everything works, with Whisper transcribing on the CPU.
+
+```yaml
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+```
+
+For `docker run` the equivalent is `--runtime nvidia -e
+NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=compute,utility`.
 
 ### Unraid
 
@@ -173,8 +186,8 @@ To actually use an AMD card, run something that supports it and point Cleanarr
 at that: [whisper.cpp](https://github.com/ggml-org/whisper.cpp) has Vulkan and
 ROCm backends, and anything exposing the OpenAI transcription API works here.
 
-**CPU only** needs no configuration: with no NVIDIA runtime present, Cleanarr
-detects that and uses the CPU. Expect minutes rather than seconds per episode,
+**CPU only** needs no configuration - just leave the GPU lines out. Cleanarr
+detects there is no CUDA device and uses the CPU. Expect minutes rather than seconds per episode,
 and consider queueing overnight rather than cleaning something you are about to
 watch.
 
