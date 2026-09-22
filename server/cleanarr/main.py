@@ -269,19 +269,13 @@ def hardware():
     settings = config.load()
     cuda = _asr._cuda_available()
     chosen = settings.device
-    effective = ("cuda" if cuda else "cpu") if chosen == "auto" else chosen
+    # Facts only. The wording is built in the browser, because it has to
+    # describe the choice currently on screen rather than the saved one.
     return {
         "cuda_available": cuda,
         "device": chosen,
-        "effective": effective,
+        "effective": ("cuda" if cuda else "cpu") if chosen == "auto" else chosen,
         "compute_type": settings.compute_type,
-        # Said plainly because "no CUDA device" reads like a misconfiguration
-        # to someone with a perfectly good AMD card, and it is not one.
-        "note": ("An NVIDIA GPU is available." if cuda
-                 else "No NVIDIA GPU found, so listening runs on the CPU. "
-                      "CUDA is NVIDIA-only and the speech engine has no AMD "
-                      "backend, so an AMD card cannot be used here - point "
-                      "Cleanarr at your own Whisper server to use one."),
     }
 
 

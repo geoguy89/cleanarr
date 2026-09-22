@@ -1869,27 +1869,57 @@ $('#path-recheck')?.addEventListener('click', refreshPathReport);
 $('#path-try-go')?.addEventListener('click', tryOnePath);
 
 
-/* What Whisper will actually run on. "Auto" is right for almost everyone, but
-   when it lands on the CPU on a machine with a GPU, the only way to find out
-   used to be timing a job. */
+/* What Whisper will actually run on.
+
+   Describes the option currently SELECTED, not the one saved. Re-reading the
+   server on every change asked it about a setting it had not been told about
+   yet, so picking "NVIDIA GPU" appeared to do nothing at all. */
+let CUDA_PRESENT = null;
+
 async function loadHardware() {
-  const note = $('#hardware-note');
-  if (!note) return;
+  if (!$('#hardware-note')) return;
   try {
-    const h = await api('/api/hardware');
-    const running = h.effective === 'cuda' ? 'the GPU' : 'the CPU';
-    let msg = `${h.note} Right now this runs on ${running}.`;
-    if (h.device === 'cuda' && !h.cuda_available) {
-      msg += ' You have forced GPU, but there is no CUDA device — jobs will fail.';
-      note.className = 'help bad';
-    } else {
-      note.className = 'help';
-    }
-    note.textContent = msg;
+    CUDA_PRESENT = (await api('/api/hardware')).cuda_available;
   } catch (err) {
-    note.textContent = '';
+    $('#hardware-note').textContent = '';
+    return;
   }
+  renderHardwareNote();
 }
+
+function renderHardwareNote() {
+  const note = $('#hardware-note');
+  const form = $('#settings-form');
+  if (!note || !form || !form.elements.device || CUDA_PRESENT === null) return;
+
+  const chosen = form.elements.device.value;
+  const cuda = CUDA_PRESENT;
+  const amd = 'CUDA is NVIDIA-only and the speech engine has no AMD backend, '
+    + 'so an AMD card cannot be used here — point Cleanarr at your own Whisper '
+    + 'server to use one.';
+  let msg;
+  let bad = false;
+
+  if (chosen === 'cuda' && !cuda) {
+    msg = 'No NVIDIA GPU found here, so every job would fail. Choose CPU, or '
+      + 'whatever is available. ' + amd;
+    bad = true;
+  } else if (chosen === 'cuda') {
+    msg = 'Listening will run on the NVIDIA GPU.';
+  } else if (chosen === 'cpu') {
+    msg = cuda
+      ? 'An NVIDIA GPU is available, but you have chosen the CPU. Expect '
+        + 'minutes rather than seconds per episode.'
+      : 'Listening will run on the CPU.';
+  } else {
+    msg = cuda
+      ? 'An NVIDIA GPU was found, so listening runs on it.'
+      : 'No NVIDIA GPU found, so listening runs on the CPU. ' + amd;
+  }
+  note.className = bad ? 'help bad' : 'help';
+  note.textContent = msg;
+}
+
 $('#settings-form')?.addEventListener('change', (e) => {
-  if (e.target && e.target.name === 'device') loadHardware();
+  if (e.target && e.target.name === 'device') renderHardwareNote();
 });
