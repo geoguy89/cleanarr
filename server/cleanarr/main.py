@@ -519,7 +519,7 @@ def series():
     threading.Thread(target=_warm_posters,
                      args=(source, [s["id"] for s in items]),
                      daemon=True).start()
-    return {"items": items}
+    return {"items": items, "library_source": settings.library_source}
 
 
 @app.get("/api/home")
@@ -570,6 +570,7 @@ def home(limit: int = 12):
 
     counts = db.count_by_status()
     return {
+        "library_source": settings.library_source,
         "episodes": episodes, "movies": films, "problems": problems,
         "stats": db.stats(), "monitors": len(db.monitors()),
         "queued": counts.get("queued", 0), "running": counts.get("running", 0),
@@ -642,7 +643,7 @@ def movies():
     threading.Thread(target=_warm_posters,
                      args=(source, [m["id"] for m in items]),
                      daemon=True).start()
-    return {"items": items}
+    return {"items": items, "library_source": settings.library_source}
 
 
 #  Artwork

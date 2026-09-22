@@ -1,5 +1,24 @@
 /* Cleanarr UI: a poster wall of the library, a queue, and the settings. */
 
+/* What to call the thing that supplies the library.
+
+   Naming Sonarr and Radarr in the copy was fine while they were the only
+   option. To someone running Plex only it is the wrong name, and it sends them
+   to configure a service they were told they did not need. Kept in step from
+   any response that carries the source, so it is right before settings load. */
+let LIB_SOURCE = 'arr';
+function noteLibrarySource(data) {
+  const s = data && (data.library_source || data.source);
+  if (s !== 'arr' && s !== 'plex' && s !== 'jellyfin') return;
+  LIB_SOURCE = s;
+  try { localStorage.setItem('cleanarr.library_source', s); } catch (e) { /* ignore */ }
+}
+function sourceName(kind) {
+  if (LIB_SOURCE === 'plex') return 'Plex';
+  if (LIB_SOURCE === 'jellyfin') return 'Jellyfin';
+  return kind === 'movie' ? 'Radarr' : 'Sonarr';
+}
+
 /* Which service serves a poster. Plex and Jellyfin serve their own artwork;
    with the *arr apps it is Sonarr for shows and Radarr for films. The server
    names the source on each item - the fallback is only for a response from an
@@ -173,16 +192,24 @@ const ago = (iso) => {
     { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
+/* Settled before the first paint from a cached value, so the loading copy is
+   not briefly wrong for a Plex-only install. */
+try {
+  const cached = localStorage.getItem('cleanarr.library_source');
+  if (cached) LIB_SOURCE = cached;
+} catch (e) { /* private window, no matter */ }
+
 async function loadHome() {
   let data;
   // Asking both services takes a few seconds, and this is what opens first:
   // an empty page for that long reads as broken rather than busy.
   if (!state.home) {
-    $('#home-episodes').innerHTML = '<p class="muted">Asking Sonarr…</p>';
-    $('#home-movies').innerHTML = '<p class="muted">Asking Radarr…</p>';
+    $('#home-episodes').innerHTML = `<p class="muted">Asking ${sourceName('show')}…</p>`;
+    $('#home-movies').innerHTML = `<p class="muted">Asking ${sourceName('movie')}…</p>`;
   }
   try {
     data = await api('/api/home');
+    noteLibrarySource(data);
   } catch (err) {
     $('#home-summary').innerHTML =
       `<p class="muted">${escapeHtml(err.message)} — check Settings.</p>`;
@@ -227,11 +254,16 @@ async function loadHome() {
       <button class="small" data-new-episode="${index}">${
         ['done', 'skipped'].includes(e.job_status) ? 'Clean again' : 'Clean'}</button>
     </div>`).join('')
-    || '<p class="muted">Sonarr has not imported anything lately.</p>';
+    || `<p class="muted">Nothing new in ${sourceName('show')} lately.</p>`;
+
+  const epNote = $('#home-episodes-note');
+  if (epNote) epNote.textContent = `newest first, straight from ${sourceName('show')}`;
+  const mvNote = $('#home-movies-note');
+  if (mvNote) mvNote.textContent = `newest first, straight from ${sourceName('movie')}`;
 
   $('#home-movies').innerHTML = data.movies
     .map((m, index) => posterCard({ ...m, index, home: true }, 'movie')).join('')
-    || '<p class="muted">Radarr has not imported anything lately.</p>';
+    || `<p class="muted">Nothing new in ${sourceName('movie')} lately.</p>`;
 }
 
 // --------------------------------------------------------------- upcoming
@@ -271,13 +303,13 @@ const gap = (airedIso, gotIso) => {
 
 async function loadCalendar() {
   const days = $('#calendar-days').value;
-  if (!state.calendar) $('#calendar-list').innerHTML = '<p class="muted">Asking Sonarr…</p>';
+  if (!state.calendar) $('#calendar-list').innerHTML = `<p class="muted">Asking ${sourceName('show')}…</p>`;
   try {
     const { items } = await api(`/api/calendar?days=${days}`);
     state.calendar = items;
   } catch (err) {
     $('#calendar-list').innerHTML =
-      `<p class="muted">Sonarr: ${escapeHtml(err.message)} — check Settings.</p>`;
+      `<p class="muted">${sourceName('show')}: ${escapeHtml(err.message)} — check Settings.</p>`;
     return;
   }
   renderCalendar();
@@ -420,14 +452,16 @@ function posterCard(item, kind) {
 }
 
 async function loadShows() {
-  $('#show-grid').innerHTML = '<p class="muted">Asking Sonarr…</p>';
+  $('#show-grid').innerHTML = `<p class="muted">Asking ${sourceName('show')}…</p>`;
   try {
-    const { items } = await api('/api/series');
+    const data = await api('/api/series');
+    noteLibrarySource(data);
+    const { items } = data;
     state.shows = items;
     renderShows();
   } catch (err) {
     $('#show-grid').innerHTML =
-      `<p class="muted">Sonarr: ${escapeHtml(err.message)} — check Settings.</p>`;
+      `<p class="muted">${sourceName('show')}: ${escapeHtml(err.message)} — check Settings.</p>`;
   }
 }
 
@@ -457,14 +491,16 @@ $('#show-filter').addEventListener('change', renderShows);
 $('#show-sort').addEventListener('change', renderShows);
 
 async function loadMovies() {
-  $('#movie-grid').innerHTML = '<p class="muted">Asking Radarr…</p>';
+  $('#movie-grid').innerHTML = `<p class="muted">Asking ${sourceName('movie')}…</p>`;
   try {
-    const { items } = await api('/api/movies');
+    const data = await api('/api/movies');
+    noteLibrarySource(data);
+    const { items } = data;
     state.movies = items.map((m, index) => ({ ...m, index }));
     renderMovies();
   } catch (err) {
     $('#movie-grid').innerHTML =
-      `<p class="muted">Radarr: ${escapeHtml(err.message)} — check Settings.</p>`;
+      `<p class="muted">${sourceName('movie')}: ${escapeHtml(err.message)} — check Settings.</p>`;
   }
 }
 
@@ -523,7 +559,7 @@ async function openSeries(seriesId, title) {
     $('#drawer-body').innerHTML = `
       <p class="muted">Could not load the episodes: ${escapeHtml(err.message)}</p>
       <p class="muted">The auto-clean switch above still works. Try again in a
-        moment, or check Sonarr under Settings.</p>
+        moment, or check ${sourceName('show')} under Settings.</p>
       <button class="small" data-open-series="${escapeHtml(String(seriesId))}"
               data-title="${escapeHtml(title)}">Try again</button>`;
   }
@@ -532,14 +568,15 @@ async function openSeries(seriesId, title) {
 function renderSeasons() {
   const drawer = $('#drawer');
   const items = drawer._episodes || [];
-  // A show Sonarr is waiting on has nothing to list. Say so, and point at the
+  // A show with no files yet has nothing to list. Say so, and point at the
   // one control that still does something useful here.
   if (!items.length) {
     $('#clean-show').hidden = true;
     $('#remove-show').hidden = true;
     $('#drawer-body').innerHTML = `
-      <p class="muted">Nothing on disk for this show yet — Sonarr has not
-        imported an episode. There is nothing to clean today.</p>
+      <p class="muted">Nothing on disk for this show yet — ${
+        sourceName('show')} has no episode for it. There is nothing to clean
+        today.</p>
       <p class="muted">Tick <strong>Clean newly downloaded episodes</strong>
         above and every episode that arrives from now on is cleaned as it
         lands, without you coming back here.</p>`;
@@ -1580,6 +1617,7 @@ async function loadSettings() {
   set('jellyfin_url', settings.jellyfin_url);
   set('jellyfin_api_key', settings.jellyfin_api_key);
   const libSource = settings.library_source || 'arr';
+  noteLibrarySource(settings);
   $$('input[name="library_source"]').forEach((r) => { r.checked = r.value === libSource; });
   renderLibrarySource();
   renderMediaServer();
