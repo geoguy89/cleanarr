@@ -140,7 +140,7 @@ class Pipeline:
         return mute, leave
 
     # -- taking it back out -----------------------------------------------
-    def remove(self, job_id: int, path: Path) -> dict:
+    def remove(self, job_id: int, path: Path, reported: str = "") -> dict:
         """Write the file back without its cleaned track, freeing the space."""
         settings = self.settings
         if not path.exists():
@@ -169,13 +169,17 @@ class Pipeline:
 
         freed = max(0, before - path.stat().st_size)
         db.forget_cleaned(str(path))
-        note = arr.refresh_for(settings, str(path))
+        # The media server indexed the file at the path IT reported. With a
+        # path map ours is a different string, and asking Plex to rescan
+        # that matches no library.
+        note = arr.refresh_for(settings, reported or str(path))
         return {"status": "done", "muted": 0, "added_bytes": 0,
                 "message": f"removed the cleaned track · {freed / 1e6:.0f} MB back · "
                            f"Plex: {note}"}
 
     # -- the work ---------------------------------------------------------
-    def run(self, job_id: int, path: Path, force: bool = False) -> dict:
+    def run(self, job_id: int, path: Path, force: bool = False,
+            reported: str = "") -> dict:
         settings = self.settings
         media.THREADS = settings.ffmpeg_threads
         if not path.exists():
@@ -258,7 +262,10 @@ class Pipeline:
             added = (media.track_bytes(candidate, new_track.audio_index)
                      if new_track else 0)
             media.swap_in(candidate, path, keep_backup=settings.keep_backup)
-            note = arr.refresh_for(settings, str(path))
+            # The media server indexed the file at the path IT reported. With a
+            # path map ours is a different string, and asking Plex to rescan
+            # that matches no library.
+            note = arr.refresh_for(settings, reported or str(path))
             return {"status": "done", "muted": len(matches), "added_bytes": added,
                     "message": f"added “{settings.track_title}” · "
                                f"{len(matches)} muted · {added / 1e6:.0f} MB · "
@@ -302,9 +309,10 @@ def run_job(job_id: int, settings: config.Settings, cache_dir: Path,
         pipeline = Pipeline(settings, cache_dir, should_cancel)
         action = (job["action"] if "action" in job.keys() else "clean") or "clean"
         if action == "remove":
-            result = pipeline.remove(job_id, path)
+            result = pipeline.remove(job_id, path, reported=job["path"])
         else:
-            result = pipeline.run(job_id, path, force=bool(job["force"]))
+            result = pipeline.run(job_id, path, force=bool(job["force"]),
+                                  reported=job["path"])
         db.update(job_id, status=result.get("status", "done"),
                   muted=result.get("muted", 0), message=result.get("message", ""),
                   added_bytes=result.get("added_bytes", 0),
