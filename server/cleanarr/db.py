@@ -496,6 +496,19 @@ def judge_remember(key: str, verdict: str, instead: str = "", word: str = "") ->
     conn.commit()
 
 
+def cleaned_before(path: str, job_id: int = 0) -> bool:
+    """Has a job other than this one already cleaned this file?
+
+    The record that a track in the file is ours even when the file itself
+    carries no proof - which is every file cleaned before the marker was
+    written into it.
+    """
+    row = connect().execute(
+        "SELECT 1 FROM job WHERE path=? AND id<>? AND status IN ('done','skipped') "
+        "AND COALESCE(action,'clean')='clean' LIMIT 1", (path, job_id)).fetchone()
+    return row is not None
+
+
 def forget_cleaned(path: str) -> int:
     """Drop the record of a file having been cleaned, after its track is removed."""
     conn = connect()

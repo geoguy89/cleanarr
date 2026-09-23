@@ -78,9 +78,9 @@ services:
       - "8477:8477"
     volumes:
       - /path/to/appdata/cleanarr:/config
-      # The same path on BOTH sides: Cleanarr opens the paths your library
-      # reports, so they have to mean the same thing in here.
-      - /mnt/user/data:/mnt/user/data
+      # The right-hand side must be the path your library reports.
+      # If Plex or Sonarr says /data/media/tv/..., mount it as /data.
+      - /path/to/media:/data
     environment:
       - TZ=America/New_York
 ```
@@ -115,15 +115,15 @@ docker compose up -d
 ### docker run
 
 ```bash
-# The media volume is the same path on both sides: Cleanarr opens the paths
-# your library reports, so they have to mean the same thing in the container.
+# The container side of the media volume must be the path your library
+# reports: Cleanarr opens those paths unchanged.
 docker run -d \
   --name cleanarr \
   --restart unless-stopped \
   -e TZ=America/New_York \
   -p 8477:8477 \
   -v /path/to/appdata/cleanarr:/config \
-  -v /mnt/user/data:/mnt/user/data \
+  -v /path/to/media:/data \
   ghcr.io/geoguy89/cleanarr:latest
 ```
 
@@ -209,12 +209,15 @@ step.
 ### Paths
 
 Your library reports where each file is **as it sees it**, and Cleanarr opens
-that exact path. So mount your media into this container **at the same paths
-your library reports**:
+that exact path. So mount your media so that **the path your library reports
+exists inside this container**:
 
 ```yaml
 volumes:
-  - /mnt/user/data:/mnt/user/data    # whatever Plex, Sonarr or Radarr calls it
+  # Left: where the media is on the host.
+  # Right: what your library calls it. Sonarr and Plex in containers usually
+  # report something like /data/media/tv/..., so the media is mounted as /data.
+  - /mnt/user/data:/data
 ```
 
 The two often do not agree — a Plex server on another machine, or one reaching

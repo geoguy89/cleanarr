@@ -74,6 +74,22 @@ check("MP4 keeps the name in handler_name",
 check("an untouched MP4 track is not ours",
       track(1, handler="SoundHandler").is_cleaned, False)
 
+print("ours beyond doubt, for the step that deletes a track")
+media.set_clean_title("English - Censored")
+check("the mark says so", track(1, title="Anything", mark="1").written_here, True)
+check("so does the handler name we write",
+      track(1, title="English - Censored",
+            handler="English - Censored").written_here, True)
+# The case this exists for: a track the file came with, named the same thing.
+check("a name on its own does not",
+      track(1, title="English - Censored", handler="SoundHandler").written_here,
+      False)
+check("but it still counts as cleaned, so it is not used as a source",
+      track(1, title="English - Censored", handler="SoundHandler").is_cleaned,
+      True)
+check("an untouched track is neither",
+      track(0, title="Surround 5.1", handler="SoundHandler").written_here, False)
+
 print("picking what to listen to")
 media.set_clean_title("Cleaned - English")
 p = probe(track(0, title="Surround 5.1", default=True),

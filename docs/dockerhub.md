@@ -41,9 +41,9 @@ services:
       - "8477:8477"
     volumes:
       - /path/to/appdata/cleanarr:/config
-      # The same path on BOTH sides: Cleanarr opens the paths your library
-      # reports, so they have to mean the same thing in here.
-      - /mnt/user/data:/mnt/user/data
+      # The right-hand side must be the path your library reports;
+      # Cleanarr opens those paths unchanged.
+      - /path/to/media:/data
     environment:
       - TZ=America/New_York
       - NVIDIA_VISIBLE_DEVICES=all
@@ -69,7 +69,7 @@ docker run -d \
   -e TZ=America/New_York \
   -p 8477:8477 \
   -v /path/to/appdata/cleanarr:/config \
-  -v /mnt/user/data:/mnt/user/data \
+  -v /path/to/media:/data \
   geoguy89/cleanarr:latest
 ```
 
@@ -102,7 +102,7 @@ About **2.5 minutes** for a 25-minute episode on an RTX 2070 Super, never above 
 |---|---|
 | **GPU** | Optional. NVIDIA is much faster; CPU works with no configuration; an AMD card needs a separate Whisper server. |
 | **Sonarr / Radarr** | Addresses and API keys. Read-only — Cleanarr never writes to either. |
-| **Media** | Mounted at the **same paths** your library reports. There is no path-rewriting setting. |
+| **Media** | Mounted so the paths your library reports exist in the container. There is no path-rewriting setting. |
 | **Ollama** | Optional, off by default. |
 
 **Platform:** `linux/amd64` only — the CUDA base has no arm64 build.

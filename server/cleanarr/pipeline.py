@@ -139,6 +139,19 @@ class Pipeline:
                 mute.append(match)
         return mute, leave
 
+    # -- whose track is that? ---------------------------------------------
+    def _ours(self, original, path: Path, job_id: int) -> tuple[int, ...]:
+        """The audio streams this service can show it wrote.
+
+        Dropping a track is the only destructive thing here, so it is not done
+        on a name match alone: a track carries the mark, or the handler name
+        only this writes, or there is a finished job for this file. A track
+        that merely shares the configured name belongs to the file.
+        """
+        seen = db.cleaned_before(str(path), job_id)
+        return tuple(a.audio_index for a in original.audio
+                     if a.is_cleaned and (a.written_here or seen))
+
     # -- taking it back out -----------------------------------------------
     def remove(self, job_id: int, path: Path) -> dict:
         """Write the file back without its cleaned track, freeing the space."""
@@ -151,6 +164,12 @@ class Pipeline:
         if original.cleaned_track is None:
             db.forget_cleaned(str(path))
             return {"status": "skipped", "message": "there was no cleaned track to remove"}
+        drop = self._ours(original, path, job_id)
+        if not drop:
+            raise RuntimeError(
+                f"the track named “{settings.track_title}” in this file is not "
+                f"one this install wrote, so it is left alone - remove it with "
+                f"the tool that made it")
 
         before = path.stat().st_size
         work = Path(tempfile.mkdtemp(prefix="cleanarr-", dir=str(path.parent)))
@@ -158,7 +177,8 @@ class Pipeline:
             self._stage(job_id, "remuxing", "removing the cleaned track")
             candidate = work / f"remux{path.suffix}"
             dropped = media.remove_cleaned_track(
-                original, candidate, progress=self._progress(job_id, "remuxing"))
+                original, candidate, drop=drop,
+                progress=self._progress(job_id, "remuxing"))
 
             self._stage(job_id, "verifying", "checking the new file")
             media.verify_replacement(
@@ -183,7 +203,17 @@ class Pipeline:
 
         self._stage(job_id, "probing", "reading the file")
         original = media.probe(path)
-        existing = [a.audio_index for a in original.audio if a.is_cleaned]
+        looks_ours = [a for a in original.audio if a.is_cleaned]
+        existing = self._ours(original, path, job_id)
+        if looks_ours and not existing:
+            # Every track that matches the name is one we cannot claim, so
+            # cleaning would either add a confusing duplicate name or drop
+            # somebody else's audio.
+            raise RuntimeError(
+                f"this file already has an audio track named "
+                f"“{settings.track_title}”, and nothing in the file says "
+                f"Cleanarr wrote it - pick a different name for the new track "
+                f"in Settings, so an existing track is never replaced by mistake")
         if existing and not force:
             return {"status": "skipped",
                     "message": f"already has a “{settings.track_title}” track"}
@@ -245,7 +275,7 @@ class Pipeline:
             candidate = work / f"remux{path.suffix}"
             media.build_cleaned_file(
                 original, source, spans, candidate, title=settings.track_title,
-                fade=settings.fade, drop_audio=tuple(existing),
+                fade=settings.fade, drop_audio=existing,
                 surround_bitrate=settings.bitrate_surround,
                 stereo_bitrate=settings.bitrate_stereo,
                 progress=self._progress(job_id, "muting"))

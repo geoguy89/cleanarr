@@ -931,14 +931,19 @@ def _suggest(reported: str, visible: list[str]) -> tuple[str, str]:
     from the left of what remains handles a mount at a different depth:
     "/mnt/tank/media/tv" under a mounted /data is /data/media/tv.
 
-    Deepest ancestor first, so the rule is the most specific one that resolves
-    rather than a shallow coincidence.
+    Deepest ancestor first, so the answer is the most specific one that
+    resolves rather than a shallow coincidence. Two components have to match,
+    because one does not mean anything: every machine has some directory
+    called "media" or "tv" somewhere, and pointing at it as though it were the
+    library is worse than saying nothing. A one-component path is all there is
+    to match, so it is allowed to match on its own.
     """
     parts = [p for p in reported.strip("/").split("/") if p]
+    least = 1 if len(parts) < 2 else 2
     for end in range(len(parts), 0, -1):
         prefix = parts[:end]
         for root in visible:
-            for start in range(len(prefix)):
+            for start in range(len(prefix) - least + 1):
                 candidate = Path(root, *prefix[start:])
                 try:
                     if candidate.is_dir():

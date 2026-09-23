@@ -57,8 +57,8 @@
   <Config Name="Config" Target="/config" Default="/mnt/user/appdata/cleanarr" Mode="rw"
           Description="Settings, the job database and the cached transcripts."
           Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/cleanarr</Config>
-  <Config Name="Media" Target="/mnt/user/data" Default="/mnt/user/data" Mode="rw"
-          Description="Container path and host path must MATCH, and must match what your library reports. Cleanarr opens the paths the library gives it, exactly as given."
+  <Config Name="Media" Target="/data" Default="/mnt/user/data" Mode="rw"
+          Description="The CONTAINER PATH must be what your library reports. Sonarr, Radarr and Plex in containers usually report /data/media/..., so /data is right for them. Cleanarr opens those paths unchanged - there is no path rewriting."
           Type="Path" Display="always" Required="true" Mask="false">/mnt/user/data</Config>
   <Config Name="TZ" Target="TZ" Default="America/New_York" Mode=""
           Description="Timezone." Type="Variable"

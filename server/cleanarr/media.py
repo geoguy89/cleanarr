@@ -94,6 +94,21 @@ class AudioStream:
         names = {self.title.strip().lower(), self.handler.strip().lower()}
         return bool(names & KNOWN_TITLES)
 
+    @property
+    def written_here(self) -> bool:
+        """Ours beyond doubt, rather than by name.
+
+        is_cleaned also matches on the title alone, which a track the file came
+        with can share - "English" is both a plausible name for the new track
+        and a common name for an existing one. That is harmless for "do not
+        listen to this one" and not harmless for "delete this one", so the
+        steps that drop a track ask this instead.
+        """
+        if self.mark:
+            return True
+        handler = self.handler.strip().lower()
+        return bool(handler) and handler in KNOWN_TITLES
+
 
 @dataclass
 class Probe:
@@ -482,9 +497,15 @@ def verify_replacement(original: Probe, candidate: Path,
     return got
 
 
-def remove_cleaned_track(original: Probe, dest: Path, progress=None) -> int:
-    """Write the file back without its cleaned track. Returns how many it dropped."""
-    drop = [a.audio_index for a in original.audio if a.is_cleaned]
+def remove_cleaned_track(original: Probe, dest: Path, drop=None,
+                         progress=None) -> int:
+    """Write the file back without its cleaned track. Returns how many it dropped.
+
+    `drop` names the audio streams to leave out; by default every track that
+    looks like ours. The pipeline passes the narrower list - see written_here.
+    """
+    drop = list(drop) if drop is not None else [
+        a.audio_index for a in original.audio if a.is_cleaned]
     if not drop:
         return 0
     cmd = [FFMPEG, "-nostdin", "-v", "error", "-y", *_threads(),
