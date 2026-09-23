@@ -461,6 +461,7 @@ def get_settings():
 @app.put("/api/settings")
 def put_settings(payload: dict):
     settings = config.load()
+    old_title = settings.track_title
     for section in ("sonarr", "radarr"):
         if section in payload and isinstance(payload[section], dict):
             current = getattr(settings, section)
@@ -473,7 +474,7 @@ def put_settings(payload: dict):
     for key in ("categories", "custom_words", "allow_words", "pad_start", "pad_end",
                 "fade", "model", "device", "compute_type", "trim_silence", "keep_backup",
                 "asr_backend", "asr_url", "asr_remote_model",
-                "track_title", "path_map", "plex_url", "judge_url", "judge_model",
+                "track_title", "plex_url", "judge_url", "judge_model",
                 "media_server", "jellyfin_url", "library_source",
                 "judge_threads", "judge_keep_alive", "bitrate_surround",
                 "bitrate_stereo", "ffmpeg_threads", "hold_policy",
@@ -488,6 +489,18 @@ def put_settings(payload: dict):
     if ("jellyfin_api_key" in payload
             and set(str(payload["jellyfin_api_key"])) != {"*"}):
         settings.jellyfin_api_key = payload["jellyfin_api_key"]
+    # An empty box means the default, not a nameless track. The old name is
+    # kept because detection matches every name this install has used: after a
+    # rename, re-cleaning an older file still replaces its track rather than
+    # adding a second, and removing the cleaned track still finds it.
+    settings.track_title = (str(settings.track_title or "").strip()
+                            or media.DEFAULT_CLEAN_TITLE)
+    if old_title and settings.track_title != old_title:
+        known = [t for t in settings.known_track_titles
+                 if t and t != settings.track_title]
+        if old_title not in known:
+            known.append(old_title)
+        settings.known_track_titles = known
     config.save(settings)
     return config.load().public()
 
@@ -877,14 +890,19 @@ def _webhook_check() -> None:
 
 
 # ---------------------------------------------------------------------------
-#  Path mapping
+#  The path check
 #
-#  The library reports paths as IT sees them. Those work unchanged when the
-#  source and this container mount the same media at the same place; a media
-#  server on another host, or one reaching storage over its own mount, reports
-#  paths that mean nothing here. The symptom is every job failing with "not
-#  found from this container" while the library browses perfectly, so the
-#  mapping is visible, checkable and guessable rather than hand-edited.
+#  The library reports paths as IT sees them, and this container opens exactly
+#  those. They agree when the media is mounted here at the path the library
+#  reports, and not otherwise: a media server on another host, or one reaching
+#  storage over its own mount, reports paths that mean nothing here. The
+#  symptom is the library browsing perfectly while every job fails with "not
+#  found from this container".
+#
+#  The fix is the mount: the media has to be reachable from this container in
+#  any case, mounted at the path the library reports. So this reports what the
+#  library said, whether it is openable, and where the same folder appears to
+#  be if it is mounted somewhere else. There is no path rewriting.
 # ---------------------------------------------------------------------------
 
 def _visible_roots() -> list[str]:
@@ -932,82 +950,37 @@ def _suggest(reported: str, visible: list[str]) -> tuple[str, str]:
 
 @app.get("/api/paths")
 def path_report():
-    """Where the library says the media is, and whether we can reach it."""
+    """Where the library says the media is, and whether we can open it."""
     settings = config.load()
     visible = _visible_roots()
     try:
         roots = library.build(settings).roots()
     except Exception as exc:  # noqa: BLE001
-        return {"error": str(exc), "visible": visible, "roots": [],
-                "path_map": settings.path_map or {}}
+        return {"error": str(exc), "visible": visible, "roots": []}
 
     out = []
     for r in roots:
         reported = r.get("path", "")
-        mapped = config.map_path(reported, settings.path_map)
-        ok = Path(mapped).is_dir()
-        row = {**r, "mapped": mapped, "ok": ok, "suggestion": ""}
+        ok = Path(reported).is_dir()
+        row = {**r, "ok": ok, "elsewhere": ""}
         if not ok:
-            matched, found = _suggest(reported, visible)
-            if found:
-                row["suggestion"] = found
-                # The rule is the part that differs, not the whole path, so one
-                # rule covers every show under that root - and it is built from
-                # the ancestor that actually matched, not the full path.
-                row["rule"] = _common_rule(matched, found)
+            # Mounted, but somewhere else: the fix is then one line of the
+            # compose file rather than a new share.
+            _matched, found = _suggest(reported, visible)
+            row["elsewhere"] = found
         out.append(row)
     return {"roots": out, "visible": visible,
-            "path_map": settings.path_map or {},
             "source": getattr(settings, "library_source", "arr")}
-
-
-def _common_rule(reported: str, found: str) -> dict:
-    """Trim the matching tail off both sides to get the shortest rule."""
-    a, b = reported.rstrip("/").split("/"), found.rstrip("/").split("/")
-    while a and b and a[-1] == b[-1]:
-        a.pop()
-        b.pop()
-    return {"from": "/".join(a) or "/", "to": "/".join(b) or "/"}
-
-
-@app.post("/api/paths/check")
-def path_check(payload: dict):
-    """Resolve one path the way a job would, and say what happened."""
-    settings = config.load()
-    reported = (payload.get("path") or "").strip()
-    if not reported:
-        raise HTTPException(400, "no path given")
-    mapping = payload.get("path_map")
-    if mapping is None:
-        mapping = settings.path_map
-    mapped = config.map_path(reported, mapping)
-    target = Path(mapped)
-    if target.exists():
-        return {"ok": True, "mapped": mapped,
-                "kind": "directory" if target.is_dir() else "file",
-                "message": f"Found it at {mapped}"}
-    # How far up the tree it did get: "the mount is there but the show is not"
-    # is a different problem from "nothing is mounted here".
-    deepest = ""
-    probe = target
-    while probe != probe.parent:
-        probe = probe.parent
-        if probe.exists():
-            deepest = str(probe)
-            break
-    matched, suggestion = _suggest(reported, _visible_roots())
-    return {"ok": False, "mapped": mapped, "deepest_existing": deepest,
-            "suggestion": suggestion,
-            "rule": _common_rule(matched, suggestion) if suggestion else None,
-            "message": (f"{mapped} is not there. This container can see "
-                        f"as far as {deepest or '/'}.")}
 
 
 @app.get("/api/file")
 def file_info(path: str):
     """What is in one file: used to show existing tracks before queueing."""
     settings = config.load()
-    real = Path(config.map_path(path, settings.path_map))
+    # Same names the pipeline will use, so a track this install cleaned under
+    # an older name is still shown as cleaned here.
+    media.set_clean_title(settings.track_title, settings.known_track_titles)
+    real = Path(path)
     if not real.exists():
         raise HTTPException(404, f"{real} not found from this container")
     try:

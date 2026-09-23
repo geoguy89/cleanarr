@@ -14,7 +14,7 @@
  * because it looks correct.
  */
 
-const VERSION = 'cleanarr-v4';
+const VERSION = 'cleanarr-v5';
 const SHELL = [
   '/',
   '/static/style.css',

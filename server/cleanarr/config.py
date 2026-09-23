@@ -107,11 +107,13 @@ class Settings:
 
     # Files
     keep_backup: bool = False
+    # What the added track is called. Changing it names the tracks written
+    # from then on; the ones already written keep the name they were given.
     track_title: str = "Cleaned - English"
-    # The library reports paths as it sees them. Where this container sees the
-    # same media somewhere else, rewrite the start of the path here:
-    # {"/mnt/tank/media": "/data"}. Longest matching prefix wins.
-    path_map: dict = field(default_factory=dict)
+    # Every name this install has used before the current one. Kept so a file
+    # cleaned under an older name is still recognised - otherwise renaming the
+    # track would mean re-cleaning adds a second one and removing finds none.
+    known_track_titles: list[str] = field(default_factory=list)
 
     # Plex is told to look again once a file changes, so the new track appears
     # without waiting for a scheduled scan.
@@ -178,6 +180,10 @@ def load() -> Settings:
         raw["hold_policy"] = ("video_transcode" if raw.pop("pause_while_plex_playing")
                               else "never")
     raw.pop("pause_while_plex_playing", None)
+    # Path rewriting was removed: the media has to be mounted here either way,
+    # and mounting it at the path the library reports is the whole fix. An old
+    # config file keeps the key until the next save, when it is dropped.
+    raw.pop("path_map", None)
     # media_server arrived when Jellyfin did. An install that already had a
     # Plex address configured meant Plex, so say so rather than silently
     # switching it off.
@@ -199,17 +205,3 @@ def save(settings: Settings) -> None:
                        encoding="utf8")
         tmp.replace(CONFIG_FILE)
 
-
-def map_path(path: str, mapping: dict) -> str:
-    """Translate a path the library reported into one this container can open.
-
-    Longest prefix wins, so a rule for "/media/tv" is not shadowed by one for
-    "/media" depending on which was written first.
-    """
-    best = ""
-    for src in (mapping or {}):
-        if src and path.startswith(src) and len(src) > len(best):
-            best = src
-    if not best:
-        return path
-    return str(mapping[best]) + path[len(best):]

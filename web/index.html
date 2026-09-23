@@ -200,34 +200,15 @@
       <div class="row"><span id="test-result" class="muted"></span></div>
       <div class="callout">
         <strong>There is no “media folder” to set.</strong>
-        Your library reports where each file is, and Cleanarr opens that path.
-        Mount your media into this container; if the paths don’t match, the
-        check below will say so and offer a rule.
+        Your library reports where each file is, and Cleanarr opens that exact
+        path — so mount your media into this container at the same paths your
+        library reports. The check below says whether it worked.
         <span id="path-note"></span>
       </div>
       <div id="path-report" class="path-report"></div>
-
-      <details class="explain" id="path-map-box">
-        <summary>My paths don’t match — translate them</summary>
-        <p>A rule rewrites the start of a path. A server reporting
-          <code>/mnt/tank/media/tv/…</code> against media mounted here at
-          <code>/data/tv/…</code> needs one rule:
-          <code>/mnt/tank/media</code> → <code>/data</code>. One rule covers
-          everything under it.</p>
-        <p>The media still has to be reachable from this container — NFS or SMB
-          from another machine is fine, it just has to be mounted.</p>
-        <div id="path-rules"></div>
-        <div class="row">
-          <button type="button" id="path-add" class="ghost">Add a rule</button>
-          <button type="button" id="path-recheck" class="ghost">Re-check</button>
-        </div>
-        <label>Try one path
-          <input type="text" id="path-try"
-                 placeholder="paste a path the library reported">
-        </label>
-        <div class="row"><button type="button" id="path-try-go" class="ghost">Check this path</button></div>
-        <div id="path-try-result" class="help"></div>
-      </details>
+      <div class="row">
+        <button type="button" id="path-recheck" class="ghost">Re-check</button>
+      </div>
 
       <h2>2 · What gets silenced</h2>
       <p class="help">Four lists, each switchable. Matching is whole-word, so
@@ -346,6 +327,10 @@
         <label>Fade at each edge (seconds)<input name="fade" type="number" step="0.005" min="0" max="0.2"></label>
         <label>Name of the new track<input name="track_title"></label>
       </div>
+      <p class="help">The name applies to tracks written from now on. Files
+        already cleaned keep the name they were given, and are still
+        recognised — re-cleaning one replaces its track rather than adding a
+        second. Don’t reuse the name of a track your files already have.</p>
 
       <h2>5 · Second opinion <span class="optional">optional</span></h2>
       <div class="callout">

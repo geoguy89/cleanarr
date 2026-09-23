@@ -38,6 +38,12 @@ const state = {
   queueIds: [],          // the queue in display order, for range selection
 };
 
+/* What this install calls the track it adds. Settings has the real answer;
+   before they have loaded, the default is the only sensible guess. */
+function trackName() {
+  return (state.settings && state.settings.track_title) || 'Cleaned - English';
+}
+
 // ---------------------------------------------------------------- helpers
 async function api(path, options = {}) {
   const res = await fetch(path, {
@@ -703,7 +709,7 @@ async function removeTracks(episodes, label) {
   const answer = await ask(
     `Remove the cleaned track from ${cleaned.length} file${cleaned.length === 1 ? '' : 's'}?`,
     `${label}. The original audio and everything else in the file is untouched — `
-    + `only the “Cleaned - English” track is taken out`
+    + `only the “${escapeHtml(trackName())}” track is taken out`
     + `${freed ? `, giving back about ${size(freed)}` : ''}.`,
     [{ label: 'Remove them', value: 'yes', primary: true }]);
   if (answer !== 'yes') return;
@@ -1152,7 +1158,7 @@ $('#remove-all').addEventListener('click', async () => {
   // and the only way back is cleaning them all again.
   const first = await ask(
     `Remove the cleaned track from all ${stats.cleaned_files} files?`,
-    `Every “Cleaned - English” track goes, giving back ${size(stats.added_bytes)}. `
+    `Every “${escapeHtml(trackName())}” track goes, giving back ${size(stats.added_bytes)}. `
     + `The original audio in every file is untouched. Re-cleaning them later `
     + `would take hours.`,
     [{ label: 'Continue', value: 'go' }]);
@@ -1626,7 +1632,6 @@ async function loadSettings() {
   $$('input[name="library_source"]').forEach((r) => { r.checked = r.value === libSource; });
   renderLibrarySource();
   renderMediaServer();
-  renderPathRules(settings.path_map);
   refreshPathReport();
   set('asr_url', settings.asr_url); set('asr_api_key', settings.asr_api_key);
   set('asr_remote_model', settings.asr_remote_model);
@@ -1686,7 +1691,6 @@ $('#settings-form').addEventListener('submit', async (event) => {
     judge_threads: Number(form.elements.judge_threads.value),
     check_in_context: lines('check_in_context'),
     hold_policy: form.elements.hold_policy.value,
-    path_map: collectPathRules(),
   };
   try {
     await api('/api/settings', { method: 'PUT', body: JSON.stringify(payload) });
@@ -1730,57 +1734,16 @@ setInterval(() => {
 
 
 /* ---------------------------------------------------------------------------
-   Path mapping
+   The path check
 
-   The library says where a file is; this container has to be able to open it.
-   Those agree when both mount the same media at the same place, and routinely
-   do not when the library is a media server on another host.
+   The library says where a file is; this container opens that exact path.
+   They agree when the media is mounted here at the path the library reports,
+   and not otherwise — routine when the library is on another host.
 
-   Shows what the library reported, what it resolves to here, whether that
-   exists, and a guess at the rule when it does not.
+   Shows what the library reported, whether it opens from in here, and where
+   the same folder appears to be if it is mounted somewhere else. The fix is
+   always the mount; there is no path rewriting.
    --------------------------------------------------------------------------- */
-
-function pathRuleRow(from = '', to = '') {
-  const row = document.createElement('div');
-  row.className = 'path-rule';
-  row.innerHTML = `
-    <input type="text" class="rule-from" placeholder="the library says" value="${escapeHtml(from)}">
-    <span class="arrow">&rarr;</span>
-    <input type="text" class="rule-to" placeholder="Cleanarr sees" value="${escapeHtml(to)}">
-    <button type="button" class="ghost rule-drop" title="Remove">&times;</button>`;
-  row.querySelector('.rule-drop').addEventListener('click', () => row.remove());
-  return row;
-}
-
-function collectPathRules() {
-  const map = {};
-  $$('#path-rules .path-rule').forEach((row) => {
-    const from = row.querySelector('.rule-from').value.trim();
-    const to = row.querySelector('.rule-to').value.trim();
-    if (from && to) map[from] = to;
-  });
-  return map;
-}
-
-function renderPathRules(map) {
-  const host = $('#path-rules');
-  if (!host) return;
-  host.innerHTML = '';
-  Object.entries(map || {}).forEach(([from, to]) => host.appendChild(pathRuleRow(from, to)));
-}
-
-function addPathRule(from, to) {
-  const host = $('#path-rules');
-  if (!host) return;
-  // Don't stack a second rule for a prefix that already has one.
-  const existing = $$('#path-rules .rule-from').find((i) => i.value.trim() === from);
-  if (existing) {
-    existing.closest('.path-rule').querySelector('.rule-to').value = to;
-  } else {
-    host.appendChild(pathRuleRow(from, to));
-  }
-  $('#path-map-box').open = true;
-}
 
 async function refreshPathReport() {
   const host = $('#path-report');
@@ -1808,65 +1771,30 @@ async function refreshPathReport() {
       <td>${r.ok ? '✓' : '✗'}</td>
       <td>${escapeHtml(r.library || '')}</td>
       <td><code>${escapeHtml(r.path)}</code></td>
-      <td><code>${escapeHtml(r.mapped)}</code></td>
-      <td>${r.ok ? 'reachable'
-        : (r.suggestion
-            ? `not here — found <code>${escapeHtml(r.suggestion)}</code>
-               <button type="button" class="ghost use-rule"
-                 data-from="${escapeHtml((r.rule || {}).from || '')}"
-                 data-to="${escapeHtml((r.rule || {}).to || '')}">Use this</button>`
-            : 'not reachable from this container')}</td>
+      <td>${r.ok ? 'Cleanarr can open this'
+        : (r.elsewhere
+            ? `not here — but this folder looks mounted at
+               <code>${escapeHtml(r.elsewhere)}</code>. Change that volume so it
+               appears here as <code>${escapeHtml(r.path)}</code>.`
+            : 'not mounted in this container')}</td>
     </tr>`).join('');
   host.innerHTML = `
     <table class="paths">
-      <thead><tr><th></th><th>Library</th><th>It says</th><th>We look in</th><th></th></tr></thead>
+      <thead><tr><th></th><th>Library</th><th>It says the media is here</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     ${bad.length
       ? `<p class="help bad">${bad.length} of ${data.roots.length} library folders
-         cannot be opened from this container. Jobs for anything in them will fail
-         with “not found”. Either mount them at the same paths, or add a rule below.</p>`
+         cannot be opened from this container, so jobs for anything in them will
+         fail with “not found”. Mount them here at the paths above — in
+         docker-compose, a line like
+         <code>- /your/media:${escapeHtml(bad[0].path)}</code> — then re-check.</p>`
       : '<p class="help good">Every library folder is reachable from this container.</p>'}
     <p class="help">This container can see: ${
       data.visible.map((v) => `<code>${escapeHtml(v)}</code>`).join(' ') || 'nothing mounted'}</p>`;
-
-  $$('#path-report .use-rule').forEach((b) => b.addEventListener('click', () => {
-    addPathRule(b.dataset.from, b.dataset.to);
-  }));
 }
 
-async function tryOnePath() {
-  const out = $('#path-try-result');
-  const path = $('#path-try').value.trim();
-  if (!path) { out.textContent = 'Paste a path first.'; return; }
-  out.textContent = 'Checking…';
-  try {
-    // Checked against the rules on screen, not the saved ones, so a rule can
-    // be proved before it is saved.
-    const r = await api('/api/paths/check', {
-      method: 'POST',
-      body: JSON.stringify({ path, path_map: collectPathRules() }),
-    });
-    out.className = 'help ' + (r.ok ? 'good' : 'bad');
-    out.innerHTML = escapeHtml(r.message)
-      + (!r.ok && r.suggestion
-          ? ` <button type="button" class="ghost use-rule"
-                data-from="${escapeHtml((r.rule || {}).from || '')}"
-                data-to="${escapeHtml((r.rule || {}).to || '')}">Use <code>${
-                escapeHtml(r.suggestion)}</code></button>`
-          : '');
-    $$('#path-try-result .use-rule').forEach((b) => b.addEventListener('click', () => {
-      addPathRule(b.dataset.from, b.dataset.to);
-    }));
-  } catch (err) {
-    out.className = 'help bad';
-    out.textContent = String(err);
-  }
-}
-
-$('#path-add')?.addEventListener('click', () => $('#path-rules').appendChild(pathRuleRow()));
 $('#path-recheck')?.addEventListener('click', refreshPathReport);
-$('#path-try-go')?.addEventListener('click', tryOnePath);
 
 
 /* What Whisper will actually run on.

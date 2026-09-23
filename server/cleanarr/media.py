@@ -28,7 +28,31 @@ THREADS = int(os.environ.get("CLEANARR_FFMPEG_THREADS", "2"))
 def _threads() -> list[str]:
     return ["-threads", str(THREADS)] if THREADS else []
 
-CLEAN_TITLE = "Cleaned - English"
+# What the added track is called, and what marks a track as ours. The name is
+# a setting, so the pipeline calls set_clean_title() before every job. Only
+# CLEAN_TITLE is written; every name in KNOWN_TITLES is recognised.
+DEFAULT_CLEAN_TITLE = "Cleaned - English"
+CLEAN_TITLE = DEFAULT_CLEAN_TITLE
+KNOWN_TITLES = {DEFAULT_CLEAN_TITLE.lower()}
+
+# A mark that does not depend on the name at all. Matroska keeps arbitrary
+# stream tags, so an MKV track stays ours through any number of renames; MP4
+# drops them, which is why the names are still matched as well.
+MARK_KEY = "cleanarr"
+MARK_VALUE = "1"
+
+
+def set_clean_title(title: str, also_known=()) -> None:
+    """Take the track name from the settings, and the names it used to have.
+
+    Detection matches all of them; only the current one is ever written.
+    """
+    global CLEAN_TITLE, KNOWN_TITLES
+    CLEAN_TITLE = (title or "").strip() or DEFAULT_CLEAN_TITLE
+    KNOWN_TITLES = {CLEAN_TITLE.lower(), DEFAULT_CLEAN_TITLE.lower()}
+    KNOWN_TITLES |= {t.strip().lower() for t in (also_known or ()) if t and t.strip()}
+
+
 # How much a remux is allowed to differ from the original before it is thrown
 # away: containers round durations, but a truncated file is a lost episode.
 DURATION_TOLERANCE = 1.0
@@ -49,19 +73,26 @@ class AudioStream:
     title: str
     default: bool
     handler: str = ""
+    mark: str = ""
 
     @property
     def is_cleaned(self) -> bool:
         """Is this our track?
 
-        Two fields, because MP4 has no per-track title: ffmpeg accepts
-        `-metadata:s:a:N title=` on an MP4 and drops it at mux time. MP4 does
-        keep `handler_name`, so the marker is written to both and read from
+        The mark settles it where the container kept one. Otherwise the name,
+        read from two fields: MP4 has no per-track title - ffmpeg accepts
+        `-metadata:s:a:N title=` on an MP4 and drops it at mux time - but it
+        does keep `handler_name`, so the name is written to both and read from
         either. Untouched tracks carry handler_name "SoundHandler", so matching
         on it cannot claim a track we did not make.
+
+        Matched against every name this install has used, not only the current
+        one: a file cleaned under an older name is still ours.
         """
-        return CLEAN_TITLE.lower() in (
-            self.title.strip().lower(), self.handler.strip().lower())
+        if self.mark:
+            return True
+        names = {self.title.strip().lower(), self.handler.strip().lower()}
+        return bool(names & KNOWN_TITLES)
 
 
 @dataclass
@@ -105,6 +136,7 @@ def probe(path: str | Path) -> Probe:
             title=str(tags.get("title", "")),
             default=bool((s.get("disposition") or {}).get("default")),
             handler=str(tags.get("handler_name", "")),
+            mark=str(tags.get(MARK_KEY, "")),
         ))
         ai += 1
     return Probe(
@@ -120,12 +152,18 @@ def pick_source_track(p: Probe, prefer_language: str = "eng") -> AudioStream:
     """The track to listen to and to base the clean one on.
 
     Preference order: the default English track, any English track, the
-    default track, the first track. A track already titled "Cleaned - English"
-    is never used as a source - cleaning a cleaned track would compound the
-    muting and drift further from the original every run.
+    default track, the first track. A track we have cleaned already is never
+    used as a source - cleaning a cleaned track would compound the muting and
+    drift further from the original every run.
     """
     usable = [a for a in p.audio if not a.is_cleaned]
     if not usable:
+        if p.audio:
+            # The file has audio, and all of it matches the configured name.
+            raise MediaError(
+                f"every audio track in this file already looks like ours - the "
+                f"track name “{CLEAN_TITLE}” matches a track the file came "
+                f"with, so pick a different name")
         raise MediaError("no usable audio track in this file")
 
     def english(a: AudioStream) -> bool:
@@ -247,7 +285,7 @@ def _run_with_progress(cmd: list[str], progress=None) -> None:
 
 def build_cleaned_file(original: Probe, track: AudioStream,
                        spans: list[tuple[float, float]], dest: Path,
-                       title: str = CLEAN_TITLE, language: str = "eng",
+                       title: str = "", language: str = "eng",
                        fade: float = 0.02, drop_audio: tuple[int, ...] = (),
                        surround_bitrate: str = "384k", stereo_bitrate: str = "192k",
                        progress=None) -> Path:
@@ -260,6 +298,7 @@ def build_cleaned_file(original: Probe, track: AudioStream,
     """
     args, _codec = _encoder_for(original.container, track.channels, track.codec,
                                 surround_bitrate, stereo_bitrate)
+    title = title or CLEAN_TITLE
     new_index = len(original.audio) - len(drop_audio)
 
     cmd = [FFMPEG, "-nostdin", "-v", "error", "-y", *_threads(),
@@ -275,6 +314,9 @@ def build_cleaned_file(original: Probe, track: AudioStream,
             # MP4 drops the title and keeps this one. Harmless on Matroska.
             f"-metadata:s:a:{new_index}", f"handler_name={title}",
             f"-metadata:s:a:{new_index}", f"language={language}",
+            # Kept by Matroska, ignored by MP4: the track stays ours even if
+            # the name is changed later.
+            f"-metadata:s:a:{new_index}", f"{MARK_KEY}={MARK_VALUE}",
             f"-disposition:a:{new_index}", "0",
             # A muxer option, so it belongs after the inputs - see add_track.
             "-max_interleave_delta", "0",
@@ -309,7 +351,7 @@ def _filter_script(spans: list[tuple[float, float]], track: AudioStream,
 
 
 def add_track(original: Probe, cleaned_audio: Path, dest: Path,
-              title: str = CLEAN_TITLE, language: str = "eng",
+              title: str = "", language: str = "eng",
               drop_audio: tuple[int, ...] = (), progress=None) -> Path:
     """Every stream of the original, copied, plus the cleaned track.
 
@@ -320,6 +362,7 @@ def add_track(original: Probe, cleaned_audio: Path, dest: Path,
     The new track is explicitly NOT default: the file must play exactly as it
     did before for anyone who does not choose otherwise.
     """
+    title = title or CLEAN_TITLE
     new_index = len(original.audio) - len(drop_audio)
     cmd = [FFMPEG, "-nostdin", "-v", "error", "-y", *_threads(),
            "-i", str(original.path), "-i", str(cleaned_audio), "-map", "0"]
@@ -343,6 +386,9 @@ def add_track(original: Probe, cleaned_audio: Path, dest: Path,
             # MP4 drops the title and keeps this one. Harmless on Matroska.
             f"-metadata:s:a:{new_index}", f"handler_name={title}",
             f"-metadata:s:a:{new_index}", f"language={language}",
+            # See build_cleaned_file: a name-independent mark, where the
+            # container keeps one.
+            f"-metadata:s:a:{new_index}", f"{MARK_KEY}={MARK_VALUE}",
             f"-disposition:a:{new_index}", "0",
             "-progress", "pipe:1", "-nostats", str(dest)]
     _run_with_progress(cmd, progress)
@@ -424,7 +470,8 @@ def verify_replacement(original: Probe, candidate: Path,
         raise MediaError(
             f"the new file has {len(got.audio)} audio tracks, expected {expected}")
     if got.cleaned_track is None:
-        raise MediaError("the new file has no track titled " + CLEAN_TITLE)
+        raise MediaError(
+            f"the new file has no track named “{CLEAN_TITLE}”")
     if original.duration and abs(got.duration - original.duration) > DURATION_TOLERANCE:
         raise MediaError(
             f"the new file is {got.duration:.1f}s long, the original was "

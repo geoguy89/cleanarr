@@ -16,9 +16,11 @@ services:
       - "8477:8477"
     volumes:
       - /mnt/user/appdata/cleanarr:/config
-      # The same mount Sonarr and Radarr use, at the same path, so the file
-      # paths they report can be opened here without translating anything.
-      - /mnt/user/data:/data
+      # The same path on BOTH sides. Cleanarr opens the paths the library
+      # reports, exactly as reported - there is nothing to translate them
+      # with, on purpose - so /mnt/user/data has to mean the same thing in
+      # here as it does to Plex, Sonarr and Radarr.
+      - /mnt/user/data:/mnt/user/data
     # Under contention the server should favour Plex, not this. Shares only
     # matter when the CPU is actually full, so cleaning still gets the whole
     # machine when nothing else wants it.

@@ -3,7 +3,7 @@
 Cleanarr is an \*arr-inspired, *vibe-coded* application that mutes profanity in
 media you already own.
 
-It adds a second audio track, **“Cleaned - English”**, with the swearing
+It adds a second audio track, **“Cleaned - English”** by default, with the swearing
 silenced. The original is untouched and stays the default — in Plex or Jellyfin
 you pick the clean one from the audio menu. **One file, two tracks, not two
 copies.**
@@ -78,7 +78,9 @@ services:
       - "8477:8477"
     volumes:
       - /path/to/appdata/cleanarr:/config
-      - /path/to/media:/data
+      # The same path on BOTH sides: Cleanarr opens the paths your library
+      # reports, so they have to mean the same thing in here.
+      - /mnt/user/data:/mnt/user/data
     environment:
       - TZ=America/New_York
 ```
@@ -113,13 +115,15 @@ docker compose up -d
 ### docker run
 
 ```bash
+# The media volume is the same path on both sides: Cleanarr opens the paths
+# your library reports, so they have to mean the same thing in the container.
 docker run -d \
   --name cleanarr \
   --restart unless-stopped \
   -e TZ=America/New_York \
   -p 8477:8477 \
   -v /path/to/appdata/cleanarr:/config \
-  -v /path/to/media:/data \
+  -v /mnt/user/data:/mnt/user/data \
   ghcr.io/geoguy89/cleanarr:latest
 ```
 
@@ -204,8 +208,14 @@ step.
 
 ### Paths
 
-Your library reports where each file is **as it sees it**, and Cleanarr has to
-open that same file. So mount your media into this container.
+Your library reports where each file is **as it sees it**, and Cleanarr opens
+that exact path. So mount your media into this container **at the same paths
+your library reports**:
+
+```yaml
+volumes:
+  - /mnt/user/data:/mnt/user/data    # whatever Plex, Sonarr or Radarr calls it
+```
 
 The two often do not agree — a Plex server on another machine, or one reaching
 storage over its own mount, reports paths that mean nothing here. The symptom
@@ -213,18 +223,14 @@ is the library browsing perfectly while every job fails with *“not found from
 this container”*.
 
 **Settings → Your library** shows a check for each library folder: what it
-reports, what that resolves to here, and whether it exists. When it does not,
-Cleanarr looks for the folder and offers the rule. Usually one rule covers
-everything:
+reports and whether Cleanarr can open it. When it cannot, it also says where
+that folder looks to be mounted instead, so the fix is usually one line of the
+compose file.
 
-```
-Plex says  /mnt/tank/media   →   Cleanarr sees  /data
-```
-
-You can test a path against a rule before saving it.
-
-The media still has to be **reachable** from this container. NFS or SMB from
-another machine is fine — it just has to be mounted.
+There is no path-rewriting setting, deliberately. The media has to be mounted
+into this container either way — NFS or SMB from another machine is fine, it
+just has to be mounted — and once it is being mounted, mounting it at the path
+the library reports costs nothing and leaves one fewer thing to get wrong.
 
 ---
 
