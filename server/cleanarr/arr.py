@@ -478,8 +478,31 @@ def jellyfin_refresh(url: str, api_key: str, path: str) -> str:
         return f"refresh failed: {exc}"
 
 
+def refresh_target(settings) -> str:
+    """Which server gets told that a file changed.
+
+    The explicit choice first. Failing that, the library - when the library is
+    Plex or Jellyfin its address and token are already here, and they are the
+    same server that has to re-read the file. Left to "neither", a Plex-only
+    install cleans a file perfectly and nothing appears in Plex until its next
+    scheduled scan, which reads as the job having done nothing at all.
+
+    Waiting for transcodes is not inferred the same way: that one stops work,
+    so it stays the explicit choice it looks like.
+    """
+    chosen = getattr(settings, "media_server", "none")
+    if chosen in ("plex", "jellyfin"):
+        return chosen
+    source = getattr(settings, "library_source", "arr")
+    return source if source in ("plex", "jellyfin") else "none"
+
+
 def sessions_for(settings) -> list[PlexSession]:
-    """Whichever media server is configured, or nothing."""
+    """Whichever media server was chosen, or nothing.
+
+    The library is deliberately not used as a fallback here - see
+    refresh_target.
+    """
     if settings.media_server == "jellyfin":
         return jellyfin_sessions(settings.jellyfin_url, settings.jellyfin_api_key)
     if settings.media_server == "plex":
@@ -488,8 +511,9 @@ def sessions_for(settings) -> list[PlexSession]:
 
 
 def refresh_for(settings, path: str) -> str:
-    if settings.media_server == "jellyfin":
+    target = refresh_target(settings)
+    if target == "jellyfin":
         return jellyfin_refresh(settings.jellyfin_url, settings.jellyfin_api_key, path)
-    if settings.media_server == "plex":
+    if target == "plex":
         return plex_refresh(settings.plex_url, settings.plex_token, path)
     return "no media server configured"

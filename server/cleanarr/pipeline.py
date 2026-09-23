@@ -36,6 +36,21 @@ STAGES = {
 }
 
 
+def _missing(path: Path) -> str:
+    """Why a file could not be opened, in the two cases that mean it.
+
+    A file that was cleaned last week and has since been deleted is a
+    different problem from a library folder that was never mounted here, and
+    "is not there any more" is wrong about the second - which is the one a new
+    install hits on every single job.
+    """
+    folder = path.parent
+    if not folder.is_dir():
+        return (f"{path} not found from this container - it cannot see "
+                f"{folder}. Check Settings → Your library.")
+    return f"{path} is not there any more"
+
+
 class Cancelled(Exception):
     pass
 
@@ -157,7 +172,7 @@ class Pipeline:
         """Write the file back without its cleaned track, freeing the space."""
         settings = self.settings
         if not path.exists():
-            raise FileNotFoundError(f"{path} is not there any more")
+            raise FileNotFoundError(_missing(path))
 
         self._stage(job_id, "probing", "reading the file")
         original = media.probe(path)
@@ -199,7 +214,7 @@ class Pipeline:
         settings = self.settings
         media.THREADS = settings.ffmpeg_threads
         if not path.exists():
-            raise FileNotFoundError(f"{path} is not there any more")
+            raise FileNotFoundError(_missing(path))
 
         self._stage(job_id, "probing", "reading the file")
         original = media.probe(path)
