@@ -17,7 +17,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY server/requirements.txt /app/requirements.txt
-RUN pip3 install --no-cache-dir -r /app/requirements.txt
+# Ubuntu 22.04's pip (22.0) crashes in its resolver - AssertionError in
+# get_topological_weights - on current releases of these packages' dependencies.
+RUN pip3 install --no-cache-dir --upgrade "pip>=24" \
+    && pip3 install --no-cache-dir -r /app/requirements.txt
 
 COPY server/cleanarr /app/cleanarr
 COPY web /app/web
