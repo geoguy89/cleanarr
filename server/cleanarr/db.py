@@ -368,6 +368,11 @@ def save_detections(job_id: int, muted, left_in=()) -> None:
     conn.commit()
 
 
+def detection(detection_id: int) -> sqlite3.Row | None:
+    return connect().execute(
+        "SELECT * FROM detection WHERE id=?", (detection_id,)).fetchone()
+
+
 def detections(job_id: int) -> list[sqlite3.Row]:
     return connect().execute(
         "SELECT * FROM detection WHERE job_id=? ORDER BY start", (job_id,)).fetchall()

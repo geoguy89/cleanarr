@@ -1169,6 +1169,85 @@ def job_detail(job_id: int):
     return {"job": dict(row), "detections": [dict(d) for d in db.detections(job_id)]}
 
 
+# ---------------------------------------------------------------------------
+#  Correcting a wrong call
+#
+#  Whisper hears a name as a swear, or the judge clears a word it should not
+#  have. Either way the fix is a word list, so a detection can put its word on
+#  one directly instead of someone copying it into Settings by hand.
+# ---------------------------------------------------------------------------
+
+# Which setting each list is.
+WORD_LISTS = {"never": "allow_words", "context": "check_in_context",
+              "always": "custom_words"}
+
+
+def _has(items: list[str], word: str) -> bool:
+    return any(words.normalize(w) == word for w in items)
+
+
+def _without(items: list[str], word: str) -> list[str]:
+    return [w for w in items if words.normalize(w) != word]
+
+
+@app.post("/api/detections/{detection_id}/correct")
+def correct_detection(detection_id: int, payload: dict):
+    """Put a detection's word on a list so the next clean gets it right.
+
+    never:   never mute it.
+    context: mute it unless the second opinion says it was an ordinary word.
+    always:  mute it wherever it is heard - for a word the second opinion let
+             through. Takes it off the other two lists.
+    """
+    row = db.detection(detection_id)
+    if row is None:
+        raise HTTPException(404, "no such detection")
+    target = str(payload.get("list", ""))
+    if target not in WORD_LISTS:
+        raise HTTPException(400, "list must be never, context or always")
+    word = words.normalize(row["text"])
+    if not word:
+        raise HTTPException(400, "that detection has no word to add")
+
+    settings = config.load()
+    added = False
+    if target == "always":
+        settings.allow_words = _without(settings.allow_words, word)
+        settings.check_in_context = _without(settings.check_in_context, word)
+        # Already on a built-in list: taking it off the other two is enough.
+        builtin = words.Matcher(categories=tuple(settings.categories),
+                                never=frozenset(), context_words=frozenset())
+        if (not builtin.find([{"word": word, "start": 0.0, "end": 0.1}])
+                and not _has(settings.custom_words, word)):
+            settings.custom_words = [*settings.custom_words, word]
+        added = True
+    else:
+        field_name = WORD_LISTS[target]
+        current = list(getattr(settings, field_name))
+        if not _has(current, word):
+            setattr(settings, field_name, [*current, word])
+            added = True
+        if target == "never":
+            settings.custom_words = _without(settings.custom_words, word)
+    config.save(settings)
+    return {"word": word, "list": target, "added": added, "job_id": row["job_id"],
+            "judge_configured": bool(settings.judge_url)}
+
+
+@app.delete("/api/words/{list_name}/{word}")
+def remove_word(list_name: str, word: str):
+    """Take a word back off a list - the undo for a correction."""
+    if list_name not in WORD_LISTS:
+        raise HTTPException(404, "no such list")
+    settings = config.load()
+    field_name = WORD_LISTS[list_name]
+    before = list(getattr(settings, field_name))
+    after = _without(before, words.normalize(word))
+    setattr(settings, field_name, after)
+    config.save(settings)
+    return {"removed": len(before) - len(after)}
+
+
 @app.delete("/api/jobs/{job_id}")
 def cancel_job(job_id: int):
     if not worker.cancel(job_id):
