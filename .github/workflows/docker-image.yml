@@ -17,6 +17,9 @@ on:
     paths-ignore:
       - "**.md"
       - "docs/images/**"
+      - "tests/**"
+      - "pytest.ini"
+      - ".github/workflows/tests.yml"
   workflow_dispatch:
 
 # Two pushes in quick succession used to build in parallel, both racing to

@@ -301,8 +301,8 @@ Webhook** (*On Import*) at `http://<host>:8477/api/webhook/sonarr`.
 
 ```
 server/cleanarr/
-  words.py      word lists and whole-word matching     (tools/test_words.py)
-  judge.py      the second opinion                     (tools/test_judge.py)
+  words.py      word lists and whole-word matching
+  judge.py      the second opinion
   asr.py        Whisper, local or remote, with caching
   media.py      ffprobe/ffmpeg: probe, mute, remux, verify, swap
   library.py    Sonarr/Radarr, Plex or Jellyfin as the library
@@ -312,14 +312,21 @@ server/cleanarr/
   auth.py       optional login
   main.py       API and static page
 web/            the page
+tests/          pytest suite
 ```
 
-Tests are plain scripts, no framework:
+Tests need ffmpeg on the PATH. The end-to-end tests also need espeak-ng, and
+download Whisper `tiny.en` (~75 MB) the first time.
 
 ```bash
-python tools/test_words.py
-python tools/test_judge.py
+pip install -r server/requirements.txt -r tests/requirements.txt
+python -m pytest -m "not e2e"     # fast: words, queue, API, real ffmpeg
+python -m pytest -m e2e           # speech -> Whisper -> cleaned MKV and MP4
 ```
+
+Set `CLEANARR_TEST_MODELS` to a folder to keep the model between runs. No
+Sonarr, Plex, Jellyfin or Ollama is needed: the tests start small local
+stand-ins for them.
 
 ---
 
