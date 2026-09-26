@@ -311,3 +311,69 @@ def test_calendar_needs_sonarr(client, settings):
     settings.library_source = "plex"
     config.save(settings)
     assert client.get("/api/calendar").json()["unavailable"] is True
+
+
+# ---------------------------------------------------------------- the library views
+
+@pytest.fixture
+def arr_library(settings, stub):
+    stub.route("GET", "/api/v3/episode", [
+        {"id": 1, "seasonNumber": 1, "episodeNumber": 1, "title": "A", "episodeFileId": 10},
+        {"id": 2, "seasonNumber": 1, "episodeNumber": 2, "title": "B", "episodeFileId": 11}])
+    stub.route("GET", "/api/v3/episodefile", [
+        {"id": 10, "path": "/tv/s/1.mkv", "dateAdded": "2024-01-01T00:00:00Z"},
+        {"id": 11, "path": "/tv/s/2.mkv", "dateAdded": "2024-01-02T00:00:00Z"}])
+    stub.route("GET", "/api/v3/movie", [{"id": 5, "title": "Film", "year": 2020,
+                                         "movieFile": {"path": "/m/f.mkv", "dateAdded": "2024-02-01T00:00:00Z"}}])
+    stub.route("GET", "/api/v3/history", {"records": [{
+        "seriesId": 3, "episodeId": 2, "date": "2024-01-02T00:00:00Z",
+        "data": {"importedPath": "/tv/s/2.mkv"}, "series": {"title": "Show"},
+        "episode": {"seasonNumber": 1, "episodeNumber": 2, "title": "B"}}]})
+    settings.sonarr = config.ArrConfig(url=stub.url, api_key="k")
+    settings.radarr = config.ArrConfig(url=stub.url, api_key="k")
+    config.save(settings)
+    done = db.enqueue(kind="episode", title="Show", path="/tv/s/1.mkv")
+    db.update(done, status="done", muted=4, added_bytes=9, finished_at=100.0)
+    db.enqueue(kind="movie", title="Film", path="/m/f.mkv")
+    db.monitor_add("sonarr", "3", "Show", "new_only")
+    return done
+
+
+def test_episodes_carry_their_job(client, arr_library):
+    eps = client.get("/api/series/3/episodes").json()["items"]
+    assert [(e["job_status"], e["job_id"], e["muted"], e["cleaned_at"], e["added_bytes"])
+            for e in eps] == [("done", arr_library, 4, 100.0, 9), ("", None, None, None, None)]
+
+
+def test_movies_carry_their_job(client, arr_library):
+    film = client.get("/api/movies").json()["items"][0]
+    assert film["job_status"] == "queued" and film["source"] == "radarr"
+    assert film["latest"] == "2024-02-01T00:00:00Z"
+
+
+def test_home(client, arr_library):
+    home = client.get("/api/home").json()
+    assert home["problems"] == []
+    ep = home["episodes"][0]
+    assert (ep["series"], ep["monitored"], ep["job_status"], ep["source"]) == ("Show", True, "", "sonarr")
+    assert home["movies"][0]["job_status"] == "queued"
+    assert home["stats"]["cleaned_files"] == 1 and home["monitors"] == 1
+
+
+def test_home_names_what_did_not_answer(client, settings):
+    home = client.get("/api/home").json()
+    assert home["problems"] == ["Sonarr: Sonarr address and API key are not set",
+                                "Radarr: Radarr address and API key are not set"]
+
+
+def test_startup_requeues_interrupted_jobs(home, monkeypatch):
+    from fastapi.testclient import TestClient
+    started = []
+    monkeypatch.setattr(main.worker, "start", lambda: started.append(True))
+    monkeypatch.setattr(main.worker, "stop", lambda: None)
+    monkeypatch.setattr(main, "CACHE_DIR", home / "cache")
+    job = db.enqueue(kind="file", title="x", path="/x")
+    db.update(job, status="running")
+    with TestClient(main.app):
+        assert db.get(job)["status"] == "queued"
+        assert started == [True]

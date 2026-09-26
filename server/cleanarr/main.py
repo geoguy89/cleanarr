@@ -6,6 +6,7 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
@@ -20,7 +21,6 @@ from .worker import Worker
 WEB_DIR = Path(os.environ.get("CLEANARR_WEB", "/app/web"))
 CACHE_DIR = Path(os.environ.get("CLEANARR_CACHE", "/config/cache"))
 
-app = FastAPI(title="Cleanarr", docs_url="/api/docs", redoc_url=None)
 worker = Worker(CACHE_DIR)
 
 # For the pages that ask Sonarr and Radarr two slow questions at once. Both
@@ -28,7 +28,6 @@ worker = Worker(CACHE_DIR)
 POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="cleanarr-arr")
 
 
-@app.on_event("startup")
 def _startup() -> None:
     db.connect()
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -43,10 +42,14 @@ def _startup() -> None:
     _import_dates(arr.Sonarr(settings.sonarr.url, settings.sonarr.api_key))
 
 
-@app.on_event("shutdown")
-def _shutdown() -> None:
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    _startup()
+    yield
     worker.stop()
 
+
+app = FastAPI(title="Cleanarr", docs_url="/api/docs", redoc_url=None, lifespan=_lifespan)
 
 
 # ---------------------------------------------------------------------------
@@ -575,7 +578,7 @@ def put_settings(payload: dict):
             for key, value in payload[section].items():
                 # A masked key means "leave it alone", so the UI can save the
                 # form without ever holding the real key.
-                if key == "api_key" and set(str(value)) == {"*"}:
+                if key == "api_key" and _masked(value):
                     continue
                 setattr(current, key, value)
     for key in ("categories", "custom_words", "allow_words", "pad_start", "pad_end",
@@ -588,14 +591,10 @@ def put_settings(payload: dict):
                 "check_in_context"):
         if key in payload:
             setattr(settings, key, payload[key])
-    if "plex_token" in payload and set(str(payload["plex_token"])) != {"*"}:
-        settings.plex_token = payload["plex_token"]
-    # Same masking rule as the other secrets: all-stars means "leave it".
-    if "asr_api_key" in payload and set(str(payload["asr_api_key"])) != {"*"}:
-        settings.asr_api_key = payload["asr_api_key"]
-    if ("jellyfin_api_key" in payload
-            and set(str(payload["jellyfin_api_key"])) != {"*"}):
-        settings.jellyfin_api_key = payload["jellyfin_api_key"]
+    # Same masking rule for every secret: all-stars means "leave it".
+    for key in ("plex_token", "asr_api_key", "jellyfin_api_key"):
+        if key in payload and not _masked(payload[key]):
+            setattr(settings, key, payload[key])
     # An empty box means the default, not a nameless track. The old name is
     # kept because detection matches every name this install has used: after a
     # rename, re-cleaning an older file still replaces its track rather than
@@ -618,10 +617,15 @@ def put_settings(payload: dict):
     return config.load().public()
 
 
+def _masked(value) -> bool:
+    """A secret as the settings page shows it: all stars, standing for the saved one."""
+    return set(str(value)) == {"*"}
+
+
 def _typed_secret(typed, saved: str) -> str:
     """What the form holds for a secret: the masked value means "the saved one"."""
     text = str(typed or "").strip()
-    return saved if not text or set(text) == {"*"} else text
+    return saved if not text or _masked(text) else text
 
 
 @app.post("/api/settings/test/{service}")
@@ -747,6 +751,19 @@ def series():
     return {"items": items, "library_source": settings.library_source}
 
 
+def _attach_jobs(items: list[dict], known: dict[str, dict],
+                 with_size: bool = False) -> None:
+    """Mark each episode or film with what this service last did to its file."""
+    for item in items:
+        job = known.get(item["path"]) or {}
+        item["job_status"] = job.get("status", "")
+        item["job_id"] = job.get("job_id")
+        item["muted"] = job.get("muted")
+        item["cleaned_at"] = job.get("finished_at")
+        if with_size:
+            item["added_bytes"] = job.get("added_bytes")
+
+
 @app.get("/api/home")
 def home(limit: int = 12):
     """What arrived lately, on both sides, plus how the queue is doing.
@@ -786,13 +803,9 @@ def home(limit: int = 12):
         item["monitored"] = ("sonarr", str(item["series_id"])) in watched
     problems = [p for p in problems if p]
     for group, kind in ((episodes, "show"), (films, "movie")):
+        _attach_jobs(group, known)
         for item in group:
-            job = known.get(item["path"]) or {}
             item["source"] = _poster_source(settings, kind)
-            item["job_status"] = job.get("status", "")
-            item["job_id"] = job.get("job_id")
-            item["muted"] = job.get("muted")
-            item["cleaned_at"] = job.get("finished_at")
 
     counts = db.count_by_status()
     return {
@@ -836,14 +849,7 @@ def episodes(series_id: str):
         items = library.build(settings).episodes(series_id)
     except (arr.ArrError, library.LibraryError) as exc:
         raise HTTPException(502, str(exc))
-    known = db.cleaned_paths([e["path"] for e in items])
-    for episode in items:
-        job = known.get(episode["path"]) or {}
-        episode["job_status"] = job.get("status", "")
-        episode["job_id"] = job.get("job_id")
-        episode["muted"] = job.get("muted")
-        episode["cleaned_at"] = job.get("finished_at")
-        episode["added_bytes"] = job.get("added_bytes")
+    _attach_jobs(items, db.cleaned_paths([e["path"] for e in items]), with_size=True)
     return {"items": items}
 
 
@@ -854,13 +860,8 @@ def movies():
         items = library.build(settings).movies()
     except (arr.ArrError, library.LibraryError) as exc:
         raise HTTPException(502, str(exc))
-    known = db.cleaned_paths([m["path"] for m in items])
+    _attach_jobs(items, db.cleaned_paths([m["path"] for m in items]))
     for movie in items:
-        job = known.get(movie["path"]) or {}
-        movie["job_status"] = job.get("status", "")
-        movie["job_id"] = job.get("job_id")
-        movie["muted"] = job.get("muted")
-        movie["cleaned_at"] = job.get("finished_at")
         movie["latest"] = movie.get("added", "")
 
     source = _poster_source(settings, "movie")
