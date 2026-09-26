@@ -46,15 +46,18 @@ services:
       - /path/to/media:/data
     environment:
       - TZ=America/New_York
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # With an NVIDIA GPU, uncomment these. Without one they stop the
+    # container starting, so leave them out and it runs on the CPU.
+    # environment:
+    #   - NVIDIA_VISIBLE_DEVICES=all
+    #   - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
 ```
 
 ### Or with docker run
@@ -63,9 +66,6 @@ services:
 docker run -d \
   --name cleanarr \
   --restart unless-stopped \
-  --runtime nvidia \
-  -e NVIDIA_VISIBLE_DEVICES=all \
-  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
   -e TZ=America/New_York \
   -p 8477:8477 \
   -v /path/to/appdata/cleanarr:/config \
@@ -73,9 +73,9 @@ docker run -d \
   geoguy89/cleanarr:latest
 ```
 
-Then open `http://<host>:8477` and work down Settings. Drop the `--runtime`
-and `NVIDIA_*` lines if you have no NVIDIA card — it falls back to the CPU on
-its own.
+With an NVIDIA GPU, add `--runtime nvidia -e NVIDIA_VISIBLE_DEVICES=all -e
+NVIDIA_DRIVER_CAPABILITIES=compute,utility`. Then open `http://<host>:8477`:
+Home lists what is left to set up.
 
 > **Also on GitHub Container Registry** as `ghcr.io/geoguy89/cleanarr:latest`,
 > if you would rather pull from there. Docker Hub rate-limits anonymous pulls
@@ -101,9 +101,9 @@ About **2.5 minutes** for a 25-minute episode on an RTX 2070 Super, never above 
 | | |
 |---|---|
 | **GPU** | Optional. NVIDIA is much faster; CPU works with no configuration; an AMD card needs a separate Whisper server. |
-| **Sonarr / Radarr** | Addresses and API keys. Read-only — Cleanarr never writes to either. |
+| **A library** | Sonarr + Radarr, **or** Plex, **or** Jellyfin. Read-only — Cleanarr never writes to any of them. |
 | **Media** | Mounted so the paths your library reports exist in the container. There is no path-rewriting setting. |
-| **Ollama** | Optional, off by default. |
+| **Ollama** | Optional, off by default. Any OpenAI-compatible chat server works too. |
 
 **Platform:** `linux/amd64` only — the CUDA base has no arm64 build.
 
@@ -113,7 +113,8 @@ About **2.5 minutes** for a 25-minute episode on an RTX 2070 Super, never above 
 
 - **Shows can clean themselves** — mark one and episodes downloaded from then on are cleaned as they arrive.
 - **Nothing is written until it verifies.** A failed job leaves the file exactly as it was.
-- **Nothing is ever written to Sonarr or Radarr.** They are only asked what exists.
+- **Nothing is ever written to your library.** It is only asked what exists.
+- **A wrong call is one click to fix.** Each job lists every word it muted; "That was wrong" puts the word on a list for next time.
 - **Optional login**, off until you set one.
 
 MIT licensed. Issues and pull requests: <https://github.com/geoguy89/cleanarr>

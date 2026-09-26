@@ -28,19 +28,19 @@
   <Support>https://github.com/geoguy89/cleanarr/issues</Support>
   <Project>https://github.com/geoguy89/cleanarr</Project>
   <Overview>
-    Adds a second audio track, "Cleaned - English", to shows and movies from
-    Sonarr and Radarr, with the profanity muted. One file, extra track: the
-    original audio is untouched and stays the default, and the clean one is
-    picked from the audio menu in Plex.
+    Adds a second audio track, "Cleaned - English", to shows and films from
+    Sonarr and Radarr, Plex or Jellyfin, with the profanity muted. One file,
+    one extra track: the original audio is untouched and stays the default,
+    and the clean one is picked from the audio menu in Plex or Jellyfin.
 
-    Built locally from /mnt/user/appdata/cleanarr-src - rebuild with:
-    cd /mnt/user/appdata/cleanarr-src/docker &amp;&amp; docker compose up -d --build
+    Runs on the CPU as it comes. With an NVIDIA GPU and the Nvidia Driver
+    plugin, add --runtime=nvidia to Extra Parameters (Advanced View).
   </Overview>
   <Category>MediaApp:Video Tools:Utilities</Category>
   <WebUI>http://[IP]:[PORT:8477]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/geoguy89/cleanarr/main/docker/my-Cleanarr.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/geoguy89/cleanarr/main/web/icon.png</Icon>
-  <ExtraParams>--runtime=nvidia --restart=unless-stopped</ExtraParams>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
   <PostArgs/>
   <CPUset/>
   <DonateText/>
@@ -50,7 +50,7 @@
 ### 1.0.0
 - First public release.
   </Changes>
-  <Requires>An NVIDIA GPU, Sonarr and Radarr, and Ollama for the second opinion on ambiguous words.</Requires>
+  <Requires>Sonarr and Radarr, Plex, or Jellyfin, with the media mounted at the paths it reports. An NVIDIA GPU and Ollama are optional.</Requires>
   <Config Name="WebUI" Target="8477" Default="8477" Mode="tcp"
           Description="The Cleanarr web interface." Type="Port"
           Display="always" Required="true" Mask="false">8477</Config>
@@ -64,9 +64,9 @@
           Description="Timezone." Type="Variable"
           Display="always" Required="false" Mask="false">America/New_York</Config>
   <Config Name="NVIDIA_VISIBLE_DEVICES" Target="NVIDIA_VISIBLE_DEVICES" Default="all" Mode=""
-          Description="The GPU used to transcribe. 'all', or a specific GPU UUID from nvidia-smi -L."
-          Type="Variable" Display="always" Required="true" Mask="false">all</Config>
+          Description="NVIDIA only: the GPU used to transcribe. 'all', or a GPU UUID from nvidia-smi -L. Needs --runtime=nvidia in Extra Parameters."
+          Type="Variable" Display="always" Required="false" Mask="false">all</Config>
   <Config Name="NVIDIA_DRIVER_CAPABILITIES" Target="NVIDIA_DRIVER_CAPABILITIES" Default="compute,utility" Mode=""
-          Description="What the container may use the driver for." Type="Variable"
-          Display="advanced" Required="true" Mask="false">compute,utility</Config>
+          Description="NVIDIA only: what the container may use the driver for." Type="Variable"
+          Display="advanced" Required="false" Mask="false">compute,utility</Config>
 </Container>

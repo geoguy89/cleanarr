@@ -21,7 +21,12 @@ uncertain the word gets muted.
 
 ## What it looks like
 
-**Home** — what landed lately, and what it has cost so far.
+The screenshots are of a made-up demo library (`python tools/screenshots.py`
+regenerates them), in the dark theme. The page follows the system's light or
+dark setting.
+
+**Home** — what is being cleaned, what landed lately, and what it has cost so
+far. On a new install it opens with a checklist of what is left to set up.
 
 ![Home](docs/images/home.jpg)
 
@@ -31,14 +36,19 @@ disk yet.
 ![Shows](docs/images/shows.jpg)
 
 **Inside a show** — clean one episode, a season, everything outstanding, or
-from here on. Removing a cleaned track is just as easy.
+from one episode to the end. Removing a cleaned track is just as easy.
 
 ![Episodes](docs/images/episodes.jpg)
 
-**Every mute is on the record**, so a wrong call can be found rather than
-guessed at.
+**Every mute is on the record.** When one is wrong — Whisper heard a name as a
+swear — **That was wrong** puts the word on the never-mute or check-in-context
+list, and a word the second opinion let through can be made always muted.
 
 ![Job details](docs/images/details.jpg)
+
+**The queue** — one file at a time, reorderable, with what is running now.
+
+![Queue](docs/images/queue.jpg)
 
 **Cleaned** — searchable history, and what the extra tracks cost in disk.
 
@@ -48,6 +58,15 @@ guessed at.
 hides itself otherwise.
 
 ![Upcoming](docs/images/upcoming.jpg)
+
+**Settings** are numbered in the order they need doing, and nothing is saved
+until you press Save. Each Test button tries what is typed, before it is saved.
+
+![What gets silenced](docs/images/settings.jpg)
+
+**On a phone** the sidebar becomes a bar along the bottom.
+
+<img src="docs/images/phone.jpg" alt="Home on a phone" width="300">
 
 ---
 
@@ -175,19 +194,25 @@ Whisper server**. Anything exposing the OpenAI transcription API works.
 
 ## First run
 
-Open `http://<host>:8477` and work down **Settings**; it is numbered in the
-order things need doing.
+Open `http://<host>:8477`. **Home** shows a checklist of what is left to do,
+with a link to each fix; it goes away once everything is done. **Settings** is
+numbered in the order things need doing:
 
-1. **Your library** — Sonarr + Radarr, Plex or Jellyfin, with a test button.
+1. **Your library** — Sonarr + Radarr, Plex or Jellyfin, with a test button,
+   and a check that each library folder opens from inside the container.
 2. **What gets silenced** — four switchable lists, plus your own always/never
    words.
 3. **Listening** — download the speech model here rather than during your first
    clean.
-4. **Muting** — padding and fade. The defaults are fine.
+4. **Muting** — padding, fade and the new track's name. The defaults are fine.
 5. **Second opinion** — optional, off by default.
 6. **Media server** — optional, for refreshing and pausing during transcodes.
-7. **Who can use this** — set a password if this is reachable from outside your
+7. **Advanced** — bitrates, ffmpeg threads, number format, keeping backups.
+8. **Who can use this** — set a password if this is reachable from outside your
    network.
+
+A value Cleanarr cannot use — an address without `http://`, a padding of 9
+seconds — is refused when you save, with the reason next to the field.
 
 Then clean one episode before turning it loose on a season.
 
@@ -264,9 +289,11 @@ Speech recognition writes homophones. A scene about drywall produced nine mutes
 of *“cock”* — the word was *“caulk”*. No word list fixes that, because the
 transcript genuinely contains the rude one.
 
-So a word you list is sent to **your own Ollama**, with the sentence around it,
-and is left in only if the model names the ordinary word it heard instead.
-Nothing leaves your network; a blank address skips the step.
+So a word you list is sent to **your own Ollama** — or any server with an
+OpenAI-compatible chat API — with the sentence around it, and is left in only
+if the model names the ordinary word it heard instead. Nothing leaves your
+network; a blank address skips the step, and the listed words are simply
+muted.
 
 Across 196 checks on a real library it changed the outcome **twice**, at
 30–100 s each — hence the default. Anything unanswered stays muted.
@@ -280,7 +307,9 @@ disk is touched; catching up is a separate button. A show with no files yet can
 be marked, so a new series arrives clean.
 
 Checked every 10 minutes. For instant cleaning, point a Sonarr **Connect →
-Webhook** (*On Import*) at `http://<host>:8477/api/webhook/sonarr`.
+Webhook** (*On Import*) at `http://<host>:8477/api/webhook/sonarr`. If you
+have set a login, put the same username and password in the webhook's
+Username and Password fields.
 
 ---
 
@@ -311,8 +340,9 @@ server/cleanarr/
   arr.py        Sonarr, Radarr, Plex and Jellyfin clients
   auth.py       optional login
   main.py       API and static page
+  validate.py   checks a settings save
 web/            the page
-tests/          pytest suite
+tests/          pytest suite; demo.py is a made-up library for the UI tests
 ```
 
 Tests need ffmpeg on the PATH. The end-to-end tests also need espeak-ng, and
@@ -320,9 +350,14 @@ download Whisper `tiny.en` (~75 MB) the first time.
 
 ```bash
 pip install -r server/requirements.txt -r tests/requirements.txt
-python -m pytest -m "not e2e"     # fast: words, queue, API, real ffmpeg
-python -m pytest -m e2e           # speech -> Whisper -> cleaned MKV and MP4
+python -m pytest -m "not e2e and not ui"   # words, queue, API, real ffmpeg
+python -m pytest -m e2e                     # speech -> Whisper -> cleaned MKV and MP4
+python -m pytest -m ui                      # the page in Chromium
+python tests/demo.py                        # the demo library on :8477
 ```
+
+The UI tests also need Chromium for Playwright:
+`python -m playwright install chromium`.
 
 Set `CLEANARR_TEST_MODELS` to a folder to keep the model between runs. No
 Sonarr, Plex, Jellyfin or Ollama is needed: the tests start small local
