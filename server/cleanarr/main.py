@@ -538,7 +538,12 @@ def get_settings():
     settings = config.load()
     data = settings.public()
     data["available_categories"] = [
-        {"key": k, "label": words.CATEGORY_LABELS[k]} for k in words.CATEGORIES]
+        {"key": k, "label": words.CATEGORY_LABELS[k],
+         "count": len(words.WORDLISTS[k])
+         + (len(words.BLASPHEMY_SOLO) + len(words.BLASPHEMY_PHRASES)
+            if k == "blasphemy" else 0)}
+        for k in words.CATEGORIES]
+    data["builtin_model"] = BUILTIN_MODEL
     data["hold_policies"] = arr.hold_policies(settings.media_server)
     return data
 
@@ -777,6 +782,7 @@ def home(limit: int = 12):
             job = known.get(item["path"]) or {}
             item["source"] = _poster_source(settings, kind)
             item["job_status"] = job.get("status", "")
+            item["job_id"] = job.get("job_id")
             item["muted"] = job.get("muted")
             item["cleaned_at"] = job.get("finished_at")
 

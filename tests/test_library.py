@@ -53,7 +53,7 @@ def test_radarr_skips_films_with_no_file(stub):
 def test_arr_library_roots(stub):
     stub.route("GET", "/api/v3/rootfolder", [{"path": "/data/tv"}])
     lib = library.ArrLibrary(arr.Sonarr(stub.url, "k"), arr.Radarr("", ""))
-    assert lib.roots() == [{"library": "/data/tv", "kind": "show", "path": "/data/tv"}]
+    assert lib.roots() == [{"library": "Sonarr", "kind": "show", "path": "/data/tv"}]
 
 
 # ---------------------------------------------------------------- Plex

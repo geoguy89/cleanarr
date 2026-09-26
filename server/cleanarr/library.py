@@ -430,8 +430,8 @@ class ArrLibrary:
         for app, kind in ((self.sonarr, "show"), (self.radarr, "movie")):
             for r in (getattr(app, "root_folders", lambda: [])() or []):
                 if r.get("path"):
-                    out.append({"library": r.get("path", ""), "kind": kind,
-                                "path": r["path"]})
+                    out.append({"library": "Sonarr" if kind == "show" else "Radarr",
+                                "kind": kind, "path": r["path"]})
         return out
 
 
