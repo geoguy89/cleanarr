@@ -18,17 +18,25 @@ def run(cmd: list[str]) -> subprocess.CompletedProcess:
     return out
 
 
-def srt(path: Path, seconds: float) -> Path:
-    lines = []
-    for i, t in enumerate(range(0, int(seconds), 2), start=1):
-        lines.append(f"{i}\n00:00:{t:02d},000 --> 00:00:{t + 1:02d},500\nline {i}\n")
-    path.write_text("\n".join(lines), encoding="utf8")
+def _stamp(t: float) -> str:
+    ms = int(round(t * 1000))
+    return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
+
+
+def srt(path: Path, seconds: float, cues=None) -> Path:
+    """Numbered filler lines, or the given (start, end, text) cues."""
+    if cues is None:
+        cues = [(t, t + 1.5, f"line {i}")
+                for i, t in enumerate(range(0, int(seconds), 2), start=1)]
+    blocks = [f"{i}\n{_stamp(a)} --> {_stamp(b)}\n{text}\n"
+              for i, (a, b, text) in enumerate(cues, start=1)]
+    path.write_text("\n".join(blocks), encoding="utf8")
     return path
 
 
 def make_media(dest: Path, seconds: float = 6.0, audio: Path | None = None,
                channels: int = 2, audio_codec: str = "aac",
-               title: str = "Surround", subtitles: bool = True) -> Path:
+               title: str = "Surround", subtitles: bool = True, cues=None) -> Path:
     """A tiny video with one audio track and, by default, a subtitle track.
 
     The audio is a steady tone unless `audio` names a file to use instead.
@@ -44,7 +52,7 @@ def make_media(dest: Path, seconds: float = 6.0, audio: Path | None = None,
     else:
         cmd += ["-i", str(audio)]
     if subtitles:
-        cmd += ["-i", str(srt(dest.with_suffix(".srt"), seconds))]
+        cmd += ["-i", str(srt(dest.with_suffix(".srt"), seconds, cues))]
     cmd += ["-map", "0:v", "-map", "1:a"]
     if subtitles:
         cmd += ["-map", "2:s"]

@@ -50,6 +50,10 @@ class Settings:
         default_factory=lambda: ["strong", "mild", "blasphemy", "slurs_sexual"])
     custom_words: list[str] = field(default_factory=list)
     allow_words: list[str] = field(default_factory=list)   # never silence these
+    # Never silence these, in one show or film only - keyed by its name, which
+    # is what every job for it is titled. A character called Dick is a reason
+    # to leave "dick" alone in that show, not everywhere.
+    allow_words_by_title: dict[str, list[str]] = field(default_factory=dict)
 
     # Muting
     pad_start: float = 0.12

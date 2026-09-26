@@ -73,3 +73,29 @@ def test_bad_requests(client, detection):
     assert client.post("/api/detections/999/correct", json={"list": "never"}).status_code == 404
     assert client.post(f"/api/detections/{detection['god']}/correct",
                        json={"list": "sometimes"}).status_code == 400
+
+
+def test_never_mute_in_this_show_only(client, detection):
+    r = client.post(f"/api/detections/{detection['Dick,']}/correct", json={"list": "never_here"})
+    assert r.json()["title"] == "Show" and r.json()["added"] is True
+    s = config.load()
+    assert s.allow_words_by_title == {"Show": ["dick"]}
+    assert s.allow_words == []
+    assert client.delete("/api/words/never_here/dick", params={"title": "Show"}).json() == {"removed": 1}
+    assert config.load().allow_words_by_title == {}
+
+
+def test_always_clears_per_show_exceptions_too(client, settings, detection):
+    settings.allow_words_by_title = {"Show": ["prick", "dick"], "Other": ["prick"]}
+    config.save(settings)
+    client.post(f"/api/detections/{detection['Prick']}/correct", json={"list": "always"})
+    assert config.load().allow_words_by_title == {"Show": ["dick"]}
+
+
+def test_per_show_exceptions_are_validated(client, settings):
+    ok = client.put("/api/settings", json={"allow_words_by_title": {
+        " Show ": ["dick", "dick", " "], "Empty": [], "": ["x"]}})
+    assert ok.status_code == 200
+    assert config.load().allow_words_by_title == {"Show": ["dick"]}
+    bad = client.put("/api/settings", json={"allow_words_by_title": ["dick"]})
+    assert bad.status_code == 400

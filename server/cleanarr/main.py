@@ -588,7 +588,7 @@ def put_settings(payload: dict):
                 "media_server", "jellyfin_url", "library_source",
                 "judge_threads", "judge_keep_alive", "bitrate_surround",
                 "bitrate_stereo", "ffmpeg_threads", "hold_policy",
-                "check_in_context"):
+                "check_in_context", "allow_words_by_title"):
         if key in payload:
             setattr(settings, key, payload[key])
     # Same masking rule for every secret: all-stars means "leave it".
@@ -1450,9 +1450,10 @@ def job_detail(job_id: int):
 #  one directly instead of someone copying it into Settings by hand.
 # ---------------------------------------------------------------------------
 
-# Which setting each list is.
+# Which setting each list is. "never_here" is the never list of one show or
+# film, keyed by its name.
 WORD_LISTS = {"never": "allow_words", "context": "check_in_context",
-              "always": "custom_words"}
+              "always": "custom_words", "never_here": "allow_words_by_title"}
 
 
 def _has(items: list[str], word: str) -> bool:
@@ -1467,10 +1468,11 @@ def _without(items: list[str], word: str) -> list[str]:
 def correct_detection(detection_id: int, payload: dict):
     """Put a detection's word on a list so the next clean gets it right.
 
-    never:   never mute it.
-    context: mute it unless the second opinion says it was an ordinary word.
-    always:  mute it wherever it is heard - for a word the second opinion let
-             through. Takes it off the other two lists.
+    never:      never mute it.
+    never_here: never mute it in this show or film, the one the job is for.
+    context:    mute it unless the second opinion says it was an ordinary word.
+    always:     mute it wherever it is heard - for a word the second opinion
+                let through. Takes it off the other lists.
     """
     row = db.detection(detection_id)
     if row is None:
@@ -1483,10 +1485,22 @@ def correct_detection(detection_id: int, payload: dict):
         raise HTTPException(400, "that detection has no word to add")
 
     settings = config.load()
+    title = (db.get(row["job_id"]) or {"title": ""})["title"]
     added = False
-    if target == "always":
+    if target == "never_here":
+        if not title:
+            raise HTTPException(400, "that job has no show or film name to scope it to")
+        scoped = dict(settings.allow_words_by_title or {})
+        current = list(scoped.get(title, []))
+        if not _has(current, word):
+            scoped[title] = [*current, word]
+            added = True
+        settings.allow_words_by_title = scoped
+    elif target == "always":
         settings.allow_words = _without(settings.allow_words, word)
         settings.check_in_context = _without(settings.check_in_context, word)
+        scoped = {t: _without(ws, word) for t, ws in (settings.allow_words_by_title or {}).items()}
+        settings.allow_words_by_title = {t: ws for t, ws in scoped.items() if ws}
         # Already on a built-in list: taking it off the other two is enough.
         builtin = words.Matcher(categories=tuple(settings.categories),
                                 never=frozenset(), context_words=frozenset())
@@ -1504,19 +1518,29 @@ def correct_detection(detection_id: int, payload: dict):
             settings.custom_words = _without(settings.custom_words, word)
     config.save(settings)
     return {"word": word, "list": target, "added": added, "job_id": row["job_id"],
-            "judge_configured": bool(settings.judge_url)}
+            "title": title, "judge_configured": bool(settings.judge_url)}
 
 
 @app.delete("/api/words/{list_name}/{word}")
-def remove_word(list_name: str, word: str):
+def remove_word(list_name: str, word: str, title: str = ""):
     """Take a word back off a list - the undo for a correction."""
     if list_name not in WORD_LISTS:
         raise HTTPException(404, "no such list")
     settings = config.load()
-    field_name = WORD_LISTS[list_name]
-    before = list(getattr(settings, field_name))
-    after = _without(before, words.normalize(word))
-    setattr(settings, field_name, after)
+    if list_name == "never_here":
+        scoped = dict(settings.allow_words_by_title or {})
+        before = list(scoped.get(title, []))
+        after = _without(before, words.normalize(word))
+        if after:
+            scoped[title] = after
+        else:
+            scoped.pop(title, None)
+        settings.allow_words_by_title = scoped
+    else:
+        field_name = WORD_LISTS[list_name]
+        before = list(getattr(settings, field_name))
+        after = _without(before, words.normalize(word))
+        setattr(settings, field_name, after)
     config.save(settings)
     return {"removed": len(before) - len(after)}
 

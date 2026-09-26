@@ -245,9 +245,16 @@ def transcribe_remote(audio: Path, url: str, model: str, api_key: str = "",
             "to mute single words - check it supports "
             "timestamp_granularities[]=word")
 
-    out = [{"word": str(w.get("word", "")),
-            "start": round(float(w.get("start", 0.0)), 3),
-            "end": round(float(w.get("end", 0.0)), 3)} for w in words]
+    out = []
+    for w in words:
+        row = {"word": str(w.get("word", "")),
+               "start": round(float(w.get("start", 0.0)), 3),
+               "end": round(float(w.get("end", 0.0)), 3)}
+        # The OpenAI API has no per-word confidence; some servers add one.
+        sure = w.get("probability", w.get("confidence"))
+        if isinstance(sure, (int, float)):
+            row["probability"] = round(float(sure), 3)
+        out.append(row)
     duration = float(body.get("duration") or (out[-1]["end"] if out else 0.0))
     return Transcript(words=out, language=str(body.get("language", "en")),
                       duration=duration, model=f"remote:{model}")
@@ -340,7 +347,8 @@ def transcribe(audio: Path, *, model_name: str = "medium.en",
     for segment in segments:  # generator: this is where the time goes
         for w in (segment.words or []):
             words.append({"word": w.word, "start": round(float(w.start), 3),
-                          "end": round(float(w.end), 3)})
+                          "end": round(float(w.end), 3),
+                          "probability": round(float(getattr(w, "probability", 1.0)), 3)})
         if progress and duration:
             progress(min(1.0, float(segment.end) / duration))
 

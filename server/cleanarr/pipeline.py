@@ -13,9 +13,10 @@ from __future__ import annotations
 import shutil
 import tempfile
 import time
+from dataclasses import replace
 from pathlib import Path
 
-from . import arr, asr, config, db, judge, media, words
+from . import arr, asr, config, db, judge, media, subtitles, words
 
 # What each stage is worth, so the bar moves smoothly across the whole job
 # rather than sitting at 0% through the part that takes the longest.
@@ -139,17 +140,15 @@ class Pipeline:
         for i, match in enumerate(matches):
             if i in cleared:
                 heard = cleared[i]
-                leave.append(words.Match(
-                    start=match.start, end=match.end, text=match.text,
-                    category=match.category, needs_review=True,
+                leave.append(replace(
+                    match, needs_review=True,
                     reason=("left in: reverent, not an exclamation"
                             if heard.lower().startswith("reverent")
                             else f"left in: heard as “{heard}” here")))
             else:
                 if i in asked and verdicts:
-                    match = words.Match(
-                        start=match.start, end=match.end, text=match.text,
-                        category=match.category, needs_review=True,
+                    match = replace(
+                        match, needs_review=True,
                         reason=match.reason or "ambiguous word, judged profanity here")
                 mute.append(match)
         return mute, leave
@@ -211,7 +210,7 @@ class Pipeline:
                            f"{note}"}
 
     # -- the work ---------------------------------------------------------
-    def run(self, job_id: int, path: Path, force: bool = False) -> dict:
+    def run(self, job_id: int, path: Path, force: bool = False, title: str = "") -> dict:
         settings = self.settings
         if not path.exists():
             raise FileNotFoundError(_missing(path))
@@ -246,7 +245,10 @@ class Pipeline:
         work = Path(tempfile.mkdtemp(prefix="cleanarr-", dir=str(path.parent)))
         try:
             self._stage(job_id, "extracting", "pulling out the audio")
-            wav = media.extract_for_asr(path, source, work / "asr.wav")
+            subtitle_file = work / "subtitles.srt"
+            wav = media.extract_for_asr(path, source, work / "asr.wav",
+                                        subtitles=media.pick_subtitles(original),
+                                        subtitle_dest=subtitle_file)
 
             self._stage(job_id, "listening", "listening for profanity")
             transcript = asr.transcribe(
@@ -268,15 +270,28 @@ class Pipeline:
             self._stage(job_id, "matching", "checking the word list")
             context_words = {w.strip().lower() for w in settings.check_in_context
                              if w.strip()}
+            # This show's own exceptions join the household's.
+            here = (settings.allow_words_by_title or {}).get(title, [])
             matcher = words.Matcher(
                 categories=tuple(settings.categories),
-                never=frozenset(words.NEVER) | {w.lower() for w in settings.allow_words},
+                never=frozenset(words.NEVER) | {w.lower() for w in settings.allow_words}
+                | {w.lower() for w in here},
                 extra=tuple(settings.custom_words),
                 context_words=frozenset(context_words))
             matches = matcher.find(transcript.words)
 
             self._stage(job_id, "judging", "checking the ambiguous ones")
             matches, kept = self._adjudicate(matches, transcript.words, settings)
+            # What the subtitles say at each word: evidence for whoever reviews
+            # the job, never a reason to unmute.
+            cues = []
+            if subtitle_file.exists():
+                cues = subtitles.parse_srt(subtitle_file.read_text(encoding="utf8",
+                                                                   errors="replace"))
+            matches, note = subtitles.annotate(matches, cues)
+            kept, _ = subtitles.annotate(kept, cues)
+            if note:
+                print(f"[cleanarr] job {job_id}: {note}", flush=True)
             db.save_detections(job_id, matches, kept)
             spans = words.to_spans(matches, settings.pad_start, settings.pad_end)
 
@@ -352,7 +367,8 @@ def run_job(job_id: int, settings: config.Settings, cache_dir: Path,
         if action == "remove":
             result = pipeline.remove(job_id, path)
         else:
-            result = pipeline.run(job_id, path, force=bool(job["force"]))
+            result = pipeline.run(job_id, path, force=bool(job["force"]),
+                                  title=job["title"])
         db.update(job_id, status=result.get("status", "done"),
                   muted=result.get("muted", 0), message=result.get("message", ""),
                   added_bytes=result.get("added_bytes", 0),

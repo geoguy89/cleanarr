@@ -225,3 +225,53 @@ def test_not_enough_space_stops_before_anything_is_written(home, settings, fake_
     assert not list(episode.parent.glob("cleanarr-*"))
     assert media.probe(episode).cleaned_track is None
     assert fake_asr == []                       # it did not even listen
+
+
+# ---------------------------------------------------------------- guardrails
+
+CUES = [(0.8, 1.6, "What the fuck?"), (2.8, 3.8, "Get some caulk on it."), (4.0, 4.6, "Please.")]
+
+
+@pytest.fixture(params=["mkv", "mp4"])
+def subtitled(request, tmp_path):
+    folder = tmp_path / "tv"
+    folder.mkdir()
+    return make_media(folder / f"e1.{request.param}", seconds=6.0, cues=CUES)
+
+
+def test_subtitles_and_confidence_are_recorded_but_never_unmute(home, settings, monkeypatch, subtitled):
+    heard = [dict(w) for w in WORDS]
+    heard[2]["probability"] = 0.97          # "fuck," - sure
+    heard[4]["probability"] = 0.31          # "cock" - unsure
+    monkeypatch.setattr(asr, "transcribe", lambda audio, **kw: asr.Transcript(
+        words=heard, language="en", duration=6.0, model="fake"))
+    job = run(subtitled, settings, home / "cache")
+    assert job["status"] == "done", job["message"]
+    assert job["muted"] == 2                 # both still muted
+    rows = {r["text"]: dict(r) for r in db.detections(job["id"])}
+    assert rows["fuck,"]["subtitle_state"] == "agrees" and rows["fuck,"]["confidence"] == 0.97
+    assert rows["cock"]["subtitle_state"] == "differs"
+    assert "caulk" in rows["cock"]["subtitle"]
+    assert rows["cock"]["confidence"] == 0.31
+    pcm, loud = samples(subtitled, 1), rms(samples(subtitled, 0), 0.1, 0.4)
+    assert rms(pcm, 3.0, 3.4) < loud * 0.01
+    history = {r["id"]: r["to_check"] for r in db.history()}
+    assert history[job["id"]] == 1
+
+
+def test_a_file_without_subtitles_still_cleans(home, settings, fake_asr, tmp_path):
+    src = make_media(tmp_path / "plain.mkv", seconds=6.0, subtitles=False)
+    job = run(src, settings, home / "cache")
+    assert job["status"] == "done"
+    assert {r["subtitle_state"] for r in db.detections(job["id"])} == {""}
+
+
+def test_a_per_show_exception_applies_to_that_show_only(home, settings, fake_asr, tmp_path):
+    settings.allow_words_by_title = {"Show": ["cock"]}
+    a = make_media(tmp_path / "a.mkv", seconds=6.0)
+    b = make_media(tmp_path / "b.mkv", seconds=6.0)
+    here = run(a, settings, home / "cache")                      # titled "Show"
+    job = db.enqueue(kind="episode", title="Another Show", path=str(b))
+    pipeline.run_job(job, settings, home / "cache")
+    assert [r["text"] for r in db.detections(here["id"])] == ["fuck,"]
+    assert [r["text"] for r in db.detections(job)] == ["fuck,", "cock"]

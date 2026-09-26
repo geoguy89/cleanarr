@@ -21,6 +21,9 @@ pytestmark = [pytest.mark.e2e, pytest.mark.ffmpeg]
 SPEECH = ("Well, what the fuck is that? I told you, this is bullshit. "
           "Now pass the salt, please. Oh shit, I forgot the bread.")
 EXPECTED = {"fuck", "bullshit", "shit"}
+# Subtitles for SPEECH, roughly timed as a subtitler would.
+CUES = [(0.0, 2.4, "Well, what the fuck is that?"), (2.5, 5.2, "I told you, this is bullshit."),
+        (5.2, 7.3, "Now pass the salt, please."), (7.4, 9.8, "Oh shit, I forgot the bread.")]
 
 
 @pytest.fixture(scope="module")
@@ -45,7 +48,7 @@ def models(tmp_path_factory) -> Path:
 def test_speech_is_cleaned_end_to_end(home, settings, speech, models, container, tmp_path):
     folder = tmp_path / "tv" / "Show"
     folder.mkdir(parents=True)
-    episode = make_media(folder / f"S01E01.{container}", seconds=11.0, audio=speech)
+    episode = make_media(folder / f"S01E01.{container}", seconds=11.0, audio=speech, cues=CUES)
     before = media.probe(episode)
     original_pcm = samples(episode, 0)
 
@@ -63,6 +66,11 @@ def test_speech_is_cleaned_end_to_end(home, settings, speech, models, container,
     found = {words.normalize(d["text"]) for d in db.detections(job)}
     assert EXPECTED <= found, f"heard {found}"
     assert row["muted"] == len(db.detections(job))
+    # The guardrails recorded their evidence: Whisper's confidence for each
+    # word, and subtitles that agree with what was heard.
+    for d in db.detections(job):
+        assert d["confidence"] is not None and 0 < d["confidence"] <= 1
+        assert d["subtitle_state"] == "agrees", (d["text"], d["subtitle"])
 
     # Marked: every original stream is still there plus the new track.
     after = media.probe(episode)

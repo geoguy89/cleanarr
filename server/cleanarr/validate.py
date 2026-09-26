@@ -149,6 +149,18 @@ def check(payload: dict) -> tuple[dict, dict[str, str]]:
             except TypeError:
                 errors[key] = "must be a list of words"
 
+    if "allow_words_by_title" in payload:
+        value = payload["allow_words_by_title"]
+        if not isinstance(value, dict):
+            errors["allow_words_by_title"] = "must map a show or film to its words"
+        else:
+            try:
+                clean["allow_words_by_title"] = {
+                    str(title).strip(): kept for title, listed in value.items()
+                    if str(title).strip() and (kept := _lines(listed))}
+            except TypeError:
+                errors["allow_words_by_title"] = "each show needs a list of words"
+
     if "categories" in payload:
         try:
             chosen = _lines(payload["categories"])

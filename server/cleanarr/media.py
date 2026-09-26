@@ -13,7 +13,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 FFMPEG = os.environ.get("FFMPEG", "ffmpeg")
@@ -110,6 +110,29 @@ class AudioStream:
         return bool(handler) and handler in KNOWN_TITLES
 
 
+# Subtitle formats that are text, and so can be read. Picture-based ones -
+# Blu-ray PGS, DVD VobSub - would need OCR, and are skipped.
+TEXT_SUBTITLES = {"subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "text"}
+
+
+@dataclass
+class SubtitleStream:
+    sub_index: int      # index among subtitle streams only (the s:N form)
+    codec: str
+    language: str
+    title: str
+    forced: bool
+
+    @property
+    def is_text(self) -> bool:
+        return self.codec in TEXT_SUBTITLES
+
+    @property
+    def is_forced(self) -> bool:
+        """Forced by flag, or by name - plenty of files only say so in the title."""
+        return self.forced or "forced" in self.title.lower()
+
+
 @dataclass
 class Probe:
     path: Path
@@ -117,6 +140,7 @@ class Probe:
     video_streams: int
     audio: list[AudioStream]
     container: str
+    subtitles: list[SubtitleStream] = field(default_factory=list)
 
     @property
     def cleaned_track(self) -> AudioStream | None:
@@ -136,11 +160,21 @@ def probe(path: str | Path) -> Probe:
     data = json.loads(out.stdout or "{}")
     streams = data.get("streams", [])
     audio: list[AudioStream] = []
+    subtitles: list[SubtitleStream] = []
     ai = 0
     for s in streams:
+        tags = {k.lower(): v for k, v in (s.get("tags") or {}).items()}
+        if s.get("codec_type") == "subtitle":
+            subtitles.append(SubtitleStream(
+                sub_index=len(subtitles),
+                codec=str(s.get("codec_name", "")),
+                language=str(tags.get("language", "")),
+                title=str(tags.get("title", "")),
+                forced=bool((s.get("disposition") or {}).get("forced")),
+            ))
+            continue
         if s.get("codec_type") != "audio":
             continue
-        tags = {k.lower(): v for k, v in (s.get("tags") or {}).items()}
         audio.append(AudioStream(
             index=int(s.get("index", 0)),
             audio_index=ai,
@@ -160,6 +194,7 @@ def probe(path: str | Path) -> Probe:
         video_streams=sum(1 for s in streams if s.get("codec_type") == "video"),
         audio=audio,
         container=path.suffix.lower().lstrip("."),
+        subtitles=subtitles,
     )
 
 
@@ -193,11 +228,42 @@ def pick_source_track(p: Probe, prefer_language: str = "eng") -> AudioStream:
     return usable[0]
 
 
-def extract_for_asr(path: Path, track: AudioStream, dest: Path) -> Path:
-    """16 kHz mono WAV, which is what Whisper wants and nothing else does."""
+def pick_subtitles(p: Probe, prefer_language: str = "eng") -> SubtitleStream | None:
+    """The English text subtitles to check the transcript against, if any.
+
+    Forced subtitles only cover the odd line of foreign speech, so they would
+    make every swear look unconfirmed. A track tagged English wins over an
+    untagged one.
+    """
+    def usable(s: SubtitleStream) -> bool:
+        lang = s.language.lower()
+        return (s.is_text and not s.is_forced
+                and (lang.startswith(prefer_language[:2]) or lang in ("", "und")))
+
+    tagged = [s for s in p.subtitles if usable(s) and s.language]
+    untagged = [s for s in p.subtitles if usable(s) and not s.language]
+    return (tagged or untagged or [None])[0]
+
+
+def extract_for_asr(path: Path, track: AudioStream, dest: Path,
+                    subtitles: SubtitleStream | None = None,
+                    subtitle_dest: Path | None = None) -> Path:
+    """16 kHz mono WAV, which is what Whisper wants and nothing else does.
+
+    The subtitles, when asked for, come out of the same pass as SRT: reading a
+    large file off a network share twice to get a few kilobytes of text is not
+    worth it. If they cannot be converted, the audio is extracted on its own.
+    """
     cmd = [FFMPEG, "-nostdin", "-v", "error", "-y", *_threads(), "-i", str(path),
            "-map", f"0:a:{track.audio_index}", "-vn", "-sn", "-dn",
            "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(dest)]
+    if subtitles is not None and subtitle_dest is not None:
+        out = _run([*cmd, "-map", f"0:s:{subtitles.sub_index}", "-c:s", "srt",
+                    str(subtitle_dest)])
+        if out.returncode == 0 and dest.exists():
+            return dest
+        if subtitle_dest.exists():
+            subtitle_dest.unlink()
     out = _run(cmd)
     if out.returncode != 0 or not dest.exists():
         raise MediaError(f"could not extract audio: {out.stderr.strip()[:300]}")

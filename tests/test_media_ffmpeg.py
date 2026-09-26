@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -231,3 +232,35 @@ def test_verify_accepts_a_removal(source):
     assert got.cleaned_track is None
     with pytest.raises(media.MediaError, match="still has a track"):
         media.verify_replacement(cleaned, out, expected_audio=2, expect_cleaned=False)
+
+
+def test_subtitles_are_found_and_extracted_with_the_audio(source, tmp_path):
+    p = media.probe(source)
+    assert len(p.subtitles) == 1 and p.subtitles[0].is_text
+    chosen = media.pick_subtitles(p)
+    assert chosen is not None
+    wav, srt = tmp_path / "a.wav", tmp_path / "s.srt"
+    media.extract_for_asr(source, p.audio[0], wav, subtitles=chosen, subtitle_dest=srt)
+    assert wav.exists()
+    assert "line 1" in srt.read_text()
+
+
+def test_audio_still_comes_out_if_the_subtitles_cannot(source, tmp_path):
+    p = media.probe(source)
+    bogus = media.SubtitleStream(sub_index=7, codec="subrip", language="eng", title="", forced=False)
+    wav, srt = tmp_path / "a.wav", tmp_path / "s.srt"
+    media.extract_for_asr(source, p.audio[0], wav, subtitles=bogus, subtitle_dest=srt)
+    assert wav.exists() and not srt.exists()
+
+
+def test_which_subtitles_are_used():
+    def sub(i, codec="subrip", language="eng", forced=False, title=""):
+        return media.SubtitleStream(i, codec, language, title, forced)
+    p = media.Probe(path=Path("x.mkv"), duration=1, video_streams=1, audio=[], container="mkv")
+    p.subtitles = [sub(0, codec="hdmv_pgs_subtitle"), sub(1, forced=True), sub(2, language="fre"),
+                   sub(3, language=""), sub(4)]
+    assert media.pick_subtitles(p).sub_index == 4           # English, text, not forced
+    p.subtitles = [sub(0, title="English (Forced)"), sub(1, language="")]
+    assert media.pick_subtitles(p).sub_index == 1           # untagged beats forced
+    p.subtitles = [sub(0, codec="dvd_subtitle")]
+    assert media.pick_subtitles(p) is None                  # pictures cannot be read
