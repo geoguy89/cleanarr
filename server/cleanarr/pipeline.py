@@ -93,8 +93,8 @@ class Pipeline:
             return matches, []
 
         # Which words are worth asking about is the household's call, not the
-        # code's: an empty setting means the built-in list, anything else
-        # replaces it. A word taken off the list is simply muted.
+        # code's: the setting is the whole list, and an empty one means nothing
+        # is asked. A word taken off the list is simply muted.
         checked = {w.strip().lower() for w in settings.check_in_context if w.strip()}
         ambiguous = [(i, m) for i, m in enumerate(matches)
                      if judge.is_ambiguous(m.text, checked)]
