@@ -326,7 +326,7 @@ def test_that_was_wrong_puts_the_word_on_a_list_and_undo_takes_it_off(desk):
     page.locator(".detection").first.wait_for()
     row = page.locator(".detection", has_text="Dick,")
     row.locator("summary", has_text="That was wrong").click()
-    row.get_by_role("button", name=re.compile("Never mute")).click()
+    row.get_by_role("button", name=re.compile("Never mute .* anywhere")).click()
     page.locator(".toast", has_text="will never be muted").wait_for()
     assert config.load().allow_words == ["dick"]
     assert "Word lists changed" in page.locator("#sheet-body").inner_text()
@@ -425,7 +425,7 @@ TEXT_PAIRS = [
     ("accent-text", "bg"), ("accent-text", "surface"), ("accent-text", "surface-2"),
     ("on-accent", "accent"), ("on-danger", "danger"),
     ("error", "bg"), ("error", "surface"), ("error", "surface-2"),
-    ("warn", "surface"), ("info", "surface"),
+    ("warn", "surface"), ("warn", "surface-2"), ("info", "surface"),
 ]
 SOFT_PAIRS = [("accent-text", "accent-soft"), ("warn", "warn-soft"),
               ("error", "error-soft"), ("info", "info-soft")]
@@ -470,3 +470,71 @@ def test_a_destructive_question_starts_on_cancel(desk):
     page.keyboard.press("Enter")
     page.locator("#ask").wait_for(state="hidden")
     assert page.locator("#job-list .pick").count() == 5       # nothing cancelled
+
+
+
+def test_never_mute_in_this_show_only_and_undo(desk):
+    page = desk.go("cleaned")
+    page.locator("#view-cleaned .row", has_text=re.compile("The Quiet Harbour.*S01E01")).locator(
+        "[data-action=open-job]").click()
+    row = page.locator(".detection", has_text="Dick,")
+    row.wait_for()
+    row.locator("summary", has_text="That was wrong").click()
+    row.get_by_role("button", name="Never mute “Dick” in The Quiet Harbour").click()
+    page.locator(".toast", has_text="in The Quiet Harbour").wait_for()
+    s = config.load()
+    assert s.allow_words_by_title["The Quiet Harbour"] == ["dick"]
+    assert "dick" not in s.allow_words
+    page.locator("#sheet .toast").get_by_role("button", name="Undo").click()
+    page.locator(".toast", has_text="back off").wait_for()
+    assert "The Quiet Harbour" not in config.load().allow_words_by_title
+
+
+def test_words_worth_a_listen_are_pointed_out(desk):
+    page = desk.go("cleaned")
+    flagged = page.locator("#view-cleaned .row", has_text="worth a listen")
+    assert flagged.count() >= 1
+    page.select_option("#cleaned-filter", "check")
+    page.wait_for_timeout(400)
+    rows = page.locator("#cleaned-list .row")
+    assert rows.count() == flagged.count()
+    assert all("worth a listen" in t for t in rows.all_inner_texts())
+    rows.first.locator("[data-action=open-job]").click()
+    page.locator(".detection.check").first.wait_for()
+    body = page.locator("#sheet-body").inner_text()
+    assert "worth a listen" in body
+    assert "Subtitles say: “Pass me the caulk gun.”" in body
+    assert "Whisper was only 34% sure" in body
+    # Still muted: the evidence never changes that.
+    assert "Muted" in page.locator(".detection.check", has_text="cock").first.inner_text()
+
+
+def test_per_show_exceptions_can_be_edited_in_settings(desk):
+    page = desk.go("settings/words")
+    block = page.locator(".title-exception", has_text="Signal Hill")
+    block.wait_for()
+    assert block.locator(".tag").all_inner_texts() == ["dick"]
+    box = block.locator("input")
+    box.fill("prick")
+    box.press("Enter")
+    page.locator("#settings-save").click()
+    page.locator("#save-bar").wait_for(state="hidden")
+    assert config.load().allow_words_by_title == {"Signal Hill": ["dick", "prick"]}
+    page.locator(".title-exception", has_text="Signal Hill").get_by_role("button", name=re.compile("Remove every")).click()
+    page.locator("#settings-save").click()
+    page.locator("#save-bar").wait_for(state="hidden")
+    assert config.load().allow_words_by_title == {}
+
+
+
+def test_a_menu_at_the_bottom_opens_upwards(desk):
+    page = desk.go("cleaned")
+    page.locator("#view-cleaned .row", has_text=re.compile("The Quiet Harbour.*S01E07")).locator(
+        "[data-action=open-job]").click()
+    last = page.locator(".detection").last
+    last.wait_for()
+    last.evaluate("el => el.scrollIntoView({block: 'end'})")
+    last.locator("summary").click()
+    menu = last.locator(".menu-list")
+    box, area = menu.bounding_box(), page.locator("#sheet-body").bounding_box()
+    assert box["y"] + box["height"] <= area["y"] + area["height"]

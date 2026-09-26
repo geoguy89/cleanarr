@@ -207,6 +207,7 @@ class Demo:
         settings.sonarr = config.ArrConfig(url=self.sonarr.url, api_key="demo-sonarr-key")
         settings.radarr = config.ArrConfig(url=self.radarr.url, api_key="demo-radarr-key")
         settings.check_in_context = ["cock", "christ", "jesus"]
+        settings.allow_words_by_title = {"Signal Hill": ["dick"]}
         for key, value in overrides.items():
             setattr(settings, key, value)
         config.save(settings)
@@ -245,14 +246,20 @@ class Demo:
             return job_id
 
         detections = [
-            words.Match(62.4, 62.8, "shit", "strong"),
-            words.Match(301.2, 301.6, "damn", "mild"),
-            words.Match(302.0, 302.4, "Dick,", "slurs_sexual"),
+            words.Match(62.4, 62.8, "shit", "strong", confidence=0.93,
+                        subtitle="Oh, shit.", subtitle_state="agrees"),
+            words.Match(301.2, 301.6, "damn", "mild", confidence=0.88,
+                        subtitle="Damn it, Ellie.", subtitle_state="agrees"),
+            words.Match(302.0, 302.4, "Dick,", "slurs_sexual", confidence=0.71,
+                        subtitle="Dick, get the ropes!", subtitle_state="agrees"),
             words.Match(730.1, 730.5, "god", "blasphemy", True,
-                        "the Lord's name used as an exclamation (in “oh my god”)"),
-            words.Match(1205.0, 1205.4, "fucking", "strong"),
+                        "the Lord's name used as an exclamation (in “oh my god”)",
+                        confidence=0.9, subtitle="Oh, my God.", subtitle_state="agrees"),
+            words.Match(1205.0, 1205.4, "cock", "slurs_sexual", confidence=0.34,
+                        subtitle="Pass me the caulk gun.", subtitle_state="differs"),
         ]
-        left = [words.Match(880.0, 880.4, "cock", "slurs_sexual", True, "left in: heard as “caulk” here")]
+        left = [words.Match(880.0, 880.4, "cock", "slurs_sexual", True, "left in: heard as “caulk” here",
+                            confidence=0.62, subtitle="More caulk here.", subtitle_state="differs")]
         for n in range(1, 9):
             j = job(0, 1, n, "done", muted=5 + n, size=88_000_000 + n * 1_000_000,
                     message=f"added “Cleaned - English” · {5 + n} muted", ago=86400 * (10 - n))

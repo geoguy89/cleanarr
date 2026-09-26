@@ -257,6 +257,11 @@
           <span class="sr-only">Search what has been cleaned</span>
           <input id="cleaned-search" type="search" placeholder="Search what's been cleaned" autocomplete="off">
         </label>
+        <label class="select-inline"><span class="sr-only">Show</span>
+          <select id="cleaned-filter">
+            <option value="all">Everything cleaned</option>
+            <option value="check">Worth a listen</option>
+          </select></label>
         <span id="cleaned-count-note" class="muted count-note" aria-live="polite"></span>
       </div>
       <div id="cleaned-list"></div>
@@ -391,6 +396,14 @@
                   <div class="tags" data-tags="allow_words" aria-labelledby="l-allow"></div>
                   <p class="hint">A name or word that keeps getting caught. Wins over every list.</p>
                 </div>
+              </div>
+              <div class="field">
+                <span class="label">Exceptions for one show or film</span>
+                <p class="hint">Never silenced in that show or film only, so a character
+                  called Dick keeps his name without the insult going unmuted everywhere
+                  else. Added from a job's details: <em>That was wrong → Never mute … in
+                  this show</em>.</p>
+                <div id="title-exceptions"></div>
               </div>
             </section>
 

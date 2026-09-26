@@ -199,6 +199,11 @@ function posterUrl(item, kind) {
   return `/api/poster?source=${encodeURIComponent(src)}&id=${encodeURIComponent(id)}`;
 }
 
+/* The same rule as subtitles.worth_checking on the server. */
+const LOW_CONFIDENCE = 0.5;
+const worthChecking = (d) => d.subtitle_state === 'differs'
+  || (d.confidence !== null && d.confidence !== undefined && d.confidence < LOW_CONFIDENCE);
+
 const DONE = ['done', 'skipped'];
 const isDone = (status) => DONE.includes(status);
 const STATUS = {
@@ -391,6 +396,18 @@ document.addEventListener('change', async (event) => {
   if (!handler) return;
   try { await handler(el, event); } catch (err) { fail(err); }
 });
+
+/* A menu near the bottom of its scrolling area opens upwards instead of
+   running off the end of it. */
+document.addEventListener('toggle', (event) => {
+  const menu = event.target;
+  if (!menu.matches?.('details.menu') || !menu.open) return;
+  menu.classList.remove('up');
+  const list = menu.querySelector('.menu-list');
+  const area = menu.closest('.sheet-body') || document.documentElement;
+  const bottom = Math.min(area.getBoundingClientRect().bottom, window.innerHeight);
+  if (list.getBoundingClientRect().bottom > bottom - 8) menu.classList.add('up');
+}, true);
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
@@ -1098,14 +1115,32 @@ function renderJob() {
   const rows = detections.map((d) => {
     const word = esc(d.text.replace(/^[^\w']+|[^\w']+$/g, '') || d.text);
     const menu = d.muted
-      ? `<button type="button" data-action="correct" data-id="${d.id}" data-list="never">${icon('x')}Never mute “${word}”</button>
+      ? `<button type="button" data-action="correct" data-id="${d.id}" data-list="never_here">${icon('tv')}Never mute “${word}” in ${esc(job.title)}</button>
+         <button type="button" data-action="correct" data-id="${d.id}" data-list="never">${icon('x')}Never mute “${word}” anywhere</button>
          <button type="button" data-action="correct" data-id="${d.id}" data-list="context">${icon('chat')}Check “${word}” in context</button>
          ${judge ? '' : '<p class="note">No second opinion is set up, so a word checked in context is still muted until one is.</p>'}`
       : `<button type="button" data-action="correct" data-id="${d.id}" data-list="always">${icon('mute')}Always mute “${word}”</button>`;
-    return `<div class="detection${d.fixed ? ' fixed' : ''}">
+    // The evidence a person needs to decide: what Whisper thought of the word,
+    // and what the subtitles say at that moment. Neither changed the muting.
+    const evidence = [];
+    if (d.confidence !== null && d.confidence !== undefined) {
+      const pct = Math.round(d.confidence * 100);
+      evidence.push(d.confidence < LOW_CONFIDENCE
+        ? `<span class="flag">Whisper was only ${pct}% sure of this word</span>`
+        : `Whisper ${pct}% sure`);
+    }
+    if (d.subtitle_state === 'differs') {
+      evidence.push(`<span class="flag">Subtitles say: “${esc(d.subtitle)}”</span>`);
+    } else if (d.subtitle_state === 'agrees') {
+      evidence.push('Subtitles agree');
+    }
+    const check = worthChecking(d);
+    return `<div class="detection${d.fixed ? ' fixed' : ''}${check ? ' check' : ''}">
       <span class="at">${stamp(d.start)}</span>
-      <div><div class="word">${esc(d.text)} ${d.muted ? '<span class="badge done">Muted</span>' : '<span class="badge">Left in</span>'}</div>
+      <div><div class="word">${esc(d.text)} ${d.muted ? '<span class="badge done">Muted</span>' : '<span class="badge">Left in</span>'}${
+          check ? ' <span class="badge queued">Worth a listen</span>' : ''}</div>
         <div class="reason">${esc([categoryName(d.category), d.reason].filter(Boolean).join(' · '))}</div>
+        ${evidence.length ? `<div class="reason">${evidence.join(' · ')}</div>` : ''}
         ${d.fixed ? `<div class="reason" style="color:var(--accent-text)">${esc(d.fixed)}</div>` : ''}</div>
       <details class="menu">
         <summary class="btn ghost sm" aria-label="That was wrong: ${word} at ${stamp(d.start)}">${icon('flag')}That was wrong</summary>
@@ -1113,7 +1148,12 @@ function renderJob() {
       </details></div>`;
   }).join('');
 
-  $('#sheet-body').innerHTML = `${message}${banner}${meta}
+  const toCheck = detections.filter(worthChecking).length;
+  const review = toCheck ? `<div class="alert warn">${icon('alert')}<div class="grow">
+      <strong>${plural(toCheck, 'word')} worth a listen</strong>
+      Whisper was unsure of ${toCheck === 1 ? 'it' : 'them'}, or the subtitles say something else there.
+      ${toCheck === 1 ? 'It is' : 'They are'} still muted; if one is wrong, say so below.</div></div>` : '';
+  $('#sheet-body').innerHTML = `${message}${banner}${review}${meta}
     <h3 style="font-size:1rem">What was found</h3>
     <p class="muted small">Every word matched, where it was, and why. If one is wrong, say so and its word goes on a list for next time.</p>
     ${detections.length ? `<div class="detections">${rows}</div>`
@@ -1121,7 +1161,8 @@ function renderJob() {
         text: job.status === 'failed' ? 'The job stopped before listening finished.' : 'No listed word was heard in this file.' })}`;
 }
 
-const LIST_NAMES = { never: 'Never silence', context: 'Check in context', always: 'Always silence' };
+const LIST_NAMES = { never: 'Never silence', never_here: 'this show’s exceptions',
+  context: 'Check in context', always: 'Always silence' };
 
 ACTIONS.correct = async (el) => {
   const det = state.sheet.detections.find((d) => String(d.id) === el.dataset.id);
@@ -1130,6 +1171,7 @@ ACTIONS.correct = async (el) => {
   state.settings = null;          // the lists changed; reload before the next save
   const note = {
     never: `“${result.word}” will never be muted`,
+    never_here: `“${result.word}” will never be muted in ${result.title}`,
     context: result.judge_configured
       ? `“${result.word}” will be checked in context`
       : `“${result.word}” is on the check list, but without a second opinion it is still muted`,
@@ -1140,12 +1182,13 @@ ACTIONS.correct = async (el) => {
     if (same) d.fixed = `On ${LIST_NAMES[list]} from now on.`;
   });
   if (det) det.fixed = `On ${LIST_NAMES[list]} from now on.`;
+  const scope = list === 'never_here' ? `?title=${encodeURIComponent(result.title)}` : '';
   state.sheet.changed = true;
   renderJob();
   const undo = list === 'always' ? null : {
     label: 'Undo',
     run: async () => {
-      await api(`/api/words/${list}/${encodeURIComponent(result.word)}`, { method: 'DELETE' });
+      await api(`/api/words/${list}/${encodeURIComponent(result.word)}${scope}`, { method: 'DELETE' });
       state.sheet?.detections?.forEach((d) => { if (d.fixed) delete d.fixed; });
       if (state.sheet?.kind === 'job') { state.sheet.changed = false; renderJob(); }
       toast(`Took “${result.word}” back off ${LIST_NAMES[list]}`);
@@ -1452,17 +1495,19 @@ async function loadCleaned() {
     $('#cleaned-list').innerHTML = problem('Could not load what has been cleaned', err.message, 'reload-cleaned', { settings: false });
     return;
   }
-  state.history = data.items;
+  const onlyCheck = $('#cleaned-filter').value === 'check';
+  state.history = onlyCheck ? data.items.filter((j) => j.to_check) : data.items;
   const { stats } = data;
   const unknown = data.items.filter((j) => !j.added_bytes && j.status === 'done').length;
   $('#cleaned-stats').innerHTML = `
     <div class="stat"><b>${stats.cleaned_files}</b><span>${stats.cleaned_files === 1 ? 'file' : 'files'} with a cleaned track</span></div>
     <div class="stat"><b>${stats.words_muted}</b><span>words muted</span></div>
     <div class="stat"><b>${size(stats.added_bytes) || '0 MB'}</b><span>of cleaned audio${unknown ? ' (some older files not counted)' : ''}</span></div>`;
-  $('#cleaned-count-note').textContent = query ? plural(data.items.length, 'match', 'matches') : '';
+  const items = state.history;
+  $('#cleaned-count-note').textContent = query || onlyCheck ? plural(items.length, 'match', 'matches') : '';
   $('#remove-all-zone').hidden = !stats.cleaned_files;
-  $('#cleaned-list').innerHTML = data.items.length
-    ? `<div class="rows">${data.items.map((j, i) => `
+  $('#cleaned-list').innerHTML = items.length
+    ? `<div class="rows">${items.map((j, i) => `
       <div class="row">
         <div class="grow">
           <div class="title">${esc(j.title)} <span class="muted">${esc(j.subtitle || '')}</span></div>
@@ -1470,17 +1515,21 @@ async function loadCleaned() {
             size(j.added_bytes)].filter(Boolean).join(' · '))}</div>
         </div>
         <div class="actions">
+          ${j.to_check ? `<span class="badge queued">${j.to_check} worth a listen</span>` : ''}
           <button type="button" class="btn ghost sm" data-action="open-job" data-id="${j.id}" aria-label="Details for ${esc(j.title)} ${esc(j.subtitle || '')}">Details</button>
           ${j.status === 'done' ? `<button type="button" class="btn ghost sm" data-action="remove-history" data-index="${i}"
             aria-label="Remove the cleaned track from ${esc(j.title)} ${esc(j.subtitle || '')}">Remove</button>` : ''}
         </div></div>`).join('')}</div>`
-    : (query ? empty({ icon: 'search', title: 'Nothing matches', text: `No cleaned file matches “${esc(query)}”.` })
+    : (onlyCheck && !query ? empty({ icon: 'check', title: 'Nothing to check',
+        text: 'No cleaned file has a word Whisper was unsure of, or one its subtitles disagree with.' })
+      : query ? empty({ icon: 'search', title: 'Nothing matches', text: `No cleaned file matches “${esc(query)}”.` })
       : empty({ icon: 'done', title: 'Nothing cleaned yet',
         text: 'Files you clean show up here, with what was muted and what the extra track costs.',
         actions: '<a class="btn sm" href="#/shows">Pick a show</a>' }));
 }
 ACTIONS['reload-cleaned'] = loadCleaned;
 $('#cleaned-search').addEventListener('input', debounce(loadCleaned, 250));
+$('#cleaned-filter').addEventListener('change', loadCleaned);
 
 ACTIONS['remove-history'] = async (el) => {
   const j = state.history[Number(el.dataset.index)];
@@ -1562,8 +1611,8 @@ function tagInput(host, words) {
   };
   draw();
 }
-const tags = (name) => {
-  const host = $(`[data-tags="${name}"]`);
+const tags = (name) => tagWords($(`[data-tags="${name}"]`));
+const tagWords = (host) => {
   const pending = host.querySelector('input')?.value.trim();
   const words = [...(host._words || [])];
   if (pending && !words.some((w) => w.toLowerCase() === pending.toLowerCase())) words.push(pending);
@@ -1588,6 +1637,9 @@ function collect() {
     pad_start: F('pad_start').value, pad_end: F('pad_end').value, fade: F('fade').value,
     track_title: F('track_title').value.trim(),
     check_in_context: tags('check_in_context'),
+    allow_words_by_title: Object.fromEntries($$('[data-title-tags]')
+      .map((host) => [host.dataset.titleTags, tagWords(host)])
+      .filter(([, list]) => list.length)),
     judge_url: F('judge_url').value.trim(), judge_model: F('judge_model').value.trim(),
     judge_threads: Number(F('judge_threads').value),
     media_server: radio('media_server') || 'none',
@@ -1679,6 +1731,7 @@ function fillSettings(s) {
   tagInput($('[data-tags="custom_words"]'), s.custom_words || []);
   tagInput($('[data-tags="allow_words"]'), s.allow_words || []);
   tagInput($('[data-tags="check_in_context"]'), s.check_in_context || []);
+  renderTitleExceptions(s.allow_words_by_title || {});
 
   renderLibrarySource();
   renderMediaServer();
@@ -1698,6 +1751,27 @@ function fillSettings(s) {
   mediaNow();
   loadSetup();
 }
+
+function renderTitleExceptions(byTitle) {
+  const titles = Object.keys(byTitle).sort((a, b) => a.localeCompare(b));
+  const host = $('#title-exceptions');
+  host.innerHTML = titles.length ? titles.map((title, i) => `
+    <div class="title-exception">
+      <div class="title-exception-head"><strong id="l-title-${i}">${esc(title)}</strong>
+        <button type="button" class="btn ghost sm" data-drop-title="${i}"
+          aria-label="Remove every exception for ${esc(title)}">Remove all</button></div>
+      <div class="tags" data-title-tags="${esc(title)}" aria-labelledby="l-title-${i}"></div>
+    </div>`).join('')
+    : '<p class="hint">None yet.</p>';
+  $$('[data-title-tags]', host).forEach((el, i) => tagInput(el, byTitle[titles[i]]));
+}
+$('#title-exceptions').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-drop-title]');
+  if (!btn) return;
+  btn.closest('.title-exception').remove();
+  if (!$('#title-exceptions .title-exception')) $('#title-exceptions').innerHTML = '<p class="hint">None yet.</p>';
+  markDirty();
+});
 
 function renderContextNote() {
   const words = tags('check_in_context').length;

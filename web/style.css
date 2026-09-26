@@ -504,6 +504,9 @@ fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 .tags input { flex: 1 1 120px; min-width: 100px; border: 0; background: transparent; min-height: 30px; padding: 4px 6px; }
 .tags input:focus-visible { outline: none; }
 
+.title-exception { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; margin-top: 8px; }
+.title-exception-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+
 .model-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
 .model { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--radius-sm);
   border: 1px solid var(--line-strong); background: var(--surface-2); flex-wrap: wrap; }
@@ -575,6 +578,7 @@ details.menu .menu-list {
   background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
   box-shadow: var(--shadow); padding: 6px; display: flex; flex-direction: column;
 }
+details.menu.up .menu-list { top: auto; bottom: calc(100% + 4px); }
 details.menu .menu-list button {
   all: unset; display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 6px;
   cursor: pointer; font-size: .9rem;
@@ -589,6 +593,8 @@ details.menu .menu-list .note { font-size: .78rem; color: var(--muted); padding:
 .detection .word { font-weight: 650; }
 .detection .reason { color: var(--muted); font-size: .84rem; overflow-wrap: anywhere; }
 .detection.fixed { border-color: var(--accent); }
+.detection.check { border-color: var(--warn); }
+.detection .flag { color: var(--warn); font-weight: 600; }
 .job-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 4px 0 14px; }
 .job-meta div { background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; }
 .job-meta b { display: block; font-size: 1.05rem; }

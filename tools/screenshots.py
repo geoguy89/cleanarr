@@ -10,6 +10,7 @@ Run: python tools/screenshots.py
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -56,9 +57,12 @@ def main() -> None:
             page.keyboard.press("Escape")
             go("cleaned")
             shot(page, "cleaned")
-            page.locator("#view-cleaned .row", has_text="S01E05").locator("[data-action=open-job]").click()
+            page.locator("#view-cleaned .row", has_text=re.compile("The Quiet Harbour.*S01E07")).locator(
+                "[data-action=open-job]").click()
             page.locator(".detection").first.wait_for()
-            page.locator(".detection", has_text="Dick,").locator("summary").click()
+            flagged = page.locator(".detection", has_text="caulk")
+            flagged.evaluate("el => el.scrollIntoView({block: 'center'})")
+            flagged.locator("summary").click()
             shot(page, "details")
             page.keyboard.press("Escape")
             page.keyboard.press("Escape")
