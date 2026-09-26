@@ -145,12 +145,14 @@ function ask(title, body, choices, { danger = false } = {}) {
   cancel.value = '';
   cancel.textContent = 'Cancel';
   actions.appendChild(cancel);
+  // A destructive question starts on Cancel, so Enter does not destroy.
+  cancel.autofocus = danger;
   choices.forEach((c, i) => {
     const b = document.createElement('button');
     b.className = c.primary ? `btn${danger ? ' danger' : ''}` : 'btn secondary';
     b.value = c.value;
     b.textContent = c.label;
-    if (i === choices.length - 1 || c.primary) b.autofocus = true;
+    if (!danger && (i === choices.length - 1 || c.primary)) b.autofocus = true;
     actions.appendChild(b);
   });
   return new Promise((resolve) => {
@@ -345,7 +347,8 @@ async function route() {
   if (view === 'queue') renderQueue();
   if (view === 'cleaned') loadCleaned();
   if (view === 'settings') {
-    await loadSettings();
+    // A failure is already on the page, with a retry.
+    try { await loadSettings(); } catch (err) { return; }
     if (section) {
       const panel = $(`#s-${section}`);
       if (panel) {

@@ -460,3 +460,13 @@ def test_colour_contrast(browser, demo, scheme):
         if ratio < 3:
             bad.append(f"{fg} edge on {bg}: {ratio:.2f}")
     assert bad == [], f"{scheme}: " + "; ".join(bad)
+
+
+def test_a_destructive_question_starts_on_cancel(desk):
+    page = desk.go("queue")
+    page.get_by_role("button", name="Empty the queue").click()
+    page.locator("#ask").wait_for(state="visible")
+    assert page.evaluate("document.activeElement.textContent") == "Cancel"
+    page.keyboard.press("Enter")
+    page.locator("#ask").wait_for(state="hidden")
+    assert page.locator("#job-list .pick").count() == 5       # nothing cancelled
