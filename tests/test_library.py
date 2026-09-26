@@ -28,12 +28,17 @@ def test_sonarr_episodes_join_files(stub):
 
 def test_arr_errors_are_plain(stub):
     stub.route("GET", "/api/v3/system/status", lambda req: (401, {}))
-    with pytest.raises(arr.ArrError, match="API key was rejected"):
+    with pytest.raises(arr.ArrError, match="Sonarr rejected the API key"):
         arr.Sonarr(stub.url, "bad").test()
-    with pytest.raises(arr.ArrError, match="not configured"):
-        arr.Sonarr("", "").test()
+    with pytest.raises(arr.ArrError, match="Radarr address and API key are not set"):
+        arr.Radarr("", "").test()
     with pytest.raises(arr.ArrError, match="could not reach"):
         arr.Sonarr("http://127.0.0.1:9", "k").test()
+    with pytest.raises(arr.ArrError, match="URL base"):
+        arr.Sonarr(stub.url, "k").series()
+    stub.route("GET", "/api/v3/series", lambda req: (200, b"<html>login</html>"))
+    with pytest.raises(arr.ArrError, match="did not answer like Sonarr"):
+        arr.Sonarr(stub.url, "k").series()
 
 
 def test_radarr_skips_films_with_no_file(stub):

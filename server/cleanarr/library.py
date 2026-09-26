@@ -88,7 +88,8 @@ class PlexLibrary:
         try:
             return resp.json().get("MediaContainer") or {}
         except ValueError as exc:
-            raise LibraryError("Plex did not return JSON") from exc
+            raise LibraryError(f"{self.url} did not answer like Plex - check the "
+                               f"address") from exc
 
     def _sections(self, kind: str) -> list[str]:
         """Section keys of a given type - "show" or "movie"."""
@@ -269,7 +270,8 @@ class JellyfinLibrary:
         try:
             return resp.json()
         except ValueError as exc:
-            raise LibraryError("Jellyfin did not return JSON") from exc
+            raise LibraryError(f"{self.url} did not answer like Jellyfin - check the "
+                               f"address") from exc
 
     def _items(self, **params) -> list[dict]:
         params.setdefault("Recursive", "true")
