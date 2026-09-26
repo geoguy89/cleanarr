@@ -168,3 +168,11 @@ def test_spans_are_sorted_whatever_order_matches_arrive_in():
     hits = Matcher().find([{"word": "shit", "start": 5.0, "end": 5.2},
                            {"word": "fuck", "start": 1.0, "end": 1.2}])
     assert to_spans(hits, 0.0, 0.0) == [(1.0, 1.2), (5.0, 5.2)]
+
+
+def test_never_list_applies_inside_phrases():
+    assert censored("oh my god that is huge", never=frozenset({"god"})) == []
+    assert censored("god damn it", never=frozenset({"god"})) == ["damn"]
+    assert censored("jesus christ", never=frozenset({"Jesus"})) == ["christ"]
+    # The default never list does not touch any phrase word.
+    assert censored("oh my god") == ["god"]
