@@ -58,16 +58,42 @@ def load_model(name: str, device: str = "auto", compute_type: str = "auto",
 
     if device == "auto":
         device = "cuda" if _cuda_available() else "cpu"
+    elif device == "cuda" and not _cuda_available():
+        raise ModelError(
+            "Settings → Listening says to use the NVIDIA GPU, but this container "
+            "can see none. Choose \"Whatever is available\" or CPU, or give the "
+            "container the GPU (see Hardware in the README)")
     if compute_type == "auto":
         compute_type = "float16" if device == "cuda" else "int8"
 
     key = (name, device, compute_type)
     with _lock:
         if _model is None or _model_key != key:
-            _model = WhisperModel(name, device=device, compute_type=compute_type,
-                                  download_root=download_root)
+            try:
+                _model = WhisperModel(name, device=device, compute_type=compute_type,
+                                      download_root=download_root)
+            except RuntimeError:
+                raise          # out of memory: _load_with_patience handles it
+            except ValueError as exc:
+                if "invalid model size" in str(exc).lower():
+                    raise ModelError(
+                        f"“{name}” is not a speech model faster-whisper knows. "
+                        f"Set model: in config.yaml to medium.en") from exc
+                raise ModelError(_load_failed(name, exc)) from exc
+            except Exception as exc:  # noqa: BLE001
+                raise ModelError(_load_failed(name, exc)) from exc
             _model_key = key
     return _model
+
+
+class ModelError(Exception):
+    """The speech model cannot be loaded, for a reason a person can fix."""
+
+
+def _load_failed(name: str, exc: Exception) -> str:
+    return (f"could not load the speech model {name} ({type(exc).__name__}: {exc}). "
+            f"If it is not downloaded yet, this container has to reach "
+            f"huggingface.co - or download it first under Settings → Listening")
 
 
 def _cuda_available() -> bool:
