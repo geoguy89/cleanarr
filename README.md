@@ -283,6 +283,55 @@ re-cleaning skips the slow part.
 
 ---
 
+## Where things are kept
+
+**The cleaned track is inside the media file itself**, as one more audio
+stream next to the original. There is no second copy of the episode and no
+separate audio file: Plex or Jellyfin simply shows one more entry in the
+episode's audio menu. The original audio stream is copied across untouched and
+stays the default.
+
+How a file gets there:
+
+1. The new file is built in a scratch folder **beside the original**, named
+   `cleanarr-` plus a random suffix (e.g. `Show/Season 01/cleanarr-x1y2z3/`).
+   It sits on the same disk so the finished file can be moved into place
+   without copying. That needs free space of about the file's size plus
+   512 MB; a job that does not have it stops before starting.
+2. Once it verifies, the new file **replaces the original at the same path**,
+   keeping its owner, permissions and modification time, so the library does
+   not think the episode is new.
+3. The scratch folder is deleted, whether the job worked or not. One left by a
+   container killed mid-job is swept up the next time a job runs in that
+   folder, once it is six hours old.
+
+The file grows by the size of the cleaned track, about 90 MB for a 25-minute
+episode; the Cleaned page shows the running total. **Remove** rewrites the file
+without that track and gives the space back.
+
+**Keep a copy of each original** (Settings → Advanced, off by default) also
+leaves `<file name>.cleanarr-backup` beside each file, doubling what it takes
+on disk. The copy is refreshed each time the file is changed, so after a second
+clean or a removal it holds the file as it was just before that change.
+
+Everything else lives in `/config`:
+
+| Path | What |
+|---|---|
+| `/config/config.yaml` | Settings, including API keys and the login's password hash |
+| `/config/cleanarr.sqlite` | Job history, every detection, shows set to clean new episodes, second-opinion answers |
+| `/config/cache/models/` | The speech model, about 1.5 GB |
+| `/config/cache/*.json` | Transcripts, so a re-clean after a word-list change skips listening |
+| `/config/cache/posters/` | Artwork, fetched once |
+| `/config/cache/huggingface/` | Hugging Face's own download cache |
+
+Deleting `/config/cache` is safe: the model downloads again and files are
+listened to again. Deleting `cleanarr.sqlite` loses the history and the list
+of shows cleaning new episodes; the tracks in your files stay, and ones written
+by this version are still recognised as Cleanarr's from the file alone.
+
+---
+
 ## The second opinion
 
 **Optional, off by default, and most people should leave it off.**

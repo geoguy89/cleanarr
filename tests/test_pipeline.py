@@ -200,3 +200,28 @@ def test_listening_settings_reach_the_model(home, settings, fake_asr, episode):
     kw = fake_asr[-1]
     assert (kw["device"], kw["compute_type"], kw["model_name"]) == ("cpu", "int8", "small.en")
     assert kw["remote_key"] == "sk"
+
+
+def test_scratch_folders_left_by_a_killed_run_are_swept(tmp_path):
+    import os
+    import time
+    old = tmp_path / "cleanarr-old"
+    fresh = tmp_path / "cleanarr-fresh"
+    mine = tmp_path / "Season 01"
+    for folder in (old, fresh, mine):
+        folder.mkdir()
+    stale = time.time() - 7 * 3600
+    os.utime(old, (stale, stale))
+    pipeline._sweep_stale_work(tmp_path)
+    assert not old.exists()
+    assert fresh.exists() and mine.exists()
+
+
+def test_not_enough_space_stops_before_anything_is_written(home, settings, fake_asr,
+                                                             episode, monkeypatch):
+    monkeypatch.setattr(media, "free_space", lambda path: 1024)
+    job = run(episode, settings, home / "cache")
+    assert job["status"] == "failed" and "not enough free space" in job["message"]
+    assert not list(episode.parent.glob("cleanarr-*"))
+    assert media.probe(episode).cleaned_track is None
+    assert fake_asr == []                       # it did not even listen

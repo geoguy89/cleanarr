@@ -112,7 +112,7 @@ About **2.5 minutes** for a 25-minute episode on an RTX 2070 Super, never above 
 ## Also worth knowing
 
 - **Shows can clean themselves** — mark one and episodes downloaded from then on are cleaned as they arrive.
-- **Nothing is written until it verifies.** A failed job leaves the file exactly as it was.
+- **The cleaned track lives inside the media file**, as an extra audio stream, not as a copy of the episode. The file is built in a scratch folder beside the original and swapped in only after it verifies; a failed job leaves the file exactly as it was. Settings, history, the speech model and transcripts live in `/config`.
 - **Nothing is ever written to your library.** It is only asked what exists.
 - **A wrong call is one click to fix.** Each job lists every word it muted; "That was wrong" puts the word on a list for next time.
 - **Optional login**, off until you set one.
