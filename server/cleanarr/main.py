@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import arr, auth, config, db, judge, library, media, words
+from . import arr, auth, config, db, judge, library, media, validate, words
 from .worker import Worker
 
 WEB_DIR = Path(os.environ.get("CLEANARR_WEB", "/app/web"))
@@ -203,6 +203,9 @@ MODEL_SIZES = {"medium.en": "1.5 GB"}
 
 # name -> total bytes expected, 0 if we could not find out
 _downloading: dict[str, int] = {}
+# name -> why the last download failed, so the page can say so rather than
+# the Download button quietly coming back as if nothing had happened.
+_download_errors: dict[str, str] = {}
 
 
 def _repo(name: str) -> str:
@@ -283,11 +286,20 @@ def hardware():
 def list_models():
     settings = config.load()
     offered = [BUILTIN_MODEL]
+    # A model set by hand in config.yaml is the one that will be used, so it
+    # is listed as well rather than leaving medium.en to look like the answer.
+    if settings.model and settings.model != BUILTIN_MODEL:
+        offered.append(settings.model)
     return {
         "selected": settings.model,
         "folder": str(CACHE_DIR / "models"),
         "items": [_model_row(name) for name in offered],
     }
+
+
+def _pull_model(name: str, folder: str) -> None:
+    from faster_whisper.utils import download_model
+    download_model(name, cache_dir=folder)
 
 
 def _model_row(name: str) -> dict:
@@ -300,6 +312,7 @@ def _model_row(name: str) -> dict:
         "ready": _is_complete(name),
         "downloading": name in _downloading,
         "total": total or 0,
+        "error": _download_errors.get(name, ""),
     }
     # Only claim a percentage when both numbers are real. A bar that invents
     # its own progress is worse than a spinner.
@@ -320,11 +333,14 @@ def download_model(name: str):
         # Asked before the download starts so the bar has a denominator from
         # the first poll rather than jumping into existence halfway through.
         _downloading[name] = _expected_bytes(name)
+        _download_errors.pop(name, None)
         try:
-            from faster_whisper.utils import download_model as pull
-            pull(name, cache_dir=str(CACHE_DIR / "models"))
+            _pull_model(name, str(CACHE_DIR / "models"))
             print(f"[cleanarr] downloaded speech model {name}", flush=True)
         except Exception as exc:  # noqa: BLE001
+            _download_errors[name] = (
+                f"could not download {name}: {exc}. The container needs to reach "
+                f"huggingface.co")
             print(f"[cleanarr] could not download {name}: {exc}", flush=True)
         finally:
             _downloading.pop(name, None)
@@ -337,23 +353,15 @@ def download_model(name: str):
 #  The second opinion's model
 # ---------------------------------------------------------------------------
 
-@app.get("/api/asr/remote-models")
-def remote_models(url: str = ""):
-    """What the Whisper server offers, for the dropdown.
-
-    Model names are the server's own - one instance calls it
-    "Systran/faster-whisper-medium.en", another "whisper-1", another something
-    it made up. Asking beats guessing. A server with no /v1/models is not a
-    fault; the field stays free text in that case.
-    """
-    settings = config.load()
-    base = (url or settings.asr_url).strip().rstrip("/")
+def _remote_models(url: str, api_key: str) -> dict:
+    base = url.strip().rstrip("/")
     if not base:
         raise HTTPException(400, "no Whisper server address set")
     if base.endswith("/v1"):
         base = base[:-3]
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
-        resp = httpx.get(f"{base}/v1/models", timeout=15.0)
+        resp = httpx.get(f"{base}/v1/models", headers=headers, timeout=15.0)
         resp.raise_for_status()
         body = resp.json()
     except (httpx.HTTPError, ValueError) as exc:
@@ -364,6 +372,28 @@ def remote_models(url: str = ""):
     names = [str(r.get("id") or r.get("name") or "") for r in (rows or [])
              if isinstance(r, dict)]
     return {"ok": True, "models": sorted(n for n in names if n)}
+
+
+@app.get("/api/asr/remote-models")
+def remote_models(url: str = ""):
+    """What the Whisper server offers, for the dropdown.
+
+    Model names are the server's own - one instance calls it
+    "Systran/faster-whisper-medium.en", another "whisper-1", another something
+    it made up. Asking beats guessing. A server with no /v1/models is not a
+    fault; the field stays free text in that case.
+    """
+    settings = config.load()
+    return _remote_models(url or settings.asr_url, settings.asr_api_key)
+
+
+@app.post("/api/asr/remote-models")
+def remote_models_typed(payload: dict | None = None):
+    """The same, with the address and key from the form."""
+    settings = config.load()
+    payload = payload or {}
+    return _remote_models(str(payload.get("url") or settings.asr_url),
+                          _typed_secret(payload.get("api_key"), settings.asr_api_key))
 
 
 @app.post("/api/asr/test")
@@ -377,31 +407,81 @@ def test_remote_asr(payload: dict | None = None):
     """
     from . import asr as _asr
     settings = config.load()
-    url = str((payload or {}).get("url") or settings.asr_url)
-    model = str((payload or {}).get("model") or settings.asr_remote_model)
+    payload = payload or {}
+    url, problem = validate.url(payload.get("url") or settings.asr_url,
+                                "Whisper server address")
     if not url:
         raise HTTPException(400, "no Whisper server address set")
-    return _asr.probe_remote(url, model, settings.asr_api_key)
+    if problem:
+        return {"ok": False, "error": problem}
+    model = str(payload.get("model") or settings.asr_remote_model)
+    key = _typed_secret(payload.get("api_key"), settings.asr_api_key)
+    return _asr.probe_remote(url, model, key)
+
+
+def _has_model(names: list[str], wanted: str) -> bool:
+    """Whether a model list includes the one asked for.
+
+    Ollama lists "qwen3.5:9b"; a name asked for without a tag means ":latest".
+    A different tag of the same model is a different model - the 4b is not
+    the 9b.
+    """
+    if not wanted:
+        return False
+    want = wanted if ":" in wanted else f"{wanted}:latest"
+    return any(n == wanted or n == want for n in names)
+
+
+def _judge_check(url: str, model: str) -> dict:
+    """Is the second opinion reachable, and does it have the model?
+
+    Ollama answers /api/tags; an OpenAI-compatible server answers /v1/models
+    instead. Either is fine - judge.py speaks both.
+    """
+    base, problem = validate.url(url, "Second-opinion address")
+    if not base:
+        return {"reachable": False, "models": [], "has_selected": False,
+                "error": "no address set"}
+    if problem:
+        return {"reachable": False, "models": [], "has_selected": False,
+                "error": problem}
+    errors = []
+    try:
+        resp = httpx.get(f"{base}/api/tags", timeout=10.0)
+        resp.raise_for_status()
+        names = [m.get("name", "") for m in (resp.json().get("models") or [])]
+        return {"reachable": True, "api": "ollama", "models": names,
+                "has_selected": _has_model(names, model), "selected": model,
+                "can_pull": True}
+    except (httpx.HTTPError, ValueError, AttributeError) as exc:
+        errors.append(str(exc))
+    listed = _remote_models(base, "")
+    if listed["ok"]:
+        names = listed["models"]
+        return {"reachable": True, "api": "openai", "models": names,
+                "has_selected": model in names, "selected": model, "can_pull": False}
+    return {"reachable": False, "models": [], "has_selected": False,
+            "error": errors[0] if errors else listed.get("error", "no answer")}
 
 
 @app.get("/api/judge/models")
 def judge_models():
-    """What the Ollama instance already has, so the page can say."""
+    """What the saved second-opinion server already has."""
     settings = config.load()
     if not settings.judge_url:
         return {"reachable": False, "models": [], "has_selected": False}
-    try:
-        resp = httpx.get(f"{settings.judge_url.rstrip('/')}/api/tags", timeout=10.0)
-        resp.raise_for_status()
-        names = [m.get("name", "") for m in (resp.json().get("models") or [])]
-    except (httpx.HTTPError, ValueError) as exc:
-        return {"reachable": False, "error": str(exc), "models": [],
-                "has_selected": False}
-    # Ollama reports "qwen3.5:9b"; a model asked for without a tag is ":latest".
-    wanted = settings.judge_model
-    has = any(n == wanted or n.split(":")[0] == wanted.split(":")[0] for n in names)
-    return {"reachable": True, "models": names, "has_selected": has,
-            "selected": wanted}
+    return _judge_check(settings.judge_url, settings.judge_model)
+
+
+@app.post("/api/judge/check")
+def judge_check(payload: dict | None = None):
+    """The same, for the address and model typed into the form."""
+    settings = config.load()
+    payload = payload or {}
+    url = payload.get("url")
+    model = payload.get("model")
+    return _judge_check(settings.judge_url if url is None else str(url),
+                        str(model or settings.judge_model))
 
 
 @app.post("/api/judge/pull")
@@ -421,16 +501,20 @@ def judge_pull():
 
     def fetch() -> None:
         _downloading["__ollama__"] = settings.judge_model
+        _download_errors.pop("__ollama__", None)
         try:
             # Streamed, so Ollama does not time the request out on a long
             # download; the body is drained and discarded.
             with httpx.stream("POST", f"{settings.judge_url.rstrip('/')}/api/pull",
                               json={"model": settings.judge_model},
                               timeout=None) as resp:
-                for _ in resp.iter_lines():
-                    pass
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if '"error"' in line:
+                        _download_errors["__ollama__"] = line[:300]
             print(f"[cleanarr] Ollama pulled {settings.judge_model}", flush=True)
         except Exception as exc:  # noqa: BLE001
+            _download_errors["__ollama__"] = str(exc)
             print(f"[cleanarr] Ollama pull failed: {exc}", flush=True)
         finally:
             _downloading.pop("__ollama__", None)
@@ -441,7 +525,8 @@ def judge_pull():
 
 @app.get("/api/judge/pull")
 def judge_pull_state():
-    return {"downloading": _downloading.get("__ollama__", "")}
+    return {"downloading": _downloading.get("__ollama__", ""),
+            "error": _download_errors.get("__ollama__", "")}
 
 
 # ---------------------------------------------------------------------------
@@ -458,8 +543,17 @@ def get_settings():
     return data
 
 
+def _refuse(errors: dict[str, str]) -> JSONResponse:
+    """A 400 naming every field that was wrong, with the first as `detail`."""
+    return JSONResponse({"detail": next(iter(errors.values())), "errors": errors},
+                        status_code=400)
+
+
 @app.put("/api/settings")
 def put_settings(payload: dict):
+    payload, errors = validate.check(payload)
+    if errors:
+        return _refuse(errors)
     settings = config.load()
     old_title = settings.track_title
     for section in ("sonarr", "radarr"):
@@ -495,6 +589,12 @@ def put_settings(payload: dict):
     # adding a second, and removing the cleaned track still finds it.
     settings.track_title = (str(settings.track_title or "").strip()
                             or media.DEFAULT_CLEAN_TITLE)
+    # Choices that only make sense together. Checked on the merged result, so
+    # saving one section at a time still works.
+    if settings.asr_backend == "remote" and not settings.asr_url:
+        return _refuse({"asr_url": "Using your own Whisper server needs its address"})
+    if settings.judge_url and not settings.judge_model:
+        return _refuse({"judge_model": "Name the model the second opinion should use"})
     if old_title and settings.track_title != old_title:
         known = [t for t in settings.known_track_titles
                  if t and t != settings.track_title]
@@ -505,24 +605,47 @@ def put_settings(payload: dict):
     return config.load().public()
 
 
+def _typed_secret(typed, saved: str) -> str:
+    """What the form holds for a secret: the masked value means "the saved one"."""
+    text = str(typed or "").strip()
+    return saved if not text or set(text) == {"*"} else text
+
+
 @app.post("/api/settings/test/{service}")
-def test_service(service: str):
+def test_service(service: str, payload: dict | None = None):
+    """Try a connection with what is in the form, saved or not.
+
+    Testing the saved values instead meant typing an address, pressing Test and
+    being told about the old one - which is the moment somebody is most likely
+    to be setting it up for the first time.
+    """
     settings = config.load()
+    payload = payload or {}
+    saved = {
+        "sonarr": (settings.sonarr.url, settings.sonarr.api_key),
+        "radarr": (settings.radarr.url, settings.radarr.api_key),
+        "plex": (settings.plex_url, settings.plex_token),
+        "jellyfin": (settings.jellyfin_url, settings.jellyfin_api_key),
+    }
+    if service not in saved:
+        raise HTTPException(404, "no such service")
+    saved_url, saved_key = saved[service]
+    typed_url = payload.get("url")
+    address, problem = validate.url(saved_url if typed_url is None else typed_url,
+                                    f"{service.title()} address")
+    if problem:
+        return {"ok": False, "error": problem}
+    key = _typed_secret(payload.get("api_key"), saved_key)
     try:
         if service == "sonarr":
-            return arr.Sonarr(settings.sonarr.url, settings.sonarr.api_key).test()
+            return arr.Sonarr(address, key).test()
         if service == "radarr":
-            return arr.Radarr(settings.radarr.url, settings.radarr.api_key).test()
+            return arr.Radarr(address, key).test()
         if service == "plex":
-            return library.PlexLibrary(settings.plex_url, settings.plex_token).test()
-        if service == "jellyfin":
-            return library.JellyfinLibrary(settings.jellyfin_url,
-                                           settings.jellyfin_api_key).test()
-    except library.LibraryError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=200)
-    except arr.ArrError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=200)
-    raise HTTPException(404, "no such service")
+            return library.PlexLibrary(address, key).test()
+        return library.JellyfinLibrary(address, key).test()
+    except (library.LibraryError, arr.ArrError) as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 # ---------------------------------------------------------------------------
@@ -582,13 +705,16 @@ def series():
     # Mark up each show from the job history, matching on the show's folder.
     # One pass over the jobs beats one query per show for a library this size.
     known = db.job_paths()
+    by_title = db.job_titles()
     watched = {row["source_id"] for row in db.monitors("sonarr")}
     for show in items:
-        # Plex does not report a show's folder, so fall back to matching the
-        # episodes this show actually has once they have been listed. Until
-        # then a show simply shows no counts rather than wrong ones.
+        # Plex does not report a show's folder, so its jobs are matched on the
+        # show's name instead - which is what every episode job is titled.
         folder = (show.get("path") or "").rstrip("/") + "/"
-        statuses = [s for p, s in known.items() if folder != "/" and p.startswith(folder)]
+        if folder != "/":
+            statuses = [s for p, s in known.items() if p.startswith(folder)]
+        else:
+            statuses = [s for _p, s in by_title.get(show.get("title", ""), [])]
         show["cleaned"] = sum(1 for s in statuses if s in ("done", "skipped"))
         show["pending"] = sum(1 for s in statuses if s in ("queued", "running"))
         show["failed"] = sum(1 for s in statuses if s == "failed")
@@ -976,6 +1102,138 @@ def path_report():
         out.append(row)
     return {"roots": out, "visible": visible,
             "source": getattr(settings, "library_source", "arr")}
+
+
+# ---------------------------------------------------------------------------
+#  First run
+#
+#  What is left to set up, in the order it has to happen, for the checklist on
+#  Home. Each item says what is wrong in words and which Settings section fixes
+#  it, so a new install is never a blank page with no hint of why.
+# ---------------------------------------------------------------------------
+
+def _library_configured(settings) -> tuple[bool, str]:
+    source = settings.library_source
+    if source == "plex":
+        return bool(settings.plex_url and settings.plex_token), "Plex address and token"
+    if source == "jellyfin":
+        return (bool(settings.jellyfin_url and settings.jellyfin_api_key),
+                "Jellyfin address and API key")
+    has_any = (settings.sonarr.url and settings.sonarr.api_key) or (
+        settings.radarr.url and settings.radarr.api_key)
+    return bool(has_any), "Sonarr or Radarr address and API key"
+
+
+def _check_library(settings) -> dict:
+    item = {"key": "library", "title": "Connect your library", "section": "library"}
+    configured, needs = _library_configured(settings)
+    if not configured:
+        return {**item, "state": "todo", "detail": f"Add the {needs}."}
+    try:
+        if settings.library_source == "plex":
+            result = library.PlexLibrary(settings.plex_url, settings.plex_token).test()
+        elif settings.library_source == "jellyfin":
+            result = library.JellyfinLibrary(settings.jellyfin_url,
+                                             settings.jellyfin_api_key).test()
+        else:
+            answered = []
+            for name, cfg, client in (("Sonarr", settings.sonarr, arr.Sonarr),
+                                      ("Radarr", settings.radarr, arr.Radarr)):
+                if cfg.url and cfg.api_key:
+                    client(cfg.url, cfg.api_key).test()
+                    answered.append(name)
+            missing = [n for n in ("Sonarr", "Radarr") if n not in answered]
+            detail = f"{' and '.join(answered)} answered."
+            if missing:
+                detail += (" Radarr is not set, so films will not show."
+                           if missing == ["Radarr"]
+                           else " Sonarr is not set, so shows will not show.")
+            return {**item, "state": "ok", "detail": detail}
+    except (arr.ArrError, library.LibraryError) as exc:
+        return {**item, "state": "problem", "detail": str(exc)}
+    return {**item, "state": "ok", "detail": f"{result['app']} answered."}
+
+
+def _check_paths(settings, library_ok: bool) -> dict:
+    item = {"key": "paths", "title": "Make the media reachable", "section": "library"}
+    if not library_ok:
+        return {**item, "state": "todo",
+                "detail": "Checked once the library is connected."}
+    try:
+        roots = library.build(settings).roots()
+    except Exception as exc:  # noqa: BLE001
+        return {**item, "state": "problem", "detail": str(exc)}
+    if not roots:
+        return {**item, "state": "todo",
+                "detail": "The library reported no folders yet."}
+    bad = [r["path"] for r in roots if not Path(r["path"]).is_dir()]
+    if bad:
+        return {**item, "state": "problem",
+                "detail": f"{len(bad)} of {len(roots)} library folders cannot be "
+                          f"opened from this container, starting with {bad[0]}. "
+                          f"Mount them at the same paths."}
+    return {**item, "state": "ok",
+            "detail": f"All {len(roots)} library folders open from here."}
+
+
+def _check_listening(settings) -> dict:
+    from . import asr as _asr
+    item = {"key": "listening", "title": "Get the speech model", "section": "listening"}
+    if settings.asr_backend == "remote":
+        if not settings.asr_url:
+            return {**item, "state": "todo", "detail": "Add your Whisper server's address."}
+        return {**item, "state": "ok",
+                "detail": "Using your own Whisper server. Test it under Listening."}
+    if settings.device == "cuda" and not _asr._cuda_available():
+        return {**item, "state": "problem",
+                "detail": "Set to the NVIDIA GPU, but this container can see none."}
+    name = settings.model or BUILTIN_MODEL
+    if name in _downloading:
+        row = _model_row(name)
+        pct = f" {row['percent']:.0f}%" if "percent" in row else ""
+        return {**item, "state": "todo", "detail": f"Downloading{pct}…"}
+    if _download_errors.get(name):
+        return {**item, "state": "problem", "detail": _download_errors[name]}
+    if not _is_complete(name):
+        return {**item, "state": "todo",
+                "detail": f"Download {name} now, rather than during the first clean."}
+    return {**item, "state": "ok", "detail": f"{name} is downloaded."}
+
+
+def _check_first_clean() -> dict:
+    item = {"key": "first_clean", "title": "Clean one episode", "section": "shows"}
+    counts = db.count_by_status()
+    if counts.get("done") or counts.get("skipped"):
+        return {**item, "state": "ok", "detail": "Done at least once."}
+    if counts.get("queued") or counts.get("running"):
+        return {**item, "state": "todo", "detail": "One is in the queue."}
+    return {**item, "state": "todo",
+            "detail": "Try one episode before turning it loose on a season."}
+
+
+@app.get("/api/setup")
+def setup_status():
+    """The first-run checklist: required steps, then optional ones."""
+    settings = config.load()
+    lib = _check_library(settings)
+    required = [lib, _check_paths(settings, lib["state"] == "ok"),
+                _check_listening(settings), _check_first_clean()]
+    optional = [{
+        "key": "login", "title": "Set a password", "section": "security",
+        "state": "ok" if settings.auth_user else "info",
+        "detail": ("Login is on." if settings.auth_user else
+                   "Anyone who can reach this address can use it."),
+    }]
+    checked = [w for w in settings.check_in_context if w.strip()]
+    if checked and not settings.judge_url:
+        optional.append({
+            "key": "judge", "title": "Second opinion", "section": "judge",
+            "state": "info",
+            "detail": f"{len(checked)} words are on the check-in-context list, but no "
+                      f"second opinion is set, so they are muted outright.",
+        })
+    return {"required": required, "optional": optional,
+            "done": all(i["state"] == "ok" for i in required)}
 
 
 @app.get("/api/file")

@@ -485,6 +485,21 @@ def job_paths() -> dict[str, str]:
     return {r["path"]: r["status"] for r in rows}
 
 
+def job_titles() -> dict[str, list[tuple[str, str]]]:
+    """{show title: [(path, latest status)]}, for a library that reports no
+    show folder to match on."""
+    rows = connect().execute(
+        "SELECT title, path, status FROM job WHERE kind='episode' "
+        "AND COALESCE(action,'clean')='clean' ORDER BY id").fetchall()
+    latest: dict[str, tuple[str, str]] = {}
+    for r in rows:
+        latest[r["path"]] = (r["title"], r["status"])
+    out: dict[str, list[tuple[str, str]]] = {}
+    for path, (title, status) in latest.items():
+        out.setdefault(title, []).append((path, status))
+    return out
+
+
 def judge_lookup(key: str) -> tuple[str, str] | None:
     row = connect().execute(
         "SELECT verdict, instead FROM judge_cache WHERE key=?", (key,)).fetchone()

@@ -58,7 +58,8 @@ def test_categories_and_policies_are_offered(client, settings):
 
 def test_service_tests_report_failures_as_data(client, settings):
     r = client.post("/api/settings/test/sonarr")
-    assert r.status_code == 200 and r.json() == {"ok": False, "error": "not configured"}
+    assert r.status_code == 200 and r.json() == {
+        "ok": False, "error": "Sonarr address and API key are not set"}
     r = client.post("/api/settings/test/plex")
     assert r.json()["ok"] is False
     assert client.post("/api/settings/test/nothing").status_code == 404
@@ -188,3 +189,83 @@ def test_static_page_is_served(client):
     assert r.status_code == 200 and "<html" in r.text.lower()
     assert r.headers["cache-control"] == "no-cache"
     assert client.get("/static/sw.js").headers["service-worker-allowed"] == "/"
+
+
+# ---------------------------------------------------------------- test buttons
+
+def test_test_button_uses_what_was_typed(client, settings, stub):
+    stub.route("GET", "/api/v3/system/status", lambda req: (
+        (200, {"appName": "Sonarr", "version": "4.0"})
+        if req.headers.get("x-api-key") == "typed" else (401, {})))
+    r = client.post("/api/settings/test/sonarr", json={"url": stub.url, "api_key": "typed"})
+    assert r.json() == {"ok": True, "app": "Sonarr", "version": "4.0"}
+    assert config.load().sonarr.url == ""                 # testing saves nothing
+    bad = client.post("/api/settings/test/sonarr", json={"url": "sonarr:8989"})
+    assert "http://" in bad.json()["error"]
+
+
+def test_masked_key_in_the_form_means_the_saved_one(client, settings, stub):
+    stub.route("GET", "/System/Info", lambda req: (
+        (200, {"ServerName": "jf", "Version": "10"})
+        if 'Token="saved"' in req.headers.get("authorization", "") else (401, {})))
+    settings.jellyfin_api_key = "saved"
+    config.save(settings)
+    r = client.post("/api/settings/test/jellyfin", json={"url": stub.url,
+                                                         "api_key": "********"})
+    assert r.json()["ok"] is True
+
+
+@pytest.mark.parametrize("names, wanted, has", [
+    (["qwen3.5:9b"], "qwen3.5:9b", True),
+    (["qwen3.5:4b"], "qwen3.5:9b", False),
+    (["llama3:latest"], "llama3", True),
+    (["llama3:8b"], "llama3", False),
+    ([], "x", False),
+])
+def test_has_model(names, wanted, has):
+    assert main._has_model(names, wanted) is has
+
+
+def test_judge_check_ollama_and_openai(client, settings, stub):
+    stub.route("GET", "/api/tags", {"models": [{"name": "qwen3.5:9b"}]})
+    r = client.post("/api/judge/check", json={"url": stub.url, "model": "qwen3.5:9b"}).json()
+    assert r["reachable"] and r["api"] == "ollama" and r["has_selected"] and r["can_pull"]
+    stub.routes.pop(("GET", "/api/tags"))
+    stub.route("GET", "/v1/models", {"data": [{"id": "gpt-oss"}]})
+    r = client.post("/api/judge/check", json={"url": stub.url, "model": "gpt-oss"}).json()
+    assert r["reachable"] and r["api"] == "openai" and r["has_selected"]
+    assert not r["can_pull"]
+    r = client.post("/api/judge/check", json={"url": "http://127.0.0.1:9", "model": "x"}).json()
+    assert r["reachable"] is False and r["error"]
+
+
+def test_remote_models_send_the_key(client, settings, stub):
+    stub.route("GET", "/v1/models", lambda req: (
+        (200, {"data": [{"id": "b"}, {"id": "a"}]})
+        if req.headers.get("authorization") == "Bearer sk" else (401, {})))
+    r = client.post("/api/asr/remote-models", json={"url": stub.url + "/v1", "api_key": "sk"})
+    assert r.json() == {"ok": True, "models": ["a", "b"]}
+
+
+def test_asr_test_uses_the_typed_key(client, settings, stub):
+    stub.route("POST", "/v1/audio/transcriptions", lambda req: (
+        (200, {"words": [{"word": "x", "start": 0, "end": 0.1}]})
+        if req.headers.get("authorization") == "Bearer typed" else (401, {})))
+    r = client.post("/api/asr/test", json={"url": stub.url, "model": "m", "api_key": "typed"})
+    assert r.json()["ok"] is True
+
+
+def test_plex_shows_count_cleaned_episodes_by_name(client, settings, stub):
+    stub.route("GET", "/library/sections", {"MediaContainer": {"Directory": [
+        {"key": "1", "type": "show", "title": "TV"}]}})
+    stub.route("GET", "/library/sections/1/all", {"MediaContainer": {
+        "totalSize": 1, "Metadata": [{"ratingKey": "9", "title": "Show", "leafCount": 3}]}})
+    settings.library_source = "plex"
+    settings.plex_url, settings.plex_token = stub.url, "t"
+    config.save(settings)
+    a = db.enqueue(kind="episode", title="Show", path="/tv/show/1.mkv")
+    db.update(a, status="done")
+    db.enqueue(kind="episode", title="Show", path="/tv/show/2.mkv")
+    db.enqueue(kind="episode", title="Other", path="/tv/other/1.mkv")
+    show = client.get("/api/series").json()["items"][0]
+    assert (show["cleaned"], show["pending"]) == (1, 1)
