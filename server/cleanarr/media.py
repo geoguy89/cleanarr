@@ -473,8 +473,13 @@ def check_interleave(path: Path, cleaned_index: int, duration: float,
 
 
 def verify_replacement(original: Probe, candidate: Path,
-                       expected_audio: int | None = None) -> Probe:
-    """Refuse a file that lost anything on the way through."""
+                       expected_audio: int | None = None,
+                       expect_cleaned: bool = True) -> Probe:
+    """Refuse a file that lost anything on the way through.
+
+    `expect_cleaned` is False for a removal, where the new file is meant to
+    have no track of ours.
+    """
     got = probe(candidate)
     expected = len(original.audio) + 1 if expected_audio is None else expected_audio
     if got.video_streams != original.video_streams:
@@ -484,14 +489,16 @@ def verify_replacement(original: Probe, candidate: Path,
     if len(got.audio) != expected:
         raise MediaError(
             f"the new file has {len(got.audio)} audio tracks, expected {expected}")
-    if got.cleaned_track is None:
+    if expect_cleaned and got.cleaned_track is None:
         raise MediaError(
             f"the new file has no track named “{CLEAN_TITLE}”")
+    if not expect_cleaned and any(a.written_here for a in got.audio):
+        raise MediaError("the new file still has a track this install wrote")
     if original.duration and abs(got.duration - original.duration) > DURATION_TOLERANCE:
         raise MediaError(
             f"the new file is {got.duration:.1f}s long, the original was "
             f"{original.duration:.1f}s")
-    cleaned = got.cleaned_track
+    cleaned = got.cleaned_track if expect_cleaned else None
     if cleaned is not None and cleaned.audio_index != 0:
         check_interleave(candidate, cleaned.audio_index, got.duration)
     return got

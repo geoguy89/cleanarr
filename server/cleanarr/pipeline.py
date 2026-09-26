@@ -197,7 +197,8 @@ class Pipeline:
 
             self._stage(job_id, "verifying", "checking the new file")
             media.verify_replacement(
-                original, candidate, expected_audio=len(original.audio) - dropped)
+                original, candidate, expected_audio=len(original.audio) - dropped,
+                expect_cleaned=False)
             media.swap_in(candidate, path, keep_backup=settings.keep_backup)
         finally:
             shutil.rmtree(work, ignore_errors=True)
