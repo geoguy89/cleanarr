@@ -160,3 +160,43 @@ def test_settings_reach_the_listener(home, settings, fake_asr, episode):
     settings.asr_backend = "builtin"
     run(episode, settings, home / "cache", force=True)
     assert fake_asr[-1]["remote_url"] == ""
+
+
+def test_every_muting_setting_reaches_ffmpeg(home, settings, fake_asr, episode, monkeypatch):
+    seen = {}
+    real = media.build_cleaned_file
+
+    def spy(original, track, spans, dest, **kw):
+        seen.update(kw, spans=spans)
+        return real(original, track, spans, dest, **kw)
+    monkeypatch.setattr(media, "build_cleaned_file", spy)
+    settings.pad_start, settings.pad_end, settings.fade = 0.3, 0.25, 0.05
+    settings.bitrate_stereo, settings.bitrate_surround = "96k", "256k"
+    settings.track_title = "Family"
+    settings.ffmpeg_threads = 1
+    job = run(episode, settings, home / "cache")
+    assert job["status"] == "done", job["message"]
+    assert seen["spans"][0] == (0.7, 1.65)            # "fuck" 1.0-1.4, padded
+    assert seen["fade"] == 0.05
+    assert (seen["stereo_bitrate"], seen["surround_bitrate"]) == ("96k", "256k")
+    assert seen["title"] == "Family"
+    assert media.THREADS == 1
+    pcm, loud = samples(episode, 1), rms(samples(episode, 0), 0.1, 0.4)
+    assert rms(pcm, 0.75, 0.95) < loud * 0.01          # the padding is muted too
+
+
+def test_keep_backup_leaves_the_original_beside_it(home, settings, fake_asr, episode):
+    settings.keep_backup = True
+    run(episode, settings, home / "cache")
+    backup = episode.with_suffix(episode.suffix + ".cleanarr-backup")
+    assert backup.exists()
+    assert media.probe(backup).cleaned_track is None
+
+
+def test_listening_settings_reach_the_model(home, settings, fake_asr, episode):
+    settings.device, settings.compute_type, settings.model = "cpu", "int8", "small.en"
+    settings.asr_backend, settings.asr_url, settings.asr_api_key = "remote", "http://w", "sk"
+    run(episode, settings, home / "cache")
+    kw = fake_asr[-1]
+    assert (kw["device"], kw["compute_type"], kw["model_name"]) == ("cpu", "int8", "small.en")
+    assert kw["remote_key"] == "sk"

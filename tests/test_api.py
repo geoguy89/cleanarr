@@ -269,3 +269,45 @@ def test_plex_shows_count_cleaned_episodes_by_name(client, settings, stub):
     db.enqueue(kind="episode", title="Other", path="/tv/other/1.mkv")
     show = client.get("/api/series").json()["items"][0]
     assert (show["cleaned"], show["pending"]) == (1, 1)
+
+
+def test_check_for_new_episodes_and_clean_anyway(client, settings, monkeypatch):
+    monkeypatch.setattr(main.worker, "check_monitored", lambda: 2)
+    assert client.post("/api/monitors/check").json()["queued"] == 2
+    main.worker.holding = "someone is watching"
+    assert client.post("/api/queue/clean-anyway").json() == {"override": True}
+    assert main.worker.override is True and main.worker.holding == ""
+    main.worker.override = False
+
+
+def test_ollama_pull_is_streamed_and_errors_are_kept(client, settings, stub):
+    import time
+    settings.judge_url, settings.judge_model = stub.url, "qwen3.5:9b"
+    config.save(settings)
+    stub.route("POST", "/api/pull", lambda req: (200, b'{"status":"pulling"}\n{"error":"no space left"}\n'))
+    assert client.post("/api/judge/pull").json() == {"started": True, "model": "qwen3.5:9b"}
+    for _ in range(50):
+        state = client.get("/api/judge/pull").json()
+        if not state["downloading"] and state["error"]:
+            break
+        time.sleep(0.05)
+    assert "no space left" in state["error"]
+    assert stub.seen("/api/pull")[0].json() == {"model": "qwen3.5:9b"}
+    main._download_errors.clear()
+
+
+def test_media_sessions_endpoint(client, settings, stub):
+    stub.route("GET", "/Sessions", [{"UserName": "dad", "NowPlayingItem": {"Name": "Film"},
+                                     "TranscodingInfo": {"IsVideoDirect": False}}])
+    settings.media_server = "jellyfin"
+    settings.jellyfin_url, settings.jellyfin_api_key = stub.url, "k"
+    config.save(settings)
+    data = client.get("/api/media/sessions").json()
+    assert data["holding"] is True and data["policy"] == "video_transcode"
+    assert data["sessions"][0]["description"].startswith("dad is watching Film")
+
+
+def test_calendar_needs_sonarr(client, settings):
+    settings.library_source = "plex"
+    config.save(settings)
+    assert client.get("/api/calendar").json()["unavailable"] is True
