@@ -2,8 +2,8 @@
 
 <img src="web/logo.svg" alt="" width="112" align="right">
 
-Cleanarr is an \*arr-inspired, *vibe-coded* application that mutes profanity in
-media you already own.
+Cleanarr is an \*arr-inspired, *vibe-coded* application that mutes profanity in your 
+media.
 
 It adds a second audio track, **“Cleaned - English”** by default, with the swearing
 silenced. The original is untouched and stays the default — in Plex or Jellyfin
