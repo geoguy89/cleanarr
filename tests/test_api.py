@@ -348,6 +348,7 @@ def test_episodes_carry_their_job(client, arr_library):
 def test_movies_carry_their_job(client, arr_library):
     film = client.get("/api/movies").json()["items"][0]
     assert film["job_status"] == "queued" and film["source"] == "radarr"
+    assert "added_bytes" in film          # the Remove dialog says what comes back
     assert film["latest"] == "2024-02-01T00:00:00Z"
 
 

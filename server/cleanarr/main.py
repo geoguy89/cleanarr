@@ -803,7 +803,7 @@ def home(limit: int = 12):
         item["monitored"] = ("sonarr", str(item["series_id"])) in watched
     problems = [p for p in problems if p]
     for group, kind in ((episodes, "show"), (films, "movie")):
-        _attach_jobs(group, known)
+        _attach_jobs(group, known, with_size=True)
         for item in group:
             item["source"] = _poster_source(settings, kind)
 
@@ -860,7 +860,7 @@ def movies():
         items = library.build(settings).movies()
     except (arr.ArrError, library.LibraryError) as exc:
         raise HTTPException(502, str(exc))
-    _attach_jobs(items, db.cleaned_paths([m["path"] for m in items]))
+    _attach_jobs(items, db.cleaned_paths([m["path"] for m in items]), with_size=True)
     for movie in items:
         movie["latest"] = movie.get("added", "")
 
