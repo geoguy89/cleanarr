@@ -1707,8 +1707,6 @@ function fillSettings(s) {
   $('#settings-loading').innerHTML = '';
   form.hidden = false;
   $('#s-security').hidden = false;
-  $('#s-install').hidden = false;
-  renderInstall();
   const set = (name, value) => { if (F(name)) F(name).value = value ?? ''; };
   const check = (name, value) => $$(`input[name="${name}"]`).forEach((r) => { r.checked = r.value === value; });
   check('library_source', s.library_source || 'arr');
@@ -2188,70 +2186,6 @@ document.addEventListener('click', async (e) => {
   if ($('#more-sheet').open) $('#more-sheet').close();
   showGate('login');
 });
-
-/* ======================================================================
-   Installing as an app
-
-   Chrome installs a web app only from a secure address: https://, or
-   localhost. Opened as http://<server>:8477 the service worker is refused,
-   and Android offers nothing but "Create shortcut" with "This app cannot be
-   installed". No code in the page can change that, so the panel says which
-   case this is and how to get to a secure address.
-   ====================================================================== */
-
-let installPrompt = null;
-window.addEventListener('beforeinstallprompt', (event) => {
-  event.preventDefault();
-  installPrompt = event;
-  renderInstall();
-});
-window.addEventListener('appinstalled', () => { installPrompt = null; renderInstall(); });
-
-function renderInstall() {
-  const host = $('#install');
-  if (!host) return;
-  const standalone = window.matchMedia('(display-mode: standalone)').matches
-    || window.navigator.standalone === true;
-  const origin = location.origin;
-  if (standalone) {
-    host.innerHTML = `<p class="hint good">${icon('check')} Running as an installed app.</p>`;
-  } else if (!window.isSecureContext) {
-    host.innerHTML = `<div class="alert warn">${icon('alert')}<div class="grow">
-        <strong>This address can only make a shortcut</strong>
-        Browsers install web apps only from a secure (<code>https://</code>) address, and this
-        page was opened as <code>${esc(origin)}</code>. That is why Chrome says
-        “This app cannot be installed”. Any one of these fixes it:</div></div>
-      <ol class="install-steps">
-        <li><strong>A reverse proxy with a certificate</strong>, if you already reach other
-          apps by name: point Nginx Proxy Manager, SWAG, Caddy or Traefik at port 8477 and
-          open Cleanarr at its <code>https://</code> address.</li>
-        <li><strong>Tailscale</strong>: on the server, <code>tailscale serve --bg 8477</code>
-          gives an <code>https://…ts.net</code> address with a real certificate, reachable
-          from your own devices. HTTPS has to be switched on once in the Tailscale admin
-          console (DNS → HTTPS Certificates).</li>
-        <li><strong>Just this phone</strong>: in Chrome open
-          <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>, enable it,
-          add <code>${esc(origin)}</code>, and relaunch Chrome. Then the menu offers
-          <em>Install app</em>. Chrome shows a warning banner on that flags page; the
-          setting applies to this one address only.</li>
-      </ol>`;
-  } else if (installPrompt) {
-    host.innerHTML = `<div class="test-row"><button type="button" class="btn sm" data-action="install-app">
-        ${icon('download')}Install Cleanarr</button>
-      <span class="hint">Adds it to the home screen and opens it in its own window.</span></div>`;
-  } else {
-    host.innerHTML = `<p class="hint">This address can be installed. In Chrome use the
-      menu → <em>Install app</em> (on a computer, the install icon in the address bar);
-      on an iPhone, Share → <em>Add to Home Screen</em>.</p>`;
-  }
-}
-ACTIONS['install-app'] = async () => {
-  if (!installPrompt) return;
-  installPrompt.prompt();
-  await installPrompt.userChoice;
-  installPrompt = null;
-  renderInstall();
-};
 
 /* ======================================================================
    The phone's More menu

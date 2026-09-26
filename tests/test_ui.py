@@ -538,25 +538,3 @@ def test_a_menu_at_the_bottom_opens_upwards(desk):
     menu = last.locator(".menu-list")
     box, area = menu.bounding_box(), page.locator("#sheet-body").bounding_box()
     assert box["y"] + box["height"] <= area["y"] + area["height"]
-
-
-
-def test_install_panel_on_a_secure_address(desk):
-    page = desk.go("settings/install")
-    panel = page.locator("#install")
-    panel.wait_for()
-    assert "can be installed" in panel.inner_text() or panel.get_by_role("button", name="Install Cleanarr").count()
-
-
-def test_install_panel_explains_a_plain_http_address(browser, demo):
-    p = Page(browser, demo, PHONE)
-    p.page.add_init_script("Object.defineProperty(window, 'isSecureContext', {value: false})")
-    try:
-        page = p.go("settings/install")
-        text = page.locator("#install").inner_text()
-        assert "This app cannot be installed" in text
-        assert "unsafely-treat-insecure-origin-as-secure" in text
-        assert demo.url in text                      # the exact address to add
-        assert "tailscale serve" in text
-    finally:
-        p.close()

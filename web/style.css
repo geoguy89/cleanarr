@@ -715,7 +715,3 @@ details.menu .menu-list .note { font-size: .78rem; color: var(--muted); padding:
 }
 
 #monitor-status:not(:empty) { margin: -6px 0 16px; }
-
-.install-steps { margin: 4px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px;
-  font-size: .9rem; max-width: 76ch; }
-.install-steps code { word-break: break-all; }
