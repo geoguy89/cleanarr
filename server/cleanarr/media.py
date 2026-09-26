@@ -226,56 +226,6 @@ def _encoder_for(container: str, channels: int, source_codec: str = "",
     return (["-c:a", "aac", "-b:a", stereo_bitrate], "aac")
 
 
-def render_muted_track(path: Path, track: AudioStream, spans: list[tuple[float, float]],
-                       dest: Path, fade: float = 0.02,
-                       container: str = "mkv", progress=None,
-                       surround_bitrate: str = "384k",
-                       stereo_bitrate: str = "192k") -> Path:
-    """The source track with `spans` silenced, as a standalone audio file.
-
-    The muting is done with ffmpeg's volume filter rather than by cutting, so
-    the track stays exactly as long as the original - a cleaned track that
-    drifts out of sync with the picture is worse than no cleaned track.
-
-    A short fade at each edge keeps the mute from clicking. The filter is
-    written to a file because a long episode can carry hundreds of spans and
-    the expression outgrows a command line.
-    """
-    args, _codec = _encoder_for(container, track.channels, track.codec,
-                                surround_bitrate, stereo_bitrate)
-    if spans:
-        # volume=0 inside each span, with `fade` seconds of ramp at each edge.
-        # Each term is a straight line in time, clamped by min/max.
-        terms = []
-        for start, end in spans:
-            terms.append(
-                f"min(1,max(0,(({start:.3f}-t)/{fade:.3f})))"
-                f"+min(1,max(0,((t-{end:.3f})/{fade:.3f})))"
-            )
-        expr = "*".join(f"min(1,({t}))" for t in terms)
-        filter_text = f"volume=volume='min(1,max(0,{expr}))':eval=frame"
-    else:
-        filter_text = "anull"
-
-    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False,
-                                     encoding="utf8") as fh:
-        fh.write(filter_text)
-        filter_file = Path(fh.name)
-
-    try:
-        cmd = [FFMPEG, "-nostdin", "-v", "error", "-y", *_threads(), "-i", str(path),
-               "-map", f"0:a:{track.audio_index}", "-vn", "-sn", "-dn",
-               "-filter_script:a", str(filter_file), *args, "-progress", "pipe:1",
-               "-nostats", str(dest)]
-        _run_with_progress(cmd, progress)
-    finally:
-        filter_file.unlink(missing_ok=True)
-
-    if not dest.exists() or dest.stat().st_size == 0:
-        raise MediaError("the cleaned audio track came out empty")
-    return dest
-
-
 def _run_with_progress(cmd: list[str], progress=None) -> None:
     """Run ffmpeg, reporting 0-1 through `progress` as it goes."""
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -333,7 +283,18 @@ def build_cleaned_file(original: Probe, track: AudioStream,
             # the name is changed later.
             f"-metadata:s:a:{new_index}", f"{MARK_KEY}={MARK_VALUE}",
             f"-disposition:a:{new_index}", "0",
-            # A muxer option, so it belongs after the inputs - see add_track.
+            # Interleave strictly. Left to itself ffmpeg gives up on ordering
+            # after max_interleave_delta (10s) when a file has sparse streams -
+            # one episode with 38 subtitle tracks ended up with its cleaned
+            # audio for the 30-minute mark written 470MB from the matching
+            # picture, which plays fine from a local disk and stalls forever
+            # over a share.
+            #
+            # This is a MUXER option, so it belongs here, after the inputs.
+            # Written before -i it is read as an input option and silently does
+            # nothing - which is exactly what happened on the first attempt,
+            # and is why the verify step measures the result rather than
+            # trusting the flag.
             "-max_interleave_delta", "0",
             "-progress", "pipe:1", "-nostats", str(dest)]
     script = cmd[cmd.index("-filter_complex_script") + 1]
@@ -363,51 +324,6 @@ def _filter_script(spans: list[tuple[float, float]], track: AudioStream,
                                      encoding="utf8") as fh:
         fh.write(text)
         return Path(fh.name)
-
-
-def add_track(original: Probe, cleaned_audio: Path, dest: Path,
-              title: str = "", language: str = "eng",
-              drop_audio: tuple[int, ...] = (), progress=None) -> Path:
-    """Every stream of the original, copied, plus the cleaned track.
-
-    `drop_audio` holds audio-stream indexes to leave out - used when a file is
-    cleaned a second time, so the previous cleaned track is replaced rather
-    than joined by a second one.
-
-    The new track is explicitly NOT default: the file must play exactly as it
-    did before for anyone who does not choose otherwise.
-    """
-    title = title or CLEAN_TITLE
-    new_index = len(original.audio) - len(drop_audio)
-    cmd = [FFMPEG, "-nostdin", "-v", "error", "-y", *_threads(),
-           "-i", str(original.path), "-i", str(cleaned_audio), "-map", "0"]
-    for index in drop_audio:
-        cmd += ["-map", f"-0:a:{index}"]
-    cmd += ["-map", "1:a:0", "-c", "copy",
-            # Interleave strictly. Left to itself ffmpeg gives up on ordering
-            # after max_interleave_delta (10s) when a file has sparse streams -
-            # one episode with 38 subtitle tracks ended up with its cleaned
-            # audio for the 30-minute mark written 470MB from the matching
-            # picture, which plays fine from a local disk and stalls forever
-            # over a share.
-            #
-            # This is a MUXER option, so it belongs here, after the inputs.
-            # Written before -i it is read as an input option and silently does
-            # nothing - which is exactly what happened on the first attempt,
-            # and is why the verify step measures the result rather than
-            # trusting the flag.
-            "-max_interleave_delta", "0",
-            f"-metadata:s:a:{new_index}", f"title={title}",
-            # MP4 drops the title and keeps this one. Harmless on Matroska.
-            f"-metadata:s:a:{new_index}", f"handler_name={title}",
-            f"-metadata:s:a:{new_index}", f"language={language}",
-            # See build_cleaned_file: a name-independent mark, where the
-            # container keeps one.
-            f"-metadata:s:a:{new_index}", f"{MARK_KEY}={MARK_VALUE}",
-            f"-disposition:a:{new_index}", "0",
-            "-progress", "pipe:1", "-nostats", str(dest)]
-    _run_with_progress(cmd, progress)
-    return dest
 
 
 def track_bytes(path: Path, audio_index: int) -> int:
@@ -519,7 +435,8 @@ def remove_cleaned_track(original: Probe, dest: Path, drop=None,
            "-i", str(original.path), "-map", "0"]
     for index in drop:
         cmd += ["-map", f"-0:a:{index}"]
-    # After the inputs: -max_interleave_delta is a muxer option (see add_track).
+    # After the inputs: -max_interleave_delta is a muxer option (see
+    # build_cleaned_file).
     cmd += ["-c", "copy", "-max_interleave_delta", "0",
             "-progress", "pipe:1", "-nostats", str(dest)]
     _run_with_progress(cmd, progress)

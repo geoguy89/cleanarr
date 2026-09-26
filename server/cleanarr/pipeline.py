@@ -313,10 +313,6 @@ class Pipeline:
             shutil.rmtree(work, ignore_errors=True)
 
 
-def _audio_ext(container: str) -> str:
-    return "mka" if container in ("mkv", "mka") else "m4a"
-
-
 def _sweep_stale_work(folder: Path, older_than: float = 6 * 3600) -> None:
     """Delete scratch directories a killed run left behind.
 

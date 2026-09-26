@@ -163,9 +163,8 @@ def test_every_remux_interleaves_strictly(monkeypatch):
     src = track(0, title="Surround 5.1", default=True)
     ours = track(1, title="Cleaned - English", mark="1")
     media.build_cleaned_file(probe(src), src, [(1, 2)], Path("a.mkv"))
-    media.add_track(probe(src), Path("clean.mka"), Path("b.mkv"))
     media.remove_cleaned_track(probe(src, ours), Path("c.mkv"))
-    assert len(calls) == 3
+    assert len(calls) == 2
     for cmd in calls:
         # A muxer option: only honoured after the inputs.
         assert _after_inputs(cmd, "-max_interleave_delta")
