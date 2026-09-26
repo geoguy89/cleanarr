@@ -9,6 +9,8 @@ import threading
 import time
 from pathlib import Path
 
+from .subtitles import LOW_CONFIDENCE
+
 DB_PATH = Path(os.environ.get("CLEANARR_DB", "/config/cleanarr.sqlite"))
 _local = threading.local()
 
@@ -140,6 +142,11 @@ _ADDED_COLUMNS = (
     # Which word a remembered answer was about, so "is this check earning its
     # keep?" can be answered from the data instead of argued about.
     ("judge_cache", "word", "TEXT DEFAULT ''"),
+    # How sure Whisper was of a detected word, and what the subtitles said at
+    # that moment - evidence for a person reviewing it, never for muting.
+    ("detection", "confidence", "REAL"),
+    ("detection", "subtitle", "TEXT DEFAULT ''"),
+    ("detection", "subtitle_state", "TEXT DEFAULT ''"),
 )
 
 
@@ -358,14 +365,22 @@ def recent(limit: int = 100, status: str | None = None,
 def save_detections(job_id: int, muted, left_in=()) -> None:
     conn = connect()
     conn.execute("DELETE FROM detection WHERE job_id=?", (job_id,))
-    rows = [(job_id, m.start, m.end, m.text, m.category, int(m.needs_review),
-             m.reason, 1) for m in muted]
-    rows += [(job_id, m.start, m.end, m.text, m.category, 1, m.reason, 0)
-             for m in left_in]
+
+    def row(m, review, was_muted):
+        return (job_id, m.start, m.end, m.text, m.category, review, m.reason, was_muted,
+                getattr(m, "confidence", None), getattr(m, "subtitle", ""),
+                getattr(m, "subtitle_state", ""))
+    rows = [row(m, int(m.needs_review), 1) for m in muted]
+    rows += [row(m, 1, 0) for m in left_in]
     conn.executemany(
-        "INSERT INTO detection (job_id, start, end, text, category, review, reason, muted)"
-        " VALUES (?,?,?,?,?,?,?,?)", rows)
+        "INSERT INTO detection (job_id, start, end, text, category, review, reason, muted,"
+        " confidence, subtitle, subtitle_state) VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows)
     conn.commit()
+
+
+def detection(detection_id: int) -> sqlite3.Row | None:
+    return connect().execute(
+        "SELECT * FROM detection WHERE id=?", (detection_id,)).fetchone()
 
 
 def detections(job_id: int) -> list[sqlite3.Row]:
@@ -417,7 +432,12 @@ def history(query: str = "", limit: int = 500) -> list[sqlite3.Row]:
     cleaned any more, and its old entry is deleted rather than left to claim
     otherwise.
     """
-    sql = ("SELECT * FROM job WHERE status IN ('done','skipped') "
+    # How many of each file's detections are worth a listen - the same rule
+    # as subtitles.worth_checking, counted here so the list needs no second query.
+    sql = ("SELECT job.*, (SELECT COUNT(*) FROM detection d WHERE d.job_id=job.id"
+           f" AND (d.subtitle_state='differs' OR d.confidence < {LOW_CONFIDENCE}))"
+           " AS to_check"
+           " FROM job WHERE status IN ('done','skipped') "
            "AND COALESCE(action,'clean')='clean'")
     args: list = []
     if query:
@@ -478,6 +498,21 @@ def job_paths() -> dict[str, str]:
     rows = connect().execute(
         "SELECT path, status FROM job ORDER BY id").fetchall()
     return {r["path"]: r["status"] for r in rows}
+
+
+def job_titles() -> dict[str, list[tuple[str, str]]]:
+    """{show title: [(path, latest status)]}, for a library that reports no
+    show folder to match on."""
+    rows = connect().execute(
+        "SELECT title, path, status FROM job WHERE kind='episode' "
+        "AND COALESCE(action,'clean')='clean' ORDER BY id").fetchall()
+    latest: dict[str, tuple[str, str]] = {}
+    for r in rows:
+        latest[r["path"]] = (r["title"], r["status"])
+    out: dict[str, list[tuple[str, str]]] = {}
+    for path, (title, status) in latest.items():
+        out.setdefault(title, []).append((path, status))
+    return out
 
 
 def judge_lookup(key: str) -> tuple[str, str] | None:

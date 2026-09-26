@@ -1,410 +1,166 @@
-"""Draw the Cleanarr mark - a mouth washed out with soap, swearing in symbols.
+"""Draw the Cleanarr mark: a mouth with a bar of soap in it, and the swear it
+was about to say in a speech bubble.
 
-Unraid shows this beside the container, the phone uses it for the home screen,
-and the browser uses it for the tab. All of it is written by hand with the
-standard library, which is less trouble than adding Pillow to an image that
-otherwise only needs ffmpeg and a speech model.
+The drawing is one SVG, built here and written to web/logo.svg - which is also
+the favicon, so it is sharp at any size. The PNGs a phone or Unraid asks for
+are rendered from that same SVG by Chromium, through Playwright (the UI tests
+need it anyway):
 
-Every shape is drawn in a 256-unit design space and scaled to whatever size is
-asked for, so one drawing serves every size rather than a second set of
-hand-tuned numbers. Each shape returns coverage rather than being stamped down,
-so overlaps blend and nothing is jagged - and shading is done by mixing a
-lighter or darker colour over a shape's own coverage, which is what stops the
-soap and the lips reading as flat cut-out paper.
+    pip install playwright && python -m playwright install chromium
+    python tools/make_logo.py
 
-Run: python tools/make_logo.py
+The swear is spelled $#!T rather than scattered as # $ @ ! - a comic's grawlix
+is read as one word when the glyphs share a baseline and a height, and the one
+real letter at the end is what makes it legible. The glyphs are strokes, not
+text, so the SVG looks the same whatever fonts a browser has.
 """
 
 from __future__ import annotations
 
-import math
-import struct
-import zlib
+import base64
 from pathlib import Path
 
-DESIGN = 256.0
-CENTRE = DESIGN / 2
-
-BG = (25, 28, 36)              # the app's --surface
-
-LIP = (198, 82, 94)            # mid tone of the lips
-LIP_DARK = (126, 44, 56)       # where a lip turns away from the light
-LIP_LIGHT = (236, 138, 146)    # the wet highlight along the top
-MOUTH = (74, 26, 34)           # the inside, just behind the teeth
-THROAT = (38, 12, 18)          # deeper in, so the opening has depth
-TONGUE = (172, 74, 84)
-
-TOOTH = (246, 247, 250)
-TOOTH_SHADE = (196, 202, 214)  # the gum line, and the sides of each tooth
-
-SOAP = (140, 214, 242)         # the top face of the bar
-SOAP_SIDE = (86, 168, 208)     # the front face, turned away from the light
-SOAP_LIGHT = (222, 246, 255)   # the specular streak
-FOAM = (238, 250, 255)
-FOAM_SHADE = (176, 214, 232)
-
-SYMBOL = (78, 201, 138)        # the swearing - the app's --accent
-
-
-# ---------------------------------------------------------------- primitives
-def _edge(distance: float) -> float:
-    """Anti-aliasing: fade over one unit either side of an edge."""
-    return min(1.0, max(0.0, distance + 0.5))
-
-
-def _mix(base, over, amount: float):
-    amount = min(1.0, max(0.0, amount))
-    return tuple(base[i] + (over[i] - base[i]) * amount for i in range(3))
-
-
-def _ellipse(x: float, y: float, cx: float, cy: float, rx: float, ry: float,
-             tilt: float = 0.0) -> float:
-    """Coverage of an ellipse; the distance is rescaled so the fade stays even."""
-    dx, dy = x - cx, y - cy
-    if tilt:
-        c, s = math.cos(tilt), math.sin(tilt)
-        dx, dy = dx * c - dy * s, dx * s + dy * c
-    dx, dy = dx / rx, dy / ry
-    return _edge((1.0 - math.hypot(dx, dy)) * min(rx, ry))
-
-
-def _box(x: float, y: float, x0: float, y0: float, x1: float, y1: float,
-         radius: float = 0.0) -> float:
-    if radius <= 0:
-        return _edge(min(x - x0, x1 - x, y - y0, y1 - y))
-    cx = max(x0 + radius - x, 0.0, x - (x1 - radius))
-    cy = max(y0 + radius - y, 0.0, y - (y1 - radius))
-    return _edge(radius - math.hypot(cx, cy))
-
-
-def _bar(x: float, y: float, x0: float, y0: float, x1: float, y1: float,
-         width: float) -> float:
-    """A line segment with round ends - what every symbol is built from."""
-    vx, vy = x1 - x0, y1 - y0
-    span = vx * vx + vy * vy
-    t = 0.0 if span == 0 else max(0.0, min(1.0, ((x - x0) * vx + (y - y0) * vy) / span))
-    return _edge(width - math.hypot(x - (x0 + t * vx), y - (y0 + t * vy)))
-
-
-def _arc(x: float, y: float, cx: float, cy: float, radius: float, width: float,
-         start: float, end: float) -> float:
-    """Part of a ring, for the @ and the two curves of the $."""
-    angle = math.atan2(y - cy, x - cx)
-    if not start <= angle <= end:
-        return 0.0
-    return _edge(width - abs(math.hypot(x - cx, y - cy) - radius))
-
-
-# --------------------------------------------------------------- the drawing
-#  The mouth sits low and left, three-quarters open, with the soap wedged in
-#  across it. Everything is positioned against these two numbers.
-MX, MY = 96.0, 156.0
-
-
-def tile(x: float, y: float) -> float:
-    """Coverage for the background tile, so the corners are not jagged."""
-    return _box(x, y, 0, 0, DESIGN, DESIGN, 46)
-
-
-def opening(x: float, y: float) -> float:
-    """The gap between the lips: two arcs meeting at the corners.
-
-    A single ellipse reads as a hole punched in a face. Real lips part along a
-    line that is nearly flat at the corners and bows away above and below, so
-    the opening is built as the overlap of a wide upper curve and a deeper
-    lower one - which is also what gives the bottom lip its fuller shape.
-    """
-    upper = _ellipse(x, y, MX, MY + 26, 74, 46)     # bowed down from above
-    lower = _ellipse(x, y, MX, MY - 16, 74, 52)     # bowed up from below
-    return min(upper, lower)
-
-
-def lips(x: float, y: float) -> tuple[float, float, float]:
-    """(body, shadow, highlight) for the lips around that opening."""
-    outer = min(_ellipse(x, y, MX, MY + 30, 92, 62),
-                _ellipse(x, y, MX, MY - 22, 92, 68))
-    body = max(0.0, outer - opening(x, y))
-    # The light is up and to the left, so the underside of the lower lip and
-    # the inner rim of the upper one fall away into shadow.
-    below = _edge(y - (MY + 20)) * body
-    rim = max(0.0, opening(x, y + 7) - opening(x, y)) * 0.8
-    shadow = max(below * 0.55, rim)
-    # A wet streak along the top of the upper lip, and a smaller one below.
-    highlight = max(
-        _ellipse(x, y, MX - 16, MY - 44, 40, 7, tilt=-0.10) * 0.85,
-        _ellipse(x, y, MX + 4, MY + 50, 34, 5, tilt=0.06) * 0.55,
-    ) * body
-    return body, shadow, highlight
-
-
-def inside(x: float, y: float) -> tuple[float, float, float, float]:
-    """(dark, teeth, tooth shade, tongue) behind the lips."""
-    gap = opening(x, y)
-    if gap <= 0:
-        return 0.0, 0.0, 0.0, 0.0
-
-    # Upper teeth: a row hanging from the top of the opening, each one rounded
-    # at its biting edge rather than a rectangle with a scratch down it.
-    # The opening runs from about MY-20 to MY+36, so the row hangs inside that
-    # - teeth drawn any higher are simply clipped away and the mouth ends up
-    # with a white sliver instead of a smile.
-    teeth = 0.0
-    shade = 0.0
-    for offset, half in ((-44, 7), (-29, 8), (-11, 9), (8, 9), (27, 8), (43, 7)):
-        tooth = _box(x, y, MX + offset - half, MY - 26,
-                     MX + offset + half, MY + 3, 5)
-        teeth = max(teeth, tooth)
-        # Each tooth is lit from the left, so its right edge darkens - and the
-        # whole row is darker where it meets the gum.
-        shade = max(shade, tooth * _edge(x - (MX + offset + half - 4)) * 0.45,
-                    tooth * _edge((MY - 19) - y) * 0.55)
-    teeth = min(teeth, gap)
-    shade = min(shade, gap)
-
-    # The tongue, low and half hidden by the soap.
-    tongue = min(gap, _ellipse(x, y, MX + 2, MY + 40, 46, 20)) * 0.9
-    return gap, teeth, shade, tongue
-
-
-def soap(x: float, y: float) -> tuple[float, float, float]:
-    """(top face, front face, specular) for a bar of soap wedged in the mouth.
-
-    Drawn as two stacked slabs rather than one rectangle: a bar seen slightly
-    from above shows its top face and its front, and the join between them is
-    what makes it read as an object with thickness instead of a blue label.
-    """
-    angle = math.radians(-14)
-    dx, dy = x - 88.0, y - 180.0
-    rx = dx * math.cos(angle) - dy * math.sin(angle)
-    ry = dx * math.sin(angle) + dy * math.cos(angle)
-
-    # Sized and set low deliberately: a bar that fills the opening hides the
-    # teeth, and then the whole thing stops reading as a mouth at all.
-    top = _box(rx, ry, -40, -18, 40, 2, 9)
-    front = max(0.0, _box(rx, ry, -38, -6, 38, 17, 8) - top)
-    # One streak of reflected light across the top face, plus the softer sheen
-    # a wet bar carries near its left edge.
-    spec = max(_ellipse(rx, ry, -4, -11, 23, 3, tilt=-0.05),
-               _ellipse(rx, ry, -26, -4, 5, 7) * 0.5) * top
-    return top, front, spec
-
-
-def foam(x: float, y: float) -> tuple[float, float]:
-    """(bubbles, their shading) drifting off the soap."""
-    body = 0.0
-    shade = 0.0
-    for cx, cy, r in ((28, 116, 13), (52, 94, 8), (150, 128, 9),
-                      (170, 106, 5), (16, 150, 7), (72, 78, 5),
-                      (40, 196, 6), (124, 172, 7)):
-        bubble = _ellipse(x, y, cx, cy, r, r)
-        body = max(body, bubble)
-        # A bubble is a thin shell: bright at the top-left, darker round the
-        # lower right, hollow-looking in between.
-        shade = max(shade, bubble * _edge(math.hypot(x - cx + r * .3,
-                                                     y - cy + r * .3) - r * .55) * .7)
-    return body, shade
-
-
-def _turn(x: float, y: float, cx: float, cy: float, tilt: float) -> tuple[float, float]:
-    """Point (x, y) expressed in a glyph's own rotated, centred coordinates."""
-    dx, dy = x - cx, y - cy
-    c, s = math.cos(tilt), math.sin(tilt)
-    return dx * c - dy * s, dx * s + dy * c
-
-
-#  The expletive
-#  -------------
-#  The first version scattered # $ @ ! around the mouth and it read as
-#  decoration - four unrelated marks, the visual equivalent of "beep". A swear
-#  in a comic is one WORD with its letters swapped for symbols, and the eye
-#  reads it as a word: the glyphs sit on a baseline, evenly spaced, same
-#  height. So this spells $#!T on a line rising away from the mouth.
-#
-#  Each glyph is drawn around its own centre in local coordinates, so the whole
-#  word can be tilted by changing one number.
-
-def _dollar(lx: float, ly: float, h: float, w: float) -> float:
-    """$ - two opposed arcs with the stroke straight through them."""
-    r = h * 0.40
-    out = _arc(lx, ly, 0, -r * 0.92, r, w, math.radians(-172), math.radians(52))
-    out = max(out, _arc(lx, ly, 0, r * 0.92, r, w, math.radians(-52), math.radians(172)))
-    return max(out, _bar(lx, ly, 0, -h, 0, h, w * 0.78))
-
-
-def _hash(lx: float, ly: float, h: float, w: float) -> float:
-    """# - uprights leaning the way a real hash does."""
-    lean = h * 0.16
-    out = 0.0
-    for dx in (-h * 0.34, h * 0.34):
-        out = max(out, _bar(lx, ly, dx + lean, -h, dx - lean, h, w))
-    for dy in (-h * 0.34, h * 0.34):
-        out = max(out, _bar(lx, ly, -h * 0.62, dy, h * 0.62, dy, w))
-    return out
-
-
-def _bang(lx: float, ly: float, h: float, w: float) -> float:
-    """! - tapering stroke over a dot."""
-    out = _bar(lx, ly, 0, -h, 0, h * 0.30, w)
-    return max(out, _ellipse(lx, ly, 0, h * 0.78, w * 1.02, w * 1.02))
-
-
-def _tee(lx: float, ly: float, h: float, w: float) -> float:
-    """T - the one real letter, which is what makes the word legible."""
-    out = _bar(lx, ly, -h * 0.60, -h + w * 0.5, h * 0.60, -h + w * 0.5, w)
-    return max(out, _bar(lx, ly, 0, -h, 0, h, w))
-
-
-def symbols(x: float, y: float) -> float:
-    """$#!T leaving the mouth, on a line rising to the right."""
-    tilt = math.radians(-13)          # the word lifts as it travels
-    h = 21.0                          # half-height of a glyph
-    w = 4.1                           # stroke weight
-
-    # Positions along the baseline, which starts clear of the upper lip.
-    glyphs = (
-        (_dollar, 112.0, 92.0),
-        (_hash, 150.0, 83.0),
-        (_bang, 185.0, 75.0),
-        (_tee, 214.0, 68.0),
-    )
-
-    out = 0.0
-    for draw, cx, cy in glyphs:
-        lx, ly = _turn(x, y, cx, cy, tilt)
-        out = max(out, draw(lx, ly, h, w))
-
-    # One impact tick, past the end of the word. There was a second in front of
-    # the $, and sitting up against the glyph it read as an opening quote mark
-    # rather than emphasis - the word looked quoted instead of shouted.
-    out = max(out, _bar(x, y, 234, 45, 243, 34, w * 0.55))
-    return out
-
-
-def pixel(x: float, y: float):
-    """Colour and alpha for one point of the mark, painted back to front."""
-    alpha = tile(x, y)
-    r, g, b = BG
-
-    gap, teeth, tooth_shade, tongue = inside(x, y)
-    if gap > 0:
-        # Deeper towards the middle of the opening, so it is a cavity and not
-        # a flat maroon shape.
-        r, g, b = _mix((r, g, b), MOUTH, gap)
-        r, g, b = _mix((r, g, b), THROAT,
-                       gap * _ellipse(x, y, MX + 2, MY + 4, 52, 34))
-    if tongue > 0:
-        r, g, b = _mix((r, g, b), TONGUE, tongue)
-    if teeth > 0:
-        r, g, b = _mix((r, g, b), TOOTH, teeth)
-    if tooth_shade > 0:
-        r, g, b = _mix((r, g, b), TOOTH_SHADE, tooth_shade)
-
-    body, shadow, highlight = lips(x, y)
-    if body > 0:
-        r, g, b = _mix((r, g, b), LIP, body)
-    if shadow > 0:
-        r, g, b = _mix((r, g, b), LIP_DARK, shadow)
-    if highlight > 0:
-        r, g, b = _mix((r, g, b), LIP_LIGHT, highlight)
-
-    top, front, spec = soap(x, y)
-    if front > 0:
-        r, g, b = _mix((r, g, b), SOAP_SIDE, front)
-    if top > 0:
-        r, g, b = _mix((r, g, b), SOAP, top)
-    if spec > 0:
-        r, g, b = _mix((r, g, b), SOAP_LIGHT, spec)
-
-    bubbles, bubble_shade = foam(x, y)
-    if bubbles > 0:
-        r, g, b = _mix((r, g, b), FOAM, bubbles)
-    if bubble_shade > 0:
-        r, g, b = _mix((r, g, b), FOAM_SHADE, bubble_shade)
-
-    mark = symbols(x, y)
-    if mark > 0:
-        r, g, b = _mix((r, g, b), SYMBOL, mark)
-
-    return r, g, b, alpha
-
-
-# ------------------------------------------------------------------- output
-def _chunk(kind: bytes, data: bytes) -> bytes:
-    return (struct.pack(">I", len(data)) + kind + data
-            + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
-
-
-def png(path: Path, size: int, supersample: int = 2, sampler=None) -> None:
-    """Render at `supersample`x and average down.
-
-    The shapes already anti-alias themselves, but where three of them meet -
-    a tooth against the soap against the dark - one sample per pixel picks a
-    winner and the small sizes go crunchy. Averaging four samples fixes it for
-    a few seconds of drawing time.
-    """
-    sampler = sampler or pixel
-    scale = size * supersample / DESIGN
-    rows = []
-    for py in range(size):
-        row = bytearray([0])                       # filter byte: none
-        for px in range(size):
-            acc = [0.0, 0.0, 0.0, 0.0]
-            for sy in range(supersample):
-                for sx in range(supersample):
-                    x = (px * supersample + sx + 0.5) / scale
-                    y = (py * supersample + sy + 0.5) / scale
-                    for i, value in enumerate(sampler(x, y)):
-                        acc[i] += value
-            n = supersample * supersample
-            row += bytes((int(acc[0] / n), int(acc[1] / n), int(acc[2] / n),
-                          int(acc[3] / n * 255)))
-        rows.append(bytes(row))
-
-    raw = zlib.compress(b"".join(rows), 9)
-    header = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)  # 8-bit RGBA
-    path.write_bytes(b"\x89PNG\r\n\x1a\n"
-                     + _chunk(b"IHDR", header)
-                     + _chunk(b"IDAT", raw)
-                     + _chunk(b"IEND", b""))
-
-
-#  Android crops an installed app's icon to whatever shape the launcher uses -
-#  a circle, a squircle, a rounded square - and only the middle 80% of the
-#  image is guaranteed to survive. The normal mark runs to the edges, so a
-#  circle mask would take the corner of the mouth and the last glyph with it.
-#  This draws the same picture at 62% inside a full-bleed background, so the
-#  whole thing lands inside the safe zone whatever shape the launcher picks.
-MASKABLE_SCALE = 0.62
-
-
-def _maskable_pixel(x: float, y: float):
-    inset = DESIGN * (1 - MASKABLE_SCALE) / 2
-    sx = (x - inset) / MASKABLE_SCALE
-    sy = (y - inset) / MASKABLE_SCALE
-    if 0 <= sx < DESIGN and 0 <= sy < DESIGN:
-        r, g, b, alpha = pixel(sx, sy)
-        if alpha > 0:
-            # The tile's own alpha is composited onto the flat ground, so the
-            # rounded corners of the inner drawing disappear into it.
-            return (_mix(BG, (r, g, b), alpha) + (1.0,))
-    return BG + (1.0,)
-
-
-def write_all(web: Path) -> None:
-    """The favicon, plus the sizes a phone wants for a home-screen icon."""
-    for size, name in ((256, "icon.png"), (192, "icon-192.png"),
-                       (512, "icon-512.png"), (180, "apple-touch-icon.png")):
-        out = web / name
-        png(out, size)
-        print(f"wrote {out.name} ({size}px, {out.stat().st_size} bytes)")
-
-    for size, name in ((192, "icon-192-maskable.png"),
-                       (512, "icon-512-maskable.png")):
-        out = web / name
-        png(out, size, sampler=_maskable_pixel)
-        print(f"wrote {out.name} ({size}px, safe-zone, "
-              f"{out.stat().st_size} bytes)")
+ROOT = Path(__file__).resolve().parents[1]
+WEB = ROOT / "web"
+
+# Colours. The bubble is the app's accent green; the ground is its dark surface.
+BG_TOP, BG_BOTTOM = "#232a38", "#11141b"
+INK = "#0e1a14"
+
+# The opening between the lips, used for the mouth and to clip what is in it.
+INNER = ("M52,150 C66,132 98,126 118,132 C140,126 172,132 186,150 "
+         "C172,190 146,204 119,204 C92,204 66,190 52,150 Z")
+OUTER = ("M30,150 C46,110 86,100 118,114 C150,100 190,110 208,150 "
+         "C194,206 152,228 119,228 C86,228 44,206 30,150 Z")
+
+# (x, y, radius) of the bubbles drifting off the soap.
+FOAM = [(54, 104, 15), (33, 80, 8), (60, 66, 5), (214, 196, 11), (226, 170, 6),
+        (38, 196, 7)]
+# Suds on the end of the bar, where it sticks out of the mouth.
+SUDS = [(206, 150, 6), (216, 142, 4.5), (198, 143, 3.5), (214, 156, 3)]
+
+# Android crops an installed icon to the launcher's shape and keeps only a
+# circle 80% across, so the maskable versions draw the mark smaller on a
+# full-bleed ground. The speech bubble's far corner is the furthest point from
+# the centre, at about 0.59 of the width; 0.66 of that lands inside the circle.
+MASKABLE_SCALE = 0.66
+
+
+def _swear(x: float, y: float, gap: float) -> tuple[str, tuple[float, float]]:
+    """Stroke paths for $#!T starting at x on the line y, and where the ! dot goes."""
+    paths = [
+        # $ - an S with the stroke straight through it
+        f"M{x + 8},{y - 10} C{x + 5},{y - 15} {x - 9},{y - 16} {x - 9},{y - 7} "
+        f"C{x - 9},{y} {x + 9},{y - 1} {x + 9},{y + 7} "
+        f"C{x + 9},{y + 16} {x - 6},{y + 16} {x - 9},{y + 10} "
+        f"M{x},{y - 19} L{x},{y + 19}",
+    ]
+    x += gap
+    # # - uprights leaning the way a real hash does
+    paths.append(f"M{x - 3},{y - 15} L{x - 7},{y + 15} M{x + 7},{y - 15} L{x + 3},{y + 15} "
+                 f"M{x - 11},{y - 5} L{x + 11},{y - 5} M{x - 12},{y + 5} L{x + 10},{y + 5}")
+    x += gap * 0.8
+    bang = (x, y + 14)
+    paths.append(f"M{x},{y - 16} L{x},{y + 4}")
+    x += gap * 0.8
+    paths.append(f"M{x - 10},{y - 14} L{x + 10},{y - 14} M{x},{y - 14} L{x},{y + 16}")
+    return " ".join(paths), bang
+
+
+def _bubble(x: float, y: float, r: float) -> str:
+    """A soap bubble: nearly clear, a bright rim, and a highlight top left."""
+    rim = max(1.6, r * 0.17)
+    arc = r * 0.55
+    return (f'<circle cx="{x}" cy="{y}" r="{r}" fill="url(#foam)" stroke="#ffffff" '
+            f'stroke-opacity=".9" stroke-width="{rim:.1f}"/>'
+            f'<path d="M{x - arc:.1f},{y - r * 0.15:.1f} A{arc:.1f},{arc:.1f} 0 0 1 '
+            f'{x - r * 0.1:.1f},{y - arc - r * 0.05:.1f}" stroke="#ffffff" '
+            f'stroke-width="{rim:.1f}" stroke-linecap="round" fill="none"/>')
+
+
+def svg(size: int | None = None, rounded: bool = True, scale: float = 1.0) -> str:
+    """The mark. `rounded` gives the tile rounded corners; `scale` shrinks the
+    drawing inside a full-bleed ground, for the maskable icons."""
+    swear, (bang_x, bang_y) = _swear(140, 60, 25)
+    inset = 256 * (1 - scale) / 2
+    dims = f' width="{size}" height="{size}"' if size else ""
+    foam = "".join(_bubble(*b) for b in FOAM)
+    suds = "".join(f'<circle cx="{x}" cy="{y}" r="{r}" opacity="{0.95 - i * 0.06:.2f}"/>'
+                   for i, (x, y, r) in enumerate(SUDS))
+    teeth = "".join(f'<rect x="{x}" y="112" width="{w}" height="{h}" rx="7"/>'
+                    for x, w, h in ((50, 24, 38), (76, 21, 41), (99, 20, 43),
+                                    (121, 20, 43), (143, 21, 41), (166, 24, 38)))
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"{dims}>
+<title>Cleanarr</title>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{BG_TOP}"/><stop offset="1" stop-color="{BG_BOTTOM}"/></linearGradient>
+  <radialGradient id="glow" cx=".45" cy=".62" r=".5"><stop offset="0" stop-color="#4ec98a" stop-opacity=".22"/><stop offset="1" stop-color="#4ec98a" stop-opacity="0"/></radialGradient>
+  <linearGradient id="lip" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f06f7e"/><stop offset=".55" stop-color="#d2475a"/><stop offset="1" stop-color="#9e2a3d"/></linearGradient>
+  <radialGradient id="cavity" cx=".5" cy=".45" r=".6"><stop offset="0" stop-color="#2a0710"/><stop offset="1" stop-color="#5a1424"/></radialGradient>
+  <linearGradient id="tooth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#dfe5ee"/><stop offset=".35" stop-color="#ffffff"/><stop offset="1" stop-color="#e8edf4"/></linearGradient>
+  <linearGradient id="soapTop" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9f3ff"/><stop offset="1" stop-color="#7fd6f5"/></linearGradient>
+  <linearGradient id="soapSide" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5fc0e6"/><stop offset="1" stop-color="#3a98c6"/></linearGradient>
+  <linearGradient id="speech" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6ee0a4"/><stop offset="1" stop-color="#34b374"/></linearGradient>
+  <radialGradient id="foam" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#ffffff" stop-opacity=".04"/><stop offset=".75" stop-color="#bff0ff" stop-opacity=".16"/><stop offset="1" stop-color="#e8fbff" stop-opacity=".5"/></radialGradient>
+  <clipPath id="inner"><path d="{INNER}"/></clipPath>
+</defs>
+<rect width="256" height="256" rx="{56 if rounded else 0}" fill="url(#bg)"/>
+<g transform="translate({inset:g},{inset:g}) scale({scale:g})">
+  <rect width="256" height="256" fill="url(#glow)"/>
+  <path d="{INNER}" fill="url(#cavity)"/>
+  <g clip-path="url(#inner)">
+    <ellipse cx="120" cy="206" rx="46" ry="22" fill="#c85466"/>
+    <g fill="url(#tooth)">{teeth}</g>
+  </g>
+  <path fill-rule="evenodd" fill="url(#lip)" d="{OUTER} {INNER}"/>
+  <path d="M58,124 C78,112 100,111 114,119" stroke="#ffc2c9" stroke-width="5" stroke-linecap="round" fill="none" opacity=".75"/>
+  <path d="M92,219 C108,224 132,224 148,219" stroke="#ff9aa8" stroke-width="4" stroke-linecap="round" fill="none" opacity=".55"/>
+  <g transform="rotate(-11 136 176)">
+    <rect x="84" y="166" width="136" height="36" rx="12" fill="url(#soapSide)"/>
+    <rect x="84" y="158" width="136" height="27" rx="12" fill="url(#soapTop)"/>
+    <rect x="116" y="164" width="72" height="15" rx="7.5" fill="none" stroke="#ffffff" stroke-opacity=".75" stroke-width="2.4"/>
+    <path d="M96,164 C110,161 160,161 180,163" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" opacity=".85" fill="none"/>
+  </g>
+  <g fill="#ffffff">{suds}</g>
+  {foam}
+  <g transform="rotate(-7 180 58)">
+    <path d="M136,26 H222 A18,18 0 0 1 240,44 V76 A18,18 0 0 1 222,94 H160 L138,114 L144,94 H136 A18,18 0 0 1 118,76 V44 A18,18 0 0 1 136,26 Z" fill="url(#speech)"/>
+    <path d="{swear}" stroke="{INK}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="{bang_x}" cy="{bang_y}" r="4.2" fill="{INK}"/>
+  </g>
+</g>
+</svg>
+'''
+
+
+def render(page, markup: str, size: int, out: Path) -> None:
+    """One PNG of `markup` at `size` pixels, with transparent corners kept."""
+    data = base64.b64encode(markup.encode("utf8")).decode()
+    page.set_viewport_size({"width": size, "height": size})
+    page.set_content(f'<body style="margin:0"><img id="m" width="{size}" height="{size}" '
+                     f'src="data:image/svg+xml;base64,{data}"></body>')
+    page.wait_for_function("document.getElementById('m').complete")
+    page.locator("#m").screenshot(path=str(out), omit_background=True)
+    print(f"wrote {out.relative_to(ROOT)} ({size}px, {out.stat().st_size} bytes)")
+
+
+def write_all() -> None:
+    from playwright.sync_api import sync_playwright
+
+    (WEB / "logo.svg").write_text(svg(), encoding="utf8")
+    print("wrote web/logo.svg")
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        for size, name in ((256, "icon.png"), (192, "icon-192.png"), (512, "icon-512.png")):
+            render(page, svg(size), size, WEB / name)
+        # iOS rounds the corners itself and fills transparency with black, so
+        # its icon is the full square.
+        render(page, svg(180, rounded=False), 180, WEB / "apple-touch-icon.png")
+        for size, name in ((192, "icon-192-maskable.png"), (512, "icon-512-maskable.png")):
+            render(page, svg(size, rounded=False, scale=MASKABLE_SCALE), size, WEB / name)
+        browser.close()
 
 
 if __name__ == "__main__":
-    write_all(Path(__file__).resolve().parents[1] / "web")
+    write_all()

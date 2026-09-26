@@ -1,339 +1,1271 @@
-/* Cleanarr UI: a poster wall of the library, a queue, and the settings. */
+/* Cleanarr's page: the library, the queue, what has been cleaned, settings.
 
-/* What to call the thing that supplies the library.
+   No framework and no build step. Views are plain functions that write HTML
+   into their section; every button carries a data-action that one listener
+   dispatches, so there is one place to look for what a click does. */
+'use strict';
 
-   Naming Sonarr and Radarr in the copy was fine while they were the only
-   option. To someone running Plex only it is the wrong name, and it sends them
-   to configure a service they were told they did not need. Kept in step from
-   any response that carries the source, so it is right before settings load. */
-let LIB_SOURCE = 'arr';
-function noteLibrarySource(data) {
-  const s = data && (data.library_source || data.source);
-  if (s !== 'arr' && s !== 'plex' && s !== 'jellyfin') return;
-  LIB_SOURCE = s;
-  try { localStorage.setItem('cleanarr.library_source', s); } catch (e) { /* ignore */ }
-}
-function sourceName(kind) {
-  if (LIB_SOURCE === 'plex') return 'Plex';
-  if (LIB_SOURCE === 'jellyfin') return 'Jellyfin';
-  return kind === 'movie' ? 'Radarr' : 'Sonarr';
-}
+/* ======================================================================
+   Small helpers
+   ====================================================================== */
 
-/* Which service serves a poster. Plex and Jellyfin serve their own artwork;
-   with the *arr apps it is Sonarr for shows and Radarr for films. The server
-   names the source on each item - the fallback is only for a response from an
-   older build. */
-function posterUrl(item, kind) {
-  const src = item.source || (kind === 'show' ? 'sonarr' : 'radarr');
-  const id = item.id !== undefined ? item.id : item.series_id;
-  return `/api/poster?source=${encodeURIComponent(src)}&id=${encodeURIComponent(id)}`;
-}
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
-const state = {
-  shows: [], movies: [], calendar: null, home: null, settings: null,
-  picked: new Set(),     // queued job ids ticked in the Queue
-  lastPicked: null,      // for shift-click ranges
-  queueIds: [],          // the queue in display order, for range selection
-};
-
-/* What this install calls the track it adds. Settings has the real answer;
-   before they have loaded, the default is the only sensible guess. */
-function trackName() {
-  return (state.settings && state.settings.track_title) || 'Cleaned - English';
-}
-
-// ---------------------------------------------------------------- helpers
-async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' }, ...options,
-  });
-  if (res.status === 401) {
-    // The session expired, or this instance just had a login turned on. Put
-    // the gate up rather than letting every poll fail silently behind it.
-    showGate('login');
-    throw new Error('signed out');
-  }
-  if (!res.ok) {
-    let detail = res.statusText;
-    try { detail = (await res.json()).detail || detail; } catch (e) { /* not json */ }
-    throw new Error(detail);
-  }
-  return res.status === 204 ? null : res.json();
-}
-
-function toast(message, ms = 3200) {
-  const el = $('#toast');
-  el.textContent = message;
-  el.hidden = false;
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => { el.hidden = true; }, ms);
-}
-
-const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g,
+const esc = (value) => String(value ?? '').replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const icon = (name, cls = 'i') =>
+  `<svg class="${cls}" aria-hidden="true" focusable="false"><use href="#i-${name}"/></svg>`;
+
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const pad2 = (n) => String(n ?? 0).padStart(2, '0');
+const epCode = (season, episode) => `S${pad2(season)}E${pad2(episode)}`;
 
 const stamp = (seconds) => {
   const s = Math.max(0, Math.floor(seconds || 0));
-  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  const h = Math.floor(s / 3600);
+  const mm = `${pad2(Math.floor((s % 3600) / 60))}:${pad2(s % 60)}`;
+  return h ? `${h}:${mm}` : mm;
 };
-const gb = (bytes) => (bytes ? `${(bytes / 1e9).toFixed(1)} GB` : '');
+
 const size = (bytes) => {
   if (!bytes) return '';
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`;
-  return `${Math.round(bytes / 1e6)} MB`;
-};
-/* How long the running job has been going, so a slow stage reads as slow
-   rather than stuck. */
-const elapsed = (startedAt) => {
-  const s = Math.max(0, Math.round(Date.now() / 1000 - startedAt));
-  return s < 60 ? `${s}s so far` : `${Math.floor(s / 60)}m ${s % 60}s so far`;
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  return `${Math.max(1, Math.round(bytes / 1e6))} MB`;
 };
 
 const when = (epoch) => (epoch
   ? new Date(epoch * 1000).toLocaleDateString(undefined,
-      { day: 'numeric', month: 'short', year: 'numeric' })
+    { day: 'numeric', month: 'short', year: 'numeric' })
   : '');
 
-/* A question with named buttons. Returns which one was pressed, or null if
-   the person backed out - used before redoing work that is already done. */
-function ask(title, body, choices) {
-  return new Promise((resolve) => {
-    const modal = $('#ask');
-    $('#ask-title').textContent = title;
-    $('#ask-body').textContent = body;
-    const actions = $('#ask-actions');
-    actions.innerHTML = '';
-    const close = (value) => { modal.hidden = true; resolve(value); };
-    choices.forEach((choice) => {
-      const button = document.createElement('button');
-      button.className = choice.primary ? 'small' : 'small ghost';
-      button.textContent = choice.label;
-      button.onclick = () => close(choice.value);
-      actions.appendChild(button);
+/* "Two days ago" reads faster than a date when the point is what is new. */
+const ago = (iso) => {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const days = Math.floor((Date.now() - t) / 86400000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 14) return `${days} days ago`;
+  return new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
+const elapsed = (startedAt) => {
+  const s = Math.max(0, Math.round(Date.now() / 1000 - startedAt));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${pad2(s % 60)}s`;
+};
+
+const debounce = (fn, ms) => {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+};
+
+/* ======================================================================
+   Talking to the server
+   ====================================================================== */
+
+class ApiError extends Error {
+  constructor(message, status = 0, errors = null) {
+    super(message);
+    this.status = status;
+    this.errors = errors;
+  }
+}
+
+async function api(path, { method = 'GET', body } = {}) {
+  let res;
+  try {
+    res = await fetch(path, {
+      method,
+      headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
-    const cancel = document.createElement('button');
-    cancel.className = 'small ghost';
-    cancel.textContent = 'Cancel';
-    cancel.onclick = () => close(null);
-    actions.appendChild(cancel);
-    modal.hidden = false;
+  } catch (err) {
+    throw new ApiError('Cannot reach Cleanarr. Is the container running?');
+  }
+  if (res.status === 401 && !path.startsWith('/api/auth/')) {
+    // The session expired, or a login was just turned on elsewhere.
+    showGate('login');
+    throw new ApiError('signed out', 401);
+  }
+  if (!res.ok) {
+    let message = res.statusText || `error ${res.status}`;
+    let errors = null;
+    try {
+      const data = await res.json();
+      if (typeof data.detail === 'string') message = data.detail;
+      errors = data.errors || null;
+    } catch (e) { /* not JSON */ }
+    throw new ApiError(message, res.status, errors);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+/* ======================================================================
+   Toasts and questions
+   ====================================================================== */
+
+function toast(message, { action, error = false, ms = 4200 } = {}) {
+  // An open modal makes the rest of the page inert, so a toast (and its Undo)
+  // has to live inside it to be seen and clicked.
+  const modal = $$('dialog[open]').pop();
+  const host = modal ? (modal.querySelector(':scope > .toasts')
+    || modal.appendChild(Object.assign(document.createElement('div'), { className: 'toasts' })))
+    : $('#toasts');
+  const el = document.createElement('div');
+  el.className = `toast${error ? ' error' : ''}`;
+  el.setAttribute('role', error ? 'alert' : 'status');
+  el.innerHTML = `<span>${esc(message)}</span>`;
+  const remove = () => el.remove();
+  if (action) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn secondary sm';
+    btn.textContent = action.label;
+    btn.onclick = async () => { remove(); await action.run(); };
+    el.appendChild(btn);
+  }
+  host.appendChild(el);
+  while (host.children.length > 3) host.firstElementChild.remove();
+  setTimeout(remove, action ? Math.max(ms, 8000) : ms);
+}
+const fail = (err) => { if (err && err.status !== 401) toast(err.message || String(err), { error: true }); };
+
+/* A question with named answers. Resolves to the value picked, or null. */
+function ask(title, body, choices, { danger = false } = {}) {
+  const dlg = $('#ask');
+  $('#ask-title').textContent = title;
+  $('#ask-body').textContent = body;
+  const actions = $('#ask-actions');
+  actions.innerHTML = '';
+  const cancel = document.createElement('button');
+  cancel.className = 'btn ghost';
+  cancel.value = '';
+  cancel.textContent = 'Cancel';
+  actions.appendChild(cancel);
+  // A destructive question starts on Cancel, so Enter does not destroy.
+  cancel.autofocus = danger;
+  choices.forEach((c, i) => {
+    const b = document.createElement('button');
+    b.className = c.primary ? `btn${danger ? ' danger' : ''}` : 'btn secondary';
+    b.value = c.value;
+    b.textContent = c.label;
+    if (!danger && (i === choices.length - 1 || c.primary)) b.autofocus = true;
+    actions.appendChild(b);
+  });
+  return new Promise((resolve) => {
+    dlg.onclose = () => resolve(dlg.returnValue || null);
+    dlg.returnValue = '';
+    dlg.showModal();
   });
 }
 
-/* Anything already cleaned gets said out loud before it is cleaned again. */
-async function confirmRedo(items) {
-  const done = items.filter((i) => ['done', 'skipped'].includes(i.job_status));
-  if (!done.length) return items;
+/* ======================================================================
+   State and names
+   ====================================================================== */
 
+const state = {
+  settings: null, setup: null, home: null, shows: null, movies: null,
+  calendar: null, jobs: null, history: null,
+  libSource: 'arr', view: null,
+  picked: new Set(), lastPicked: null, queueIds: [],
+  sheet: null, labels: {},
+};
+
+try { state.libSource = localStorage.getItem('cleanarr.library_source') || 'arr'; } catch (e) { /* private window */ }
+
+function noteSource(data) {
+  const s = data && (data.library_source || data.source);
+  if (!['arr', 'plex', 'jellyfin'].includes(s)) return;
+  state.libSource = s;
+  try { localStorage.setItem('cleanarr.library_source', s); } catch (e) { /* ignore */ }
+  $('#nav-upcoming').hidden = s !== 'arr';
+  $('#more-upcoming').parentElement.hidden = s !== 'arr';
+}
+
+function sourceName(kind) {
+  if (state.libSource === 'plex') return 'Plex';
+  if (state.libSource === 'jellyfin') return 'Jellyfin';
+  return kind === 'movie' ? 'Radarr' : 'Sonarr';
+}
+const serverName = () => ({ plex: 'Plex', jellyfin: 'Jellyfin' }[state.settings?.media_server] || 'the media server');
+const trackName = () => state.settings?.track_title || 'Cleaned - English';
+
+function posterUrl(item, kind) {
+  const src = item.source || (kind === 'movie' ? 'radarr' : 'sonarr');
+  const id = item.id !== undefined && kind !== 'episode' ? item.id : item.series_id;
+  return `/api/poster?source=${encodeURIComponent(src)}&id=${encodeURIComponent(id)}`;
+}
+
+/* The same rule as subtitles.worth_checking on the server. */
+const LOW_CONFIDENCE = 0.5;
+const worthChecking = (d) => d.subtitle_state === 'differs'
+  || (d.confidence !== null && d.confidence !== undefined && d.confidence < LOW_CONFIDENCE);
+
+const DONE = ['done', 'skipped'];
+const isDone = (status) => DONE.includes(status);
+const STATUS = {
+  done: ['done', 'Cleaned'], skipped: ['done', 'Nothing to mute'], running: ['running', 'Cleaning'],
+  queued: ['queued', 'Queued'], failed: ['failed', 'Failed'], cancelled: ['cancelled', 'Cancelled'],
+};
+const badge = (status) => {
+  if (!status || !STATUS[status]) return '';
+  const [cls, label] = STATUS[status];
+  return `<span class="badge ${cls}">${label}</span>`;
+};
+
+/* ======================================================================
+   Building blocks
+   ====================================================================== */
+
+const skeletonRows = (n = 4) => `<div class="rows" aria-hidden="true">${
+  '<div class="skeleton row-sk"></div>'.repeat(n)}</div>`;
+const skeletonPosters = (n = 12) => `<div class="posters" aria-hidden="true">${
+  '<div class="skeleton poster-sk"></div>'.repeat(n)}</div>`;
+
+function loading(note, shape) {
+  return `<p class="loading-note" role="status">${esc(note)}</p>${shape}`;
+}
+
+function empty({ icon: name = 'info', title, text = '', actions = '' }) {
+  return `<div class="empty">${icon(name)}<h3>${esc(title)}</h3>${
+    text ? `<p>${text}</p>` : ''}${actions ? `<div class="actions">${actions}</div>` : ''}</div>`;
+}
+
+function problem(title, message, retryAction, { settings = true } = {}) {
+  return `<div class="alert error" role="alert">${icon('alert')}<div class="grow">
+    <strong>${esc(title)}</strong><span>${esc(message)}</span>
+    <div class="actions">
+      ${retryAction ? `<button type="button" class="btn secondary sm" data-action="${retryAction}">
+        ${icon('refresh')}Try again</button>` : ''}
+      ${settings ? '<a class="btn ghost sm" href="#/settings/library">Open settings</a>' : ''}
+    </div></div></div>`;
+}
+
+/* Rewrite a live region without losing the keyboard's place: skipped when
+   nothing changed, and focus is put back on the element with the same key. */
+function morph(host, html) {
+  if (host._html === html) return;
+  const active = document.activeElement;
+  const key = active && host.contains(active) ? active.dataset.key : null;
+  host.innerHTML = html;
+  host._html = html;
+  if (key) {
+    const again = host.querySelector(`[data-key="${CSS.escape(key)}"]`);
+    if (again) again.focus({ preventScroll: true });
+  }
+}
+
+function setBusy(button, busy) {
+  if (!button) return;
+  button.disabled = busy;
+  button.setAttribute('aria-busy', busy ? 'true' : 'false');
+}
+
+function posterCard(item, kind, index) {
+  const chips = [];
+  if (kind === 'show') {
+    if (item.monitored) chips.push('<span class="badge auto">Auto</span>');
+    if (item.pending) chips.push(`<span class="badge queued">${item.pending} queued</span>`);
+    if (item.failed) chips.push(`<span class="badge failed">${item.failed} failed</span>`);
+    if (item.cleaned) chips.push(`<span class="badge done">${item.cleaned}/${item.episodes} clean</span>`);
+    if (!item.episodes) chips.push('<span class="badge">No files</span>');
+  } else if (item.job_status) {
+    chips.push(badge(item.job_status));
+  }
+  const line = kind === 'show'
+    ? (item.episodes ? plural(item.episodes, 'episode') : 'nothing downloaded')
+    : (item.home ? ago(item.added) : (item.quality || ''));
+  const action = kind === 'show' ? 'open-show' : 'open-movie';
+  const data = kind === 'show'
+    ? `data-id="${esc(item.id)}" data-title="${esc(item.title)}"`
+    : `data-index="${index}" data-list="${item.home ? 'home' : 'movies'}"`;
+  const label = `${item.title}${item.year ? ` (${item.year})` : ''}${chips.length ? `, ${
+    chips.map((c) => c.replace(/<[^>]+>/g, '')).join(', ')}` : ''}`;
+  return `<article class="poster">
+    <div class="art"><span class="initial" aria-hidden="true">${esc((item.title || '?').trim()[0] || '?')}</span>
+      <img loading="lazy" alt="" src="${posterUrl(item, kind)}" onerror="this.remove()"></div>
+    <div class="chips" aria-hidden="true">${chips.join('')}</div>
+    <div class="meta">
+      <button type="button" class="open" data-action="${action}" ${data}
+        aria-label="${esc(label)}">${esc(item.title)}</button>
+      <div class="year">${esc([item.year || '', line].filter(Boolean).join(' · '))}</div>
+    </div></article>`;
+}
+
+/* ======================================================================
+   Routing
+   ====================================================================== */
+
+const VIEWS = ['home', 'shows', 'movies', 'upcoming', 'queue', 'cleaned', 'settings'];
+let settingsDirty = false;
+let restoringHash = false;
+let firstRoute = true;
+
+function parseHash() {
+  const [view, section] = (location.hash.replace(/^#\/?/, '') || 'home').split('/');
+  return { view: VIEWS.includes(view) ? view : 'home', section: section || '' };
+}
+
+async function route() {
+  if (restoringHash) { restoringHash = false; return; }
+  const { view, section } = parseHash();
+  const leaving = state.view;
+
+  if (leaving === 'settings' && view !== 'settings' && settingsDirty) {
+    const answer = await ask('Leave without saving?',
+      'Your changes in Settings have not been saved.',
+      [{ label: 'Discard changes', value: 'discard' }, { label: 'Save', value: 'save', primary: true }]);
+    if (answer === 'save') {
+      if (!(await saveSettings())) { restoringHash = true; location.hash = '#/settings'; return; }
+    } else if (answer === 'discard') {
+      discardSettings();
+    } else {
+      restoringHash = true;
+      location.hash = '#/settings';
+      return;
+    }
+  }
+
+  state.view = view;
+  $$('.view').forEach((v) => { v.hidden = v.id !== `view-${view}`; });
+  $$('[data-nav]').forEach((a) => {
+    if (a.dataset.nav === view) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
+  const title = $(`#view-${view}`).dataset.title;
+  document.title = view === 'home' ? 'Cleanarr' : `${title} · Cleanarr`;
+  if ($('#more-sheet').open) $('#more-sheet').close();
+
+  if (!firstRoute && leaving !== view) {
+    window.scrollTo(0, 0);
+    $(`#view-${view} h1`).focus({ preventScroll: true });
+  }
+  firstRoute = false;
+
+  if (view === 'home') loadHome();
+  if (view === 'shows' && !state.shows) loadShows();
+  if (view === 'movies' && !state.movies) loadMovies();
+  if (view === 'upcoming') loadCalendar();
+  if (view === 'queue') renderQueue();
+  if (view === 'cleaned') loadCleaned();
+  if (view === 'settings') {
+    // A failure is already on the page, with a retry.
+    try { await loadSettings(); } catch (err) { return; }
+    if (section) {
+      const panel = $(`#s-${section}`);
+      if (panel) {
+        panel.scrollIntoView({ block: 'start' });
+        const heading = panel.querySelector('h2');
+        heading.tabIndex = -1;
+        heading.focus({ preventScroll: true });
+      }
+    }
+  }
+}
+window.addEventListener('hashchange', route);
+
+/* ======================================================================
+   One listener for every click that does something
+   ====================================================================== */
+
+const ACTIONS = {};
+
+document.addEventListener('click', async (event) => {
+  // Clicking elsewhere closes an open overflow menu.
+  $$('details.menu[open]').forEach((d) => { if (!d.contains(event.target)) d.open = false; });
+  const el = event.target.closest('[data-action]');
+  if (!el || el.tagName === 'INPUT' && el.type === 'checkbox' && el.dataset.action !== 'pick') return;
+  const handler = ACTIONS[el.dataset.action];
+  if (!handler) return;
+  const menu = el.closest('details.menu');
+  if (menu) menu.open = false;
+  try {
+    await handler(el, event);
+  } catch (err) {
+    fail(err);
+  }
+});
+
+document.addEventListener('change', async (event) => {
+  const el = event.target.closest('[data-change]');
+  if (!el) return;
+  const handler = ACTIONS[el.dataset.change];
+  if (!handler) return;
+  try { await handler(el, event); } catch (err) { fail(err); }
+});
+
+/* Overflow menus are opened here rather than by the browser, so a menu near
+   the bottom of its scrolling area can be turned upwards before it is ever
+   drawn: the browser's own toggle event comes a task later, after a frame of
+   the menu hanging off the end. */
+document.addEventListener('click', (event) => {
+  const summary = event.target.closest('details.menu > summary');
+  if (!summary) return;
+  event.preventDefault();
+  const menu = summary.parentElement;
+  const opening = !menu.open;
+  $$('details.menu[open]').forEach((d) => { if (d !== menu) d.open = false; });
+  menu.classList.remove('up');
+  menu.open = opening;
+  if (!opening) return;
+  const list = menu.querySelector('.menu-list');
+  const area = menu.closest('.sheet-body') || document.documentElement;
+  const bottom = Math.min(area.getBoundingClientRect().bottom, window.innerHeight);
+  if (list.getBoundingClientRect().bottom > bottom - 8) menu.classList.add('up');
+}, true);
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    $$('details.menu[open]').forEach((d) => {
+      d.open = false;
+      d.querySelector('summary').focus();
+    });
+  }
+});
+
+/* ======================================================================
+   Queueing
+   ====================================================================== */
+
+async function queue(items, { monitor } = {}) {
+  if (!items.length) return null;
+  const body = { items };
+  if (monitor) body.monitor = monitor;
+  const result = await api('/api/jobs', { method: 'POST', body });
+  const parts = [result.queued ? `Queued ${result.queued}` : 'Nothing new queued'];
+  if (result.already_queued) parts.push(`${result.already_queued} already waiting`);
+  toast(parts.join(' · '), { action: { label: 'Open queue', run: () => { location.hash = '#/queue'; } } });
+  poll();
+  return result;
+}
+
+/* Anything already cleaned is said out loud before it is cleaned again. */
+async function confirmRedo(items) {
+  const done = items.filter((i) => isDone(i.job_status));
+  if (!done.length) return items;
   if (items.length === 1) {
     const one = done[0];
-    const detail = [when(one.cleaned_at) && `cleaned ${when(one.cleaned_at)}`,
-                    one.muted ? `${one.muted} words muted` : 'nothing found to mute']
-      .filter(Boolean).join(', ');
-    const answer = await ask('This one is already cleaned',
+    const detail = [one.cleaned_at && `cleaned ${when(one.cleaned_at)}`,
+      one.muted ? plural(one.muted, 'word') + ' muted' : 'nothing found to mute'].filter(Boolean).join(', ');
+    const answer = await ask('Already cleaned',
       `${one.label} was done before (${detail}). Cleaning it again replaces its cleaned track.`,
       [{ label: 'Clean it again', value: 'all', primary: true }]);
     return answer === 'all' ? items : [];
   }
-
   const answer = await ask('Some of these are already cleaned',
-    `${done.length} of ${items.length} already have a cleaned track. `
-    + 'Cleaning them again replaces it.',
-    [{ label: `Only the other ${items.length - done.length}`, value: 'rest', primary: true },
-     { label: 'All of them again', value: 'all' }]);
+    `${done.length} of ${items.length} already have a cleaned track. Cleaning them again replaces it.`,
+    [{ label: 'All of them again', value: 'all' },
+      { label: `Only the other ${items.length - done.length}`, value: 'rest', primary: true }]);
   if (answer === 'all') return items;
-  if (answer === 'rest') return items.filter((i) => !['done', 'skipped'].includes(i.job_status));
+  if (answer === 'rest') return items.filter((i) => !isDone(i.job_status));
   return [];
 }
 
-// ------------------------------------------------------------------ tabs
-$$('.tab').forEach((tab) => tab.addEventListener('click', () => {
-  $$('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-  $$('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${tab.dataset.view}`));
-  if (tab.dataset.view === 'home') loadHome();
-  if (tab.dataset.view === 'shows' && !state.shows.length) loadShows();
-  if (tab.dataset.view === 'upcoming') loadCalendar();
-  if (tab.dataset.view === 'movies' && !state.movies.length) loadMovies();
-  if (tab.dataset.view === 'queue') loadJobs();
-  if (tab.dataset.view === 'cleaned') loadCleaned();
-  if (tab.dataset.view === 'settings') plexNow();
-  closeDrawer();
-}));
-
-// ------------------------------------------------------- the drawer itself
-function closeDrawer() {
-  $('#drawer').hidden = true;
-  $('#scrim').hidden = true;
-}
-$('#drawer-close').addEventListener('click', closeDrawer);
-$('#scrim').addEventListener('click', closeDrawer);
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
-// Clicking anywhere that is not the drawer closes it - including the search
-// box, which is where a hand goes next after looking at a show.
-document.addEventListener('mousedown', (e) => {
-  if ($('#drawer').hidden) return;
-  if (e.target.closest('#drawer') || e.target.closest('.poster')
-      || e.target.closest('#ask') || e.target.closest('[data-job]')) return;
-  closeDrawer();
+const episodeJob = (e, showTitle, extra = {}) => ({
+  kind: 'episode', title: showTitle,
+  subtitle: `${epCode(e.season, e.episode)} · ${e.title || ''}`,
+  path: e.path, source: 'sonarr', source_id: String(e.id ?? e.episode_id), ...extra,
 });
 
-function openDrawer() {
-  $('#scrim').hidden = false;
-  $('#drawer').hidden = false;
+async function removeTracks(items, label, toJob) {
+  const cleaned = items.filter((e) => isDone(e.job_status));
+  if (!cleaned.length) { toast('None of those have a cleaned track'); return; }
+  const freed = cleaned.reduce((sum, e) => sum + (e.added_bytes || 0), 0);
+  const answer = await ask(
+    `Remove the cleaned track from ${plural(cleaned.length, 'file')}?`,
+    `${label}. Only the “${trackName()}” track is taken out; the original audio is untouched`
+    + `${freed ? `, and about ${size(freed)} comes back` : ''}.`,
+    [{ label: 'Remove', value: 'yes', primary: true }], { danger: true });
+  if (answer !== 'yes') return;
+  await queue(cleaned.map(toJob));
 }
 
-// ------------------------------------------------------------------- home
-/* "Two days ago" reads faster than a date when the whole point of the page is
-   what is new. Anything older than a fortnight gets the date instead. */
-const ago = (iso) => {
-  if (!iso) return '';
-  const days = Math.floor((Date.now() - Date.parse(iso)) / 86400000);
-  if (Number.isNaN(days)) return '';
-  if (days <= 0) return 'today';
-  if (days === 1) return 'yesterday';
-  if (days < 14) return `${days} days ago`;
-  return new Date(iso).toLocaleDateString(undefined,
-    { day: 'numeric', month: 'short', year: 'numeric' });
+/* ======================================================================
+   Status everywhere: the sidebar, the nav counts, the "now" cards
+   ====================================================================== */
+
+async function poll() {
+  let data;
+  try { data = await api('/api/jobs'); } catch (err) { return; }
+  state.jobs = data;
+  const { stats } = data;
+  const waiting = stats.waiting || 0;
+  $('#queue-count').textContent = waiting ? String(waiting) : '';
+  $('#cleaned-count').textContent = stats.cleaned_files ? String(stats.cleaned_files) : '';
+  $('#more-cleaned-count').textContent = stats.cleaned_files ? String(stats.cleaned_files) : '';
+  renderSideStatus();
+  if (state.view === 'queue') renderQueue();
+  if (state.view === 'home') renderHomeNow();
+}
+
+function runningJob() {
+  return (state.jobs?.items || []).find((j) => j.status === 'running') || null;
+}
+
+function renderSideStatus() {
+  const data = state.jobs;
+  if (!data) return;
+  const job = runningJob();
+  let html;
+  if (data.holding) {
+    html = `<strong><span class="pulse hold"></span>Waiting for ${esc(serverName())}</strong>
+      <span>${esc(data.holding)}</span>`;
+  } else if (job) {
+    html = `<strong><span class="pulse busy"></span>Cleaning ${Math.round(job.progress * 100)}%</strong>
+      <span>${esc(job.title)} ${esc(job.subtitle || '')}</span>`;
+  } else {
+    const waiting = data.stats.waiting || 0;
+    html = `<strong><span class="pulse idle"></span>${waiting ? plural(waiting, 'job') + ' waiting' : 'Idle'}</strong>`;
+  }
+  morph($('#side-status'), html);
+}
+
+/* What is happening right now: a job, a hold, or nothing. */
+function nowCard({ withCancel = false } = {}) {
+  const data = state.jobs;
+  if (!data) return '';
+  const job = runningJob();
+  if (data.holding) {
+    return `<div class="card now hold" role="status">${icon('pause', 'i big')}
+      <div class="grow"><div class="title">Waiting while ${esc(serverName())} is busy</div>
+        <div class="sub">${esc(data.holding)}. The queue carries on when it stops.</div></div>
+      <button type="button" class="btn secondary sm" data-action="clean-anyway" data-key="anyway">Clean anyway</button></div>`;
+  }
+  if (!job) return '';
+  const pct = Math.round((job.progress || 0) * 100);
+  return `<div class="card now">${icon('wave', 'i big')}
+    <div class="grow">
+      <div class="title">${esc(job.title)} <span class="muted">${esc(job.subtitle || '')}</span></div>
+      <div class="sub">${esc(job.message || job.stage || 'starting')}${
+        job.started_at ? ` · ${elapsed(job.started_at)}` : ''}</div>
+      <div class="progress" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100"
+        aria-valuenow="${pct}"><span style="width:${pct}%"></span></div>
+    </div>
+    <b>${pct}%</b>
+    ${withCancel ? `<button type="button" class="btn ghost sm" data-action="cancel-job" data-id="${job.id}" data-key="cancel-${job.id}">Cancel</button>` : ''}
+  </div>`;
+}
+
+ACTIONS['clean-anyway'] = async () => {
+  await api('/api/queue/clean-anyway', { method: 'POST' });
+  toast(`Carrying on while ${serverName()} is busy`);
+  poll();
 };
 
-/* Settled before the first paint from a cached value, so the loading copy is
-   not briefly wrong for a Plex-only install. */
-try {
-  const cached = localStorage.getItem('cleanarr.library_source');
-  if (cached) LIB_SOURCE = cached;
-} catch (e) { /* private window, no matter */ }
+/* ======================================================================
+   Home
+   ====================================================================== */
 
-async function loadHome() {
-  let data;
-  // Asking both services takes a few seconds, and this is what opens first:
-  // an empty page for that long reads as broken rather than busy.
-  if (!state.home) {
-    $('#home-episodes').innerHTML = `<p class="muted">Asking ${sourceName('show')}…</p>`;
-    $('#home-movies').innerHTML = `<p class="muted">Asking ${sourceName('movie')}…</p>`;
-  }
+const SECTION_LINKS = {
+  library: '#/settings/library', listening: '#/settings/listening', shows: '#/shows',
+  security: '#/settings/security', judge: '#/settings/judge',
+};
+
+async function loadSetup() {
   try {
-    data = await api('/api/home');
-    noteLibrarySource(data);
-  } catch (err) {
-    $('#home-summary').innerHTML =
-      `<p class="muted">${escapeHtml(err.message)} — check Settings.</p>`;
-    return;
-  }
-  state.home = data;
-
-  const { stats } = data;
-  const tile = (value, label) => `<div class="tile"><b>${value}</b><span>${label}</span></div>`;
-  $('#home-summary').innerHTML =
-    tile(stats.cleaned_files, `file${stats.cleaned_files === 1 ? '' : 's'} cleaned`)
-    + tile(stats.words_muted, `word${stats.words_muted === 1 ? '' : 's'} muted`)
-    + tile(size(stats.added_bytes) || '0 MB', 'of cleaned audio')
-    + tile(data.queued + data.running, 'waiting in the queue')
-    + tile(data.monitors, `show${data.monitors === 1 ? '' : 's'} cleaning themselves`)
-    + (data.failed ? tile(data.failed, 'failed') : '')
-    + (data.holding ? `<div class="tile wide"><b>⏸ waiting for Plex</b>
-        <span>${escapeHtml(data.holding)}</span></div>` : '');
-
-  if (data.problems.length) {
-    $('#home-summary').insertAdjacentHTML('beforeend',
-      `<div class="tile wide warn"><b>Not everything answered</b>
-       <span>${data.problems.map(escapeHtml).join(' · ')}</span></div>`);
-  }
-
-  $('#home-episodes').innerHTML = data.episodes.map((e, index) => `
-    <div class="card">
-      <img class="thumb" loading="lazy" alt=""
-           src="${posterUrl(e, 'show')}"
-           onerror="this.classList.add('missing');this.removeAttribute('src')">
-      <div class="grow">
-        <div class="title">${escapeHtml(e.series)}
-          <span class="muted">S${String(e.season).padStart(2, '0')}E${
-            String(e.episode).padStart(2, '0')} · ${escapeHtml(e.title)}</span></div>
-        <div class="sub">${ago(e.added)} · ${escapeHtml(e.quality || '')} ${gb(e.size)}${
-          e.muted ? ` · ${e.muted} muted` : ''}${
-          e.monitored ? ' · <span class="chip auto">auto</span>' : ''}</div>
-      </div>
-      ${statusBadge(e.job_status)}
-      <button class="small ghost" data-open-series="${e.series_id}"
-              data-title="${escapeHtml(e.series)}">Open show</button>
-      <button class="small" data-new-episode="${index}">${
-        ['done', 'skipped'].includes(e.job_status) ? 'Clean again' : 'Clean'}</button>
-    </div>`).join('')
-    || `<p class="muted">Nothing new in ${sourceName('show')} lately.</p>`;
-
-  const epNote = $('#home-episodes-note');
-  if (epNote) epNote.textContent = `newest first, straight from ${sourceName('show')}`;
-  const mvNote = $('#home-movies-note');
-  if (mvNote) mvNote.textContent = `newest first, straight from ${sourceName('movie')}`;
-
-  $('#home-movies').innerHTML = data.movies
-    .map((m, index) => posterCard({ ...m, index, home: true }, 'movie')).join('')
-    || `<p class="muted">Nothing new in ${sourceName('movie')} lately.</p>`;
+    state.setup = await api('/api/setup');
+  } catch (err) { return; }
+  const done = state.setup.done;
+  $('#settings-dot').hidden = done;
+  $('#more-dot').hidden = done;
+  $('#more-settings-dot').hidden = done;
+  const worst = (keys) => {
+    const items = state.setup.required.concat(state.setup.optional).filter((i) => keys.includes(i.key));
+    for (const s of ['problem', 'todo', 'info']) if (items.some((i) => i.state === s)) return s;
+    return items.length ? 'ok' : '';
+  };
+  $$('[data-state]').forEach((el) => {
+    const keys = { library: ['library', 'paths'], listening: ['listening'], login: ['login'] }[el.dataset.state];
+    el.dataset.value = worst(keys);
+    el.title = { ok: 'Done', todo: 'Needs setting up', problem: 'Has a problem', info: 'Optional' }[el.dataset.value] || '';
+  });
+  if (state.view === 'home') renderSetup();
 }
 
-// --------------------------------------------------------------- upcoming
-/* "Tonight", "Tomorrow", then the weekday - a date alone makes you count. */
+function renderSetup() {
+  const host = $('#home-setup');
+  const setup = state.setup;
+  if (!setup || setup.done) { host.innerHTML = ''; return; }
+  const ok = setup.required.filter((i) => i.state === 'ok').length;
+  const item = (i, n) => `<li class="${i.state}">
+    <span class="mark" aria-hidden="true">${i.state === 'ok' ? icon('check')
+      : (i.state === 'problem' ? '!' : (i.state === 'info' ? 'i' : n))}</span>
+    <div class="grow"><strong>${esc(i.title)}</strong>
+      <span class="sr-only">${{ ok: 'done', todo: 'to do', problem: 'problem', info: 'optional' }[i.state]}.</span>
+      <div class="detail">${esc(i.detail)}</div></div>
+    ${i.state !== 'ok' && SECTION_LINKS[i.section]
+      ? `<a class="btn secondary sm go" href="${SECTION_LINKS[i.section]}">${
+        i.key === 'first_clean' ? 'Pick one' : 'Fix'}</a>` : ''}
+  </li>`;
+  host.innerHTML = `<section class="card setup" aria-labelledby="setup-h">
+    <div class="setup-head">
+      <h2 id="setup-h">Finish setting up</h2>
+      <span class="muted small">${ok} of ${setup.required.length} done</span>
+      <div class="meter" aria-hidden="true"><span style="width:${Math.round(100 * ok / setup.required.length)}%"></span></div>
+    </div>
+    <ol class="checklist">${setup.required.map((i, n) => item(i, n + 1)).join('')}</ol>
+    ${setup.optional.some((i) => i.state !== 'ok') ? `<p class="optional-head">Optional</p>
+      <ul class="checklist">${setup.optional.filter((i) => i.state !== 'ok').map((i) => item(i, '')).join('')}</ul>` : ''}
+  </section>`;
+}
+
+function renderHomeNow() {
+  morph($('#home-now'), nowCard());
+}
+
+async function loadHome() {
+  loadSetup();
+  renderHomeNow();
+  if (!state.home) {
+    $('#home-stats').innerHTML = '<div class="skeleton stat-sk"></div>'.repeat(4);
+    $('#home-episodes').innerHTML = loading(`Asking ${sourceName('show')}…`, skeletonRows(4));
+    $('#home-movies').innerHTML = loading(`Asking ${sourceName('movie')}…`, skeletonPosters(6));
+  }
+  let data;
+  try {
+    data = await api('/api/home');
+  } catch (err) {
+    if (err.status === 401) return;
+    $('#home-stats').innerHTML = '';
+    $('#home-episodes').innerHTML = problem('Could not load Home', err.message, 'reload-home');
+    $('#home-movies').innerHTML = '';
+    return;
+  }
+  noteSource(data);
+  state.home = data;
+  renderHome();
+}
+ACTIONS['reload-home'] = () => { state.home = null; return loadHome(); };
+
+function renderHome() {
+  const data = state.home;
+  if (!data) return;
+  const { stats } = data;
+  const tile = (value, label, href) => (href
+    ? `<a class="stat" href="${href}"><b>${value}</b><span>${label}</span></a>`
+    : `<div class="stat"><b>${value}</b><span>${label}</span></div>`);
+  $('#home-stats').innerHTML =
+    tile(stats.cleaned_files, stats.cleaned_files === 1 ? 'file cleaned' : 'files cleaned', '#/cleaned')
+    + tile(stats.words_muted, stats.words_muted === 1 ? 'word muted' : 'words muted')
+    + tile(size(stats.added_bytes) || '0 MB', 'of cleaned audio', '#/cleaned')
+    + tile(data.queued + data.running, 'in the queue', '#/queue')
+    + tile(data.monitors, data.monitors === 1 ? 'show cleaning new episodes' : 'shows cleaning new episodes', '#/shows')
+    + (data.failed ? tile(data.failed, 'failed', '#/queue') : '');
+
+  $('#home-problems').innerHTML = data.problems.length
+    ? `<div class="alert warn">${icon('alert')}<div class="grow"><strong>Not everything answered</strong>
+        ${data.problems.map((p) => `<div>${esc(p)}</div>`).join('')}
+        <div class="actions"><button type="button" class="btn secondary sm" data-action="reload-home">${icon('refresh')}Try again</button>
+          <a class="btn ghost sm" href="#/settings/library">Open settings</a></div></div></div>`
+    : '';
+
+  $('#home-eps-note').textContent = `newest first, from ${sourceName('show')}`;
+  $('#home-films-note').textContent = `newest first, from ${sourceName('movie')}`;
+
+  $('#home-episodes').innerHTML = data.episodes.length
+    ? `<div class="rows">${data.episodes.map((e, i) => `
+      <div class="row">
+        <img class="thumb" loading="lazy" alt="" src="${posterUrl(e, 'episode')}" onerror="this.classList.add('none')">
+        <div class="grow">
+          <div class="title">${esc(e.series)} <span class="muted">${epCode(e.season, e.episode)}${
+            e.title ? ` · ${esc(e.title)}` : ''}</span></div>
+          <div class="sub">${esc([ago(e.added), e.quality, size(e.size),
+            e.muted ? plural(e.muted, 'word') + ' muted' : ''].filter(Boolean).join(' · '))}</div>
+        </div>
+        <div class="actions">
+          ${badge(e.job_status)}${e.monitored ? '<span class="badge auto">Auto</span>' : ''}
+          <button type="button" class="btn ghost sm" data-action="open-show" data-id="${esc(e.series_id)}"
+            data-title="${esc(e.series)}">Open show</button>
+          <button type="button" class="btn sm" data-action="clean-home-episode" data-index="${i}"
+            aria-label="${isDone(e.job_status) ? 'Clean again' : 'Clean'}: ${esc(e.series)} ${epCode(e.season, e.episode)}"
+            ${['queued', 'running'].includes(e.job_status) ? 'disabled' : ''}>${isDone(e.job_status) ? 'Clean again' : 'Clean'}</button>
+        </div>
+      </div>`).join('')}</div>`
+    : empty({ icon: 'tv', title: 'Nothing new lately',
+      text: `${esc(sourceName('show'))} has not reported any new episodes.` });
+
+  $('#home-movies').innerHTML = data.movies.length
+    ? `<div class="posters">${data.movies.map((m, i) => posterCard({ ...m, home: true }, 'movie', i)).join('')}</div>`
+    : empty({ icon: 'film', title: 'No films yet',
+      text: `${esc(sourceName('movie'))} has not reported any films.` });
+}
+
+ACTIONS['clean-home-episode'] = async (el) => {
+  const e = state.home.episodes[Number(el.dataset.index)];
+  if (!e) return;
+  const wanted = await confirmRedo([{ ...e, label: `${e.series} ${epCode(e.season, e.episode)}` }]);
+  if (!wanted.length) return;
+  setBusy(el, true);
+  try {
+    await queue([episodeJob({ ...e, id: e.episode_id }, e.series, { force: isDone(e.job_status) })]);
+  } finally { setBusy(el, false); }
+  state.home = null;
+  loadHome();
+};
+
+/* ======================================================================
+   Shows and movies
+   ====================================================================== */
+
+const byRecent = (a, b) => String(b.latest || '').localeCompare(String(a.latest || ''));
+const byTitle = (a, b) => (a.title || '').toLowerCase().localeCompare((b.title || '').toLowerCase());
+
+async function loadShows() {
+  $('#show-grid').innerHTML = loading(`Asking ${sourceName('show')}…`, skeletonPosters(18));
+  $('#show-count').textContent = '';
+  try {
+    const data = await api('/api/series');
+    noteSource(data);
+    state.shows = data.items;
+    renderShows();
+  } catch (err) {
+    if (err.status === 401) return;
+    state.shows = null;
+    $('#show-grid').innerHTML = problem(`Could not list your shows`, err.message, 'reload-shows');
+  }
+}
+ACTIONS['reload-shows'] = loadShows;
+
+function renderShows() {
+  if (!state.shows) return;
+  const needle = $('#show-search').value.trim().toLowerCase();
+  const filter = $('#show-filter').value;
+  const items = state.shows.filter((s) => {
+    if (needle && !(s.title || '').toLowerCase().includes(needle)) return false;
+    if (filter === 'cleaned') return s.cleaned > 0;
+    if (filter === 'monitored') return s.monitored;
+    if (filter === 'untouched') return !s.cleaned && !s.pending;
+    if (filter === 'nofiles') return !s.episodes;
+    return true;
+  }).sort($('#show-sort').value === 'recent' ? byRecent : byTitle);
+  $('#show-count').textContent = `${plural(items.length, 'show')}${
+    items.length !== state.shows.length ? ` of ${state.shows.length}` : ''}`;
+  if (!state.shows.length) {
+    $('#show-grid').innerHTML = empty({ icon: 'tv', title: 'No shows yet',
+      text: `${esc(sourceName('show'))} answered, but has no shows.`,
+      actions: '<a class="btn secondary sm" href="#/settings/library">Check the library settings</a>' });
+    return;
+  }
+  $('#show-grid').innerHTML = items.length
+    ? `<div class="posters">${items.map((s) => posterCard(s, 'show')).join('')}</div>`
+    : empty({ icon: 'search', title: 'Nothing matches',
+      actions: '<button type="button" class="btn secondary sm" data-action="clear-show-filters">Clear the search</button>' });
+}
+ACTIONS['clear-show-filters'] = () => {
+  $('#show-search').value = ''; $('#show-filter').value = 'all'; renderShows(); $('#show-search').focus();
+};
+$('#show-search').addEventListener('input', debounce(renderShows, 120));
+$('#show-filter').addEventListener('change', renderShows);
+$('#show-sort').addEventListener('change', renderShows);
+
+async function loadMovies() {
+  $('#movie-grid').innerHTML = loading(`Asking ${sourceName('movie')}…`, skeletonPosters(18));
+  $('#movie-count').textContent = '';
+  try {
+    const data = await api('/api/movies');
+    noteSource(data);
+    state.movies = data.items;
+    renderMovies();
+  } catch (err) {
+    if (err.status === 401) return;
+    state.movies = null;
+    $('#movie-grid').innerHTML = problem('Could not list your films', err.message, 'reload-movies');
+  }
+}
+ACTIONS['reload-movies'] = loadMovies;
+
+function renderMovies() {
+  if (!state.movies) return;
+  const needle = $('#movie-search').value.trim().toLowerCase();
+  const filter = $('#movie-filter').value;
+  const items = state.movies.map((m, index) => ({ ...m, index })).filter((m) => {
+    if (needle && !(m.title || '').toLowerCase().includes(needle)) return false;
+    if (filter === 'cleaned') return isDone(m.job_status);
+    if (filter === 'untouched') return !m.job_status;
+    return true;
+  }).sort($('#movie-sort').value === 'recent' ? byRecent : byTitle);
+  $('#movie-count').textContent = `${plural(items.length, 'film')}${
+    items.length !== state.movies.length ? ` of ${state.movies.length}` : ''}`;
+  if (!state.movies.length) {
+    $('#movie-grid').innerHTML = empty({ icon: 'film', title: 'No films yet',
+      text: `${esc(sourceName('movie'))} answered, but has no films with a file.`,
+      actions: '<a class="btn secondary sm" href="#/settings/library">Check the library settings</a>' });
+    return;
+  }
+  $('#movie-grid').innerHTML = items.length
+    ? `<div class="posters">${items.map((m) => posterCard(m, 'movie', m.index)).join('')}</div>`
+    : empty({ icon: 'search', title: 'Nothing matches',
+      actions: '<button type="button" class="btn secondary sm" data-action="clear-movie-filters">Clear the search</button>' });
+}
+ACTIONS['clear-movie-filters'] = () => {
+  $('#movie-search').value = ''; $('#movie-filter').value = 'all'; renderMovies(); $('#movie-search').focus();
+};
+$('#movie-search').addEventListener('input', debounce(renderMovies, 120));
+$('#movie-filter').addEventListener('change', renderMovies);
+$('#movie-sort').addEventListener('change', renderMovies);
+
+/* ======================================================================
+   The sheet: a show, a film, or a job
+   ====================================================================== */
+
+function openSheet(title, sub = '') {
+  const sheet = $('#sheet');
+  $('#sheet-title').textContent = title;
+  $('#sheet-sub').textContent = sub;
+  $('#sheet-actions').innerHTML = '';
+  $('#sheet-body').innerHTML = '';
+  $('#sheet-body').scrollTop = 0;
+  if (!sheet.open) sheet.showModal();
+  return sheet;
+}
+function closeSheet() { const s = $('#sheet'); if (s.open) s.close(); state.sheet = null; }
+$('#sheet-close').addEventListener('click', closeSheet);
+$('#sheet').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeSheet(); });
+$('#sheet').addEventListener('close', () => { state.sheet = null; });
+
+/* ---------------------------------------------------------------- a show */
+
+ACTIONS['open-show'] = (el) => openShow(el.dataset.id, el.dataset.title);
+
+async function openShow(id, title) {
+  state.sheet = { kind: 'show', id, title, episodes: null, open: new Set() };
+  openSheet(title);
+  renderShowActions();
+  $('#sheet-body').innerHTML = loading('Loading episodes…', skeletonRows(5));
+  try {
+    const { items } = await api(`/api/series/${encodeURIComponent(id)}/episodes`);
+    if (state.sheet?.id !== id) return;
+    state.sheet.episodes = items;
+    const seasons = [...new Set(items.map((e) => e.season))];
+    if (seasons.length === 1) state.sheet.open.add(seasons[0]);
+  } catch (err) {
+    if (state.sheet?.id !== id) return;
+    $('#sheet-body').innerHTML = problem('Could not load the episodes', err.message, 'reload-show', { settings: false });
+    return;
+  }
+  renderShow();
+}
+ACTIONS['reload-show'] = () => openShow(state.sheet.id, state.sheet.title);
+
+function isWatched(id) {
+  const show = (state.shows || []).find((s) => String(s.id) === String(id));
+  if (show) return !!show.monitored;
+  return !!state.sheet?.monitored;
+}
+
+async function renderShowActions() {
+  const sheet = state.sheet;
+  if (!sheet || sheet.kind !== 'show') return;
+  if (!(state.shows || []).some((s) => String(s.id) === String(sheet.id))) {
+    try {
+      const { items } = await api('/api/monitors');
+      sheet.monitored = items.some((m) => m.source === 'sonarr' && String(m.source_id) === String(sheet.id));
+    } catch (err) { /* the switch shows off */ }
+  }
+  const eps = sheet.episodes || [];
+  const outstanding = eps.filter((e) => !isDone(e.job_status) && !['queued', 'running'].includes(e.job_status));
+  const cleaned = eps.filter((e) => isDone(e.job_status));
+  $('#sheet-sub').textContent = sheet.episodes
+    ? `${plural(eps.length, 'episode')} on disk · ${cleaned.length} cleaned` : '';
+  $('#sheet-actions').innerHTML = `
+    <label class="switch" title="Episodes downloaded from now on are cleaned when they arrive. Nothing already on disk is touched.">
+      <input type="checkbox" role="switch" data-change="watch" data-id="${esc(sheet.id)}"
+        data-title="${esc(sheet.title)}" ${isWatched(sheet.id) ? 'checked' : ''}>
+      <span class="track" aria-hidden="true"></span><span>Clean new episodes automatically</span></label>
+    ${outstanding.length ? `<button type="button" class="btn sm" data-action="clean-outstanding">
+      Clean ${outstanding.length === eps.length ? 'all' : `${outstanding.length} not cleaned yet`}</button>` : ''}
+    ${cleaned.length ? `<button type="button" class="btn ghost sm" data-action="remove-show">Remove cleaned tracks</button>` : ''}`;
+}
+
+function renderShow() {
+  const sheet = state.sheet;
+  if (!sheet || sheet.kind !== 'show') return;
+  renderShowActions();
+  const eps = sheet.episodes || [];
+  if (!eps.length) {
+    $('#sheet-body').innerHTML = empty({ icon: 'tv', title: 'Nothing on disk yet',
+      text: `${esc(sourceName('show'))} has no episode files for this show, so there is nothing to clean today.
+        Switch on <strong>Clean new episodes automatically</strong> and each one is cleaned as it arrives.` });
+    return;
+  }
+  const seasons = [...new Set(eps.map((e) => e.season))].sort((a, b) => a - b);
+  $('#sheet-body').innerHTML = seasons.map((season) => {
+    const list = eps.filter((e) => e.season === season);
+    const clean = list.filter((e) => isDone(e.job_status)).length;
+    const busy = list.filter((e) => ['queued', 'running'].includes(e.job_status)).length;
+    const open = sheet.open.has(season);
+    const name = season === 0 ? 'Specials' : `Season ${season}`;
+    return `<section class="season">
+      <div class="season-head">
+        <button type="button" class="season-toggle" aria-expanded="${open}" aria-controls="season-${season}"
+          data-action="toggle-season" data-season="${season}">${icon('right')}
+          <strong>${name}</strong><span>${clean} of ${list.length} cleaned${busy ? ` · ${busy} queued` : ''}</span></button>
+        <button type="button" class="btn secondary sm" data-action="clean-season" data-season="${season}"
+          aria-label="Clean ${name}">Clean season</button>
+        ${clean ? `<button type="button" class="btn ghost sm" data-action="remove-season" data-season="${season}"
+          aria-label="Remove cleaned tracks from ${name}">Remove cleaned</button>` : ''}
+      </div>
+      <div class="season-body" id="season-${season}" ${open ? '' : 'hidden'}>
+        ${list.map((e) => episodeRow(e)).join('')}
+      </div></section>`;
+  }).join('');
+}
+
+function episodeRow(e) {
+  const label = `${epCode(e.season, e.episode)}${e.title ? ` ${e.title}` : ''}`;
+  const busy = ['queued', 'running'].includes(e.job_status);
+  return `<div class="row">
+    <div class="grow">
+      <div class="title">${pad2(e.episode)}. ${esc(e.title || 'Untitled')}</div>
+      <div class="sub">${esc([e.quality, size(e.size), e.muted ? plural(e.muted, 'word') + ' muted' : '',
+        e.added_bytes ? `+${size(e.added_bytes)}` : '', e.cleaned_at ? when(e.cleaned_at) : ''].filter(Boolean).join(' · '))}</div>
+    </div>
+    <div class="actions">
+      ${badge(e.job_status)}
+      <button type="button" class="btn sm${isDone(e.job_status) ? ' secondary' : ''}" data-action="clean-episode"
+        data-id="${esc(e.id)}" aria-label="${isDone(e.job_status) ? 'Clean again' : 'Clean'}: ${esc(label)}" ${busy ? 'disabled' : ''}>
+        ${isDone(e.job_status) ? 'Clean again' : 'Clean'}</button>
+      <details class="menu">
+        <summary class="icon-btn" aria-label="More for ${esc(label)}">${icon('more')}</summary>
+        <div class="menu-list">
+          <button type="button" data-action="clean-from" data-id="${esc(e.id)}">${icon('arrow')}Clean this and every one after it</button>
+          ${e.job_id ? `<button type="button" data-action="open-job" data-id="${e.job_id}">${icon('info')}What was muted</button>` : ''}
+          ${isDone(e.job_status) ? `<button type="button" data-action="remove-episode" data-id="${esc(e.id)}">${icon('trash')}Remove the cleaned track</button>` : ''}
+        </div>
+      </details>
+    </div></div>`;
+}
+
+ACTIONS['toggle-season'] = (el) => {
+  const season = Number(el.dataset.season);
+  const open = state.sheet.open;
+  if (open.has(season)) open.delete(season); else open.add(season);
+  const expanded = open.has(season);
+  el.setAttribute('aria-expanded', String(expanded));
+  $(`#season-${season}`).hidden = !expanded;
+};
+
+async function cleanEpisodes(list) {
+  const sheet = state.sheet;
+  const labelled = list.map((e) => ({ ...e, label: `${epCode(e.season, e.episode)} ${e.title || ''}`.trim() }));
+  const wanted = await confirmRedo(labelled);
+  if (!wanted.length) return;
+  await queue(wanted.map((e) => episodeJob(e, sheet.title, { force: isDone(e.job_status) })),
+    { monitor: { source: 'sonarr', source_id: String(sheet.id), title: sheet.title } });
+  wanted.forEach((w) => {
+    const found = sheet.episodes.find((e) => e.id === w.id);
+    if (found) found.job_status = 'queued';
+  });
+  // Cleaning a season marks the show to clean what arrives from now on.
+  const show = (state.shows || []).find((s) => String(s.id) === String(sheet.id));
+  if (show) show.monitored = true;
+  sheet.monitored = true;
+  renderShow();
+}
+
+const sheetEpisode = (id) => state.sheet.episodes.find((e) => String(e.id) === String(id));
+ACTIONS['clean-episode'] = (el) => cleanEpisodes([sheetEpisode(el.dataset.id)]);
+ACTIONS['clean-season'] = (el) => cleanEpisodes(state.sheet.episodes.filter((e) => e.season === Number(el.dataset.season)));
+ACTIONS['clean-from'] = (el) => {
+  const start = sheetEpisode(el.dataset.id);
+  return cleanEpisodes(state.sheet.episodes.filter((e) => e.season > start.season
+    || (e.season === start.season && e.episode >= start.episode)));
+};
+ACTIONS['clean-outstanding'] = async () => {
+  const outstanding = state.sheet.episodes.filter((e) => !isDone(e.job_status) && !['queued', 'running'].includes(e.job_status));
+  const minutes = outstanding.length * 2.5;
+  const answer = await ask(`Clean ${plural(outstanding.length, 'episode')}?`,
+    `Everything on disk for ${state.sheet.title} that is not cleaned yet. Roughly ${
+      minutes < 60 ? `${Math.round(minutes)} minutes` : `${(minutes / 60).toFixed(1)} hours`} with a GPU; longer on a CPU.`,
+    [{ label: 'Queue them', value: 'yes', primary: true }]);
+  if (answer === 'yes') await cleanEpisodes(outstanding);
+};
+const removeEpisodeJob = (e) => episodeJob(e, state.sheet.title, {
+  subtitle: `${epCode(e.season, e.episode)} · ${e.title || ''} (removing)`, action: 'remove' });
+ACTIONS['remove-episode'] = (el) => {
+  const e = sheetEpisode(el.dataset.id);
+  return removeTracks([e], `${state.sheet.title} ${epCode(e.season, e.episode)}`, removeEpisodeJob);
+};
+ACTIONS['remove-season'] = (el) => {
+  const season = Number(el.dataset.season);
+  return removeTracks(state.sheet.episodes.filter((e) => e.season === season),
+    `${state.sheet.title}, season ${season}`, removeEpisodeJob);
+};
+ACTIONS['remove-show'] = () => removeTracks(state.sheet.episodes,
+  `Every cleaned episode of ${state.sheet.title}`, removeEpisodeJob);
+
+/* The switch that marks a show to clean what arrives. Same wherever it is. */
+ACTIONS.watch = async (box) => {
+  const { id, title } = box.dataset;
+  const on = box.checked;
+  box.disabled = true;
+  try {
+    if (on) {
+      await api('/api/monitors', { method: 'POST',
+        body: { source: 'sonarr', source_id: String(id), title, mode: 'new_only' } });
+      toast(`${title}: new episodes will be cleaned as they arrive`);
+    } else {
+      await api(`/api/monitors/sonarr/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      toast(`${title}: new episodes no longer cleaned automatically`);
+    }
+  } catch (err) {
+    box.checked = !on;
+    throw err;
+  } finally {
+    box.disabled = false;
+  }
+  const show = (state.shows || []).find((s) => String(s.id) === String(id));
+  if (show) show.monitored = on;
+  if (state.sheet && String(state.sheet.id) === String(id)) state.sheet.monitored = on;
+  (state.calendar || []).forEach((e) => { if (String(e.series_id) === String(id)) e.monitored = on; });
+  if (state.view === 'shows') renderShows();
+  if (state.view === 'upcoming') renderCalendar();
+};
+
+/* ---------------------------------------------------------------- a film */
+
+ACTIONS['open-movie'] = (el) => {
+  const list = el.dataset.list === 'home' ? state.home.movies : state.movies;
+  const m = list[Number(el.dataset.index)];
+  if (m) openMovie(m);
+};
+
+function openMovie(m) {
+  state.sheet = { kind: 'movie', movie: m };
+  openSheet(m.title, [m.year, m.quality, size(m.size)].filter(Boolean).join(' · '));
+  const busy = ['queued', 'running'].includes(m.job_status);
+  $('#sheet-actions').innerHTML = `
+    <button type="button" class="btn sm" data-action="clean-movie" ${busy ? 'disabled' : ''}>
+      ${isDone(m.job_status) ? 'Clean again' : 'Clean this film'}</button>
+    ${m.job_id ? '<button type="button" class="btn secondary sm" data-action="open-job" data-id="' + m.job_id + '">What was muted</button>' : ''}
+    ${isDone(m.job_status) ? '<button type="button" class="btn ghost sm" data-action="remove-movie">Remove the cleaned track</button>' : ''}`;
+  const status = {
+    done: `Cleaned ${when(m.cleaned_at)}, ${plural(m.muted || 0, 'word')} muted.`,
+    skipped: `Checked ${when(m.cleaned_at)}: nothing to mute.`,
+    queued: 'Waiting in the queue.', running: 'Being cleaned now.', failed: 'The last attempt failed. See the queue for why.',
+  }[m.job_status] || 'Not cleaned yet.';
+  $('#sheet-body').innerHTML = `<p>${esc(status)}</p>
+    <p class="muted small" style="margin-top:12px">File: <code>${esc(m.path)}</code></p>`;
+}
+
+const movieJob = (m, extra = {}) => ({ kind: 'movie', title: m.title, subtitle: String(m.year || ''),
+  path: m.path, source: 'radarr', source_id: String(m.id), ...extra });
+ACTIONS['clean-movie'] = async (el) => {
+  const m = state.sheet.movie;
+  const wanted = await confirmRedo([{ ...m, label: m.title }]);
+  if (!wanted.length) return;
+  setBusy(el, true);
+  await queue([movieJob(m, { force: isDone(m.job_status) })]).finally(() => setBusy(el, false));
+  m.job_status = 'queued';
+  openMovie(m);
+  if (state.view === 'movies') renderMovies();
+};
+ACTIONS['remove-movie'] = async () => {
+  const m = state.sheet.movie;
+  await removeTracks([m], m.title, (x) => movieJob(x, { subtitle: `${x.year || ''} (removing)`, action: 'remove' }));
+};
+
+/* ---------------------------------------------------------------- a job */
+
+ACTIONS['open-job'] = (el) => openJob(el.dataset.id);
+
+const CATEGORY_NAMES = { custom: 'your own list' };
+const categoryName = (key) => state.labels[key] || CATEGORY_NAMES[key] || key;
+
+async function openJob(id) {
+  state.sheet = { kind: 'job', id: Number(id), changed: false };
+  openSheet('Loading…');
+  $('#sheet-body').innerHTML = skeletonRows(4);
+  let data;
+  try {
+    data = await api(`/api/jobs/${id}`);
+  } catch (err) {
+    $('#sheet-title').textContent = 'Job details';
+    $('#sheet-body').innerHTML = problem('Could not load this job', err.message, null, { settings: false });
+    return;
+  }
+  if (!state.settings) await loadSettings({ fill: false }).catch(() => {});
+  state.sheet.job = data.job;
+  state.sheet.detections = data.detections;
+  renderJob();
+}
+
+function renderJob() {
+  const { job, detections, changed } = state.sheet;
+  $('#sheet-title').textContent = `${job.title}`;
+  $('#sheet-sub').textContent = job.subtitle || '';
+  const busy = ['queued', 'running'].includes(job.status);
+  $('#sheet-actions').innerHTML = `${badge(job.status)}
+    ${!busy && (job.action || 'clean') === 'clean' ? `<button type="button" class="btn sm" data-action="job-again">Clean again</button>` : ''}
+    ${['failed', 'cancelled'].includes(job.status) ? `<button type="button" class="btn secondary sm" data-action="retry" data-id="${job.id}">Retry</button>` : ''}
+    ${busy ? `<button type="button" class="btn ghost sm" data-action="cancel-job" data-id="${job.id}">Cancel</button>` : ''}
+    ${job.status === 'done' && (job.action || 'clean') === 'clean' ? `<button type="button" class="btn ghost sm" data-action="job-remove">Remove the cleaned track</button>` : ''}`;
+
+  const left = detections.filter((d) => !d.muted);
+  const judge = !!state.settings?.judge_url;
+  const message = job.status === 'failed'
+    ? `<div class="alert error" role="alert">${icon('alert')}<div class="grow"><strong>This job failed</strong>${esc(job.message)}</div></div>`
+    : (job.message ? `<p class="muted">${esc(job.message)}</p>` : '');
+  const meta = `<div class="job-meta">
+    <div><b>${job.muted || 0}</b><span>muted</span></div>
+    ${left.length ? `<div><b>${left.length}</b><span>found but left in</span></div>` : ''}
+    ${job.added_bytes ? `<div><b>${size(job.added_bytes)}</b><span>cleaned track</span></div>` : ''}
+    ${job.duration ? `<div><b>${stamp(job.duration)}</b><span>long</span></div>` : ''}
+    ${job.finished_at ? `<div><b>${when(job.finished_at)}</b><span>finished</span></div>` : ''}
+  </div>`;
+  const banner = changed ? `<div class="alert info" role="status">${icon('info')}<div class="grow">
+      <strong>Word lists changed</strong>Clean this file again to apply them.
+      <div class="actions"><button type="button" class="btn sm" data-action="job-again">Clean again now</button></div></div></div>` : '';
+
+  const rows = detections.map((d) => {
+    const word = esc(d.text.replace(/^[^\w']+|[^\w']+$/g, '') || d.text);
+    const menu = d.muted
+      ? `<button type="button" data-action="correct" data-id="${d.id}" data-list="never_here">${icon('tv')}Never mute “${word}” in ${esc(job.title)}</button>
+         <button type="button" data-action="correct" data-id="${d.id}" data-list="never">${icon('x')}Never mute “${word}” anywhere</button>
+         <button type="button" data-action="correct" data-id="${d.id}" data-list="context">${icon('chat')}Check “${word}” in context</button>
+         ${judge ? '' : '<p class="note">No second opinion is set up, so a word checked in context is still muted until one is.</p>'}`
+      : `<button type="button" data-action="correct" data-id="${d.id}" data-list="always">${icon('mute')}Always mute “${word}”</button>`;
+    // The evidence a person needs to decide: what Whisper thought of the word,
+    // and what the subtitles say at that moment. Neither changed the muting.
+    const evidence = [];
+    if (d.confidence !== null && d.confidence !== undefined) {
+      const pct = Math.round(d.confidence * 100);
+      evidence.push(d.confidence < LOW_CONFIDENCE
+        ? `<span class="flag">Whisper was only ${pct}% sure of this word</span>`
+        : `Whisper ${pct}% sure`);
+    }
+    if (d.subtitle_state === 'differs') {
+      evidence.push(`<span class="flag">Subtitles say: “${esc(d.subtitle)}”</span>`);
+    } else if (d.subtitle_state === 'agrees') {
+      evidence.push('Subtitles agree');
+    }
+    const check = worthChecking(d);
+    return `<div class="detection${d.fixed ? ' fixed' : ''}${check ? ' check' : ''}">
+      <span class="at">${stamp(d.start)}</span>
+      <div><div class="word">${esc(d.text)} ${d.muted ? '<span class="badge done">Muted</span>' : '<span class="badge">Left in</span>'}${
+          check ? ' <span class="badge queued">Worth a listen</span>' : ''}</div>
+        <div class="reason">${esc([categoryName(d.category), d.reason].filter(Boolean).join(' · '))}</div>
+        ${evidence.length ? `<div class="reason">${evidence.join(' · ')}</div>` : ''}
+        ${d.fixed ? `<div class="reason" style="color:var(--accent-text)">${esc(d.fixed)}</div>` : ''}</div>
+      <details class="menu">
+        <summary class="btn ghost sm" aria-label="That was wrong: ${word} at ${stamp(d.start)}">${icon('flag')}That was wrong</summary>
+        <div class="menu-list">${menu}</div>
+      </details></div>`;
+  }).join('');
+
+  const toCheck = detections.filter(worthChecking).length;
+  const review = toCheck ? `<div class="alert warn">${icon('alert')}<div class="grow">
+      <strong>${plural(toCheck, 'word')} worth a listen</strong>
+      Whisper was unsure of ${toCheck === 1 ? 'it' : 'them'}, or the subtitles say something else there.
+      ${toCheck === 1 ? 'It is' : 'They are'} still muted; if one is wrong, say so below.</div></div>` : '';
+  $('#sheet-body').innerHTML = `${message}${banner}${review}${meta}
+    <h3 style="font-size:1rem">What was found</h3>
+    <p class="muted small">Every word matched, where it was, and why. If one is wrong, say so and its word goes on a list for next time.</p>
+    ${detections.length ? `<div class="detections">${rows}</div>`
+      : empty({ icon: 'check', title: job.status === 'failed' ? 'Nothing recorded' : 'Nothing found',
+        text: job.status === 'failed' ? 'The job stopped before listening finished.' : 'No listed word was heard in this file.' })}`;
+}
+
+const LIST_NAMES = { never: 'Never silence', never_here: 'this show’s exceptions',
+  context: 'Check in context', always: 'Always silence' };
+
+ACTIONS.correct = async (el) => {
+  const det = state.sheet.detections.find((d) => String(d.id) === el.dataset.id);
+  const list = el.dataset.list;
+  const result = await api(`/api/detections/${el.dataset.id}/correct`, { method: 'POST', body: { list } });
+  state.settings = null;          // the lists changed; reload before the next save
+  const note = {
+    never: `“${result.word}” will never be muted`,
+    never_here: `“${result.word}” will never be muted in ${result.title}`,
+    context: result.judge_configured
+      ? `“${result.word}” will be checked in context`
+      : `“${result.word}” is on the check list, but without a second opinion it is still muted`,
+    always: `“${result.word}” will always be muted`,
+  }[list];
+  state.sheet.detections.forEach((d) => {
+    const same = d.text.replace(/^[^\w']+|[^\w']+$/g, '').toLowerCase() === result.word;
+    if (same) d.fixed = `On ${LIST_NAMES[list]} from now on.`;
+  });
+  if (det) det.fixed = `On ${LIST_NAMES[list]} from now on.`;
+  const scope = list === 'never_here' ? `?title=${encodeURIComponent(result.title)}` : '';
+  state.sheet.changed = true;
+  renderJob();
+  const undo = list === 'always' ? null : {
+    label: 'Undo',
+    run: async () => {
+      await api(`/api/words/${list}/${encodeURIComponent(result.word)}${scope}`, { method: 'DELETE' });
+      state.sheet?.detections?.forEach((d) => { if (d.fixed) delete d.fixed; });
+      if (state.sheet?.kind === 'job') { state.sheet.changed = false; renderJob(); }
+      toast(`Took “${result.word}” back off ${LIST_NAMES[list]}`);
+    },
+  };
+  toast(note, undo ? { action: undo } : {});
+};
+
+ACTIONS['job-again'] = async () => {
+  const job = state.sheet.job;
+  await queue([{ kind: job.kind, title: job.title, subtitle: job.subtitle, path: job.path,
+    source: job.source, source_id: job.source_id, force: true }]);
+  closeSheet();
+};
+ACTIONS['job-remove'] = async () => {
+  const job = state.sheet.job;
+  await removeTracks([{ ...job, job_status: job.status }], `${job.title} ${job.subtitle || ''}`.trim(),
+    (x) => ({ kind: x.kind, title: x.title, subtitle: `${x.subtitle || ''} (removing)`, path: x.path,
+      source: x.source, source_id: x.source_id, action: 'remove' }));
+  closeSheet();
+};
+
+/* ======================================================================
+   Upcoming
+   ====================================================================== */
+
 const dayHeading = (iso) => {
   const day = new Date(`${iso}T00:00:00`);
-  const midnight = new Date();
-  midnight.setHours(0, 0, 0, 0);
+  const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
   const days = Math.round((day - midnight) / 86400000);
-  const name = day.toLocaleDateString(undefined,
-    { weekday: 'long', day: 'numeric', month: 'short' });
+  const name = day.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' });
   if (days < 0) return `Yesterday · ${name}`;
-  if (days === 0) return `Tonight · ${name}`;
+  if (days === 0) return `Today · ${name}`;
   if (days === 1) return `Tomorrow · ${name}`;
   return name;
 };
-
-const airTime = (iso) => (iso
-  ? new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-  : '');
-
-const shortDate = (iso) => (iso
-  ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
-  : '');
-
-/* How long after airing it turned up - "same night", "2 days later". The
-   interesting number when a calendar is mostly things you already have. */
-const gap = (airedIso, gotIso) => {
-  if (!airedIso || !gotIso) return '';
-  const hours = (Date.parse(gotIso) - Date.parse(airedIso)) / 3600000;
-  if (Number.isNaN(hours)) return '';
-  if (hours < 0) return 'before it aired';
-  if (hours < 18) return 'same night';
-  const days = Math.round(hours / 24);
-  return days <= 1 ? 'next day' : `${days} days later`;
-};
+const airTime = (iso) => (iso ? new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '');
+const shortDate = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
 
 async function loadCalendar() {
-  const days = $('#calendar-days').value;
-  if (!state.calendar) $('#calendar-list').innerHTML = `<p class="muted">Asking ${sourceName('show')}…</p>`;
+  if (!state.calendar) $('#calendar-list').innerHTML = loading('Asking Sonarr…', skeletonRows(5));
   try {
-    const { items } = await api(`/api/calendar?days=${days}`);
-    state.calendar = items;
+    const data = await api(`/api/calendar?days=${$('#calendar-days').value}`);
+    if (data.unavailable) {
+      state.calendar = [];
+      $('#calendar-list').innerHTML = empty({ icon: 'calendar', title: 'Only Sonarr has a calendar',
+        text: `${esc(sourceName('show'))} only knows what it already has. Use Sonarr and Radarr as the library to see what is coming.` });
+      return;
+    }
+    state.calendar = data.items;
   } catch (err) {
-    $('#calendar-list').innerHTML =
-      `<p class="muted">${sourceName('show')}: ${escapeHtml(err.message)} — check Settings.</p>`;
+    if (err.status === 401) return;
+    $('#calendar-list').innerHTML = problem('Could not load the calendar', err.message, 'reload-calendar');
     return;
   }
   renderCalendar();
 }
+ACTIONS['reload-calendar'] = () => { state.calendar = null; return loadCalendar(); };
 
 function renderCalendar() {
+  if (!state.calendar) return;
   const filter = $('#calendar-filter').value;
-  const items = (state.calendar || []).filter((e) => {
+  const items = state.calendar.filter((e) => {
     if (filter === 'missing') return !e.has_file;
     if (filter === 'monitored') return e.monitored;
     if (filter === 'unmonitored') return !e.monitored;
     return true;
   });
-  $('#calendar-count').textContent =
-    `${items.length} episode${items.length === 1 ? '' : 's'}`;
-
-  // Grouped by the day it airs, in the order Sonarr gave them (already sorted
-  // by air time), so the page reads like a diary rather than a table.
+  $('#calendar-count').textContent = plural(items.length, 'episode');
   const days = [];
   const byDay = new Map();
   items.forEach((e) => {
@@ -341,853 +1273,932 @@ function renderCalendar() {
     if (!byDay.has(key)) { byDay.set(key, []); days.push(key); }
     byDay.get(key).push(e);
   });
-
-  $('#calendar-list').innerHTML = days.map((key) => `
-    <h3 class="day-head">${escapeHtml(dayHeading(key))}</h3>
-    <div class="list">
-      ${byDay.get(key).map((e) => `
-        <div class="card">
-          <img class="thumb" loading="lazy" alt=""
-               src="${posterUrl(e, 'show')}"
-               onerror="this.classList.add('missing');this.removeAttribute('src')">
-          <div class="grow">
-            <div class="title">${escapeHtml(e.series)}
-              <span class="muted">S${String(e.season).padStart(2, '0')}E${
-                String(e.episode).padStart(2, '0')}${
-                e.title ? ` · ${escapeHtml(e.title)}` : ''}</span></div>
-            <div class="sub">${[
-              `aired ${shortDate(e.airs)} at ${airTime(e.airs)}`,
-              escapeHtml(e.network || ''),
-              e.runtime ? `${e.runtime} min` : '',
-            ].filter(Boolean).join(' · ')}</div>
-            ${e.has_file ? `<div class="sub got">${
-              e.downloaded_at
-                ? `downloaded ${shortDate(e.downloaded_at)} at ${airTime(e.downloaded_at)}`
-                  + ` <span class="muted">(${gap(e.airs, e.downloaded_at)})</span>`
-                : 'already downloaded'}</div>` : ''}
-          </div>
-          ${e.has_file ? '<span class="chip done">downloaded</span>'
-            : (e.wanted ? '<span class="chip pending">wanted</span>'
-                        : '<span class="chip empty">not wanted</span>')}
-          <label class="switch-label" title="Every episode of this show is cleaned as it downloads">
-            <input type="checkbox" data-watch="${e.series_id}"
-                   data-show-title="${escapeHtml(e.series)}"
-                   ${e.monitored ? 'checked' : ''}> Clean it
-          </label>
-          <button class="small ghost" data-open-series="${e.series_id}"
-                  data-title="${escapeHtml(e.series)}">Open</button>
-        </div>`).join('')}
-    </div>`).join('')
-    || '<p class="muted">Nothing airing in that window.</p>';
+  $('#calendar-list').innerHTML = days.length ? days.map((key) => `
+    <h2 class="day-head">${esc(dayHeading(key))}</h2>
+    <div class="rows">${byDay.get(key).map((e) => `
+      <div class="row">
+        <img class="thumb" loading="lazy" alt="" src="${posterUrl(e, 'episode')}" onerror="this.classList.add('none')">
+        <div class="grow">
+          <div class="title">${esc(e.series)} <span class="muted">${epCode(e.season, e.episode)}${e.title ? ` · ${esc(e.title)}` : ''}</span></div>
+          <div class="sub">${esc([`airs ${airTime(e.airs)}`, e.network, e.runtime ? `${e.runtime} min` : ''].filter(Boolean).join(' · '))}</div>
+          ${e.has_file ? `<div class="sub good">${e.downloaded_at
+            ? `Downloaded ${esc(shortDate(e.downloaded_at))} at ${esc(airTime(e.downloaded_at))}` : 'Downloaded'}</div>` : ''}
+        </div>
+        <div class="actions">
+          ${e.has_file ? '' : (e.wanted ? '<span class="badge queued">Wanted</span>' : '<span class="badge">Not wanted</span>')}
+          <label class="switch"><input type="checkbox" role="switch" data-change="watch" data-id="${esc(e.series_id)}"
+            data-title="${esc(e.series)}" ${e.monitored ? 'checked' : ''}>
+            <span class="track" aria-hidden="true"></span><span>Clean new episodes<span class="sr-only"> of ${esc(e.series)}</span></span></label>
+          <button type="button" class="btn ghost sm" data-action="open-show" data-id="${esc(e.series_id)}" data-title="${esc(e.series)}">Open</button>
+        </div>
+      </div>`).join('')}</div>`).join('')
+    : empty({ icon: 'calendar', title: 'Nothing airing', text: 'Nothing in that window matches.' });
 }
-
-$('#calendar-days').addEventListener('change', () => {
-  state.calendar = null;
-  loadCalendar();
-});
+$('#calendar-days').addEventListener('change', () => { state.calendar = null; loadCalendar(); });
 $('#calendar-filter').addEventListener('change', renderCalendar);
 
-/* The tick box on a calendar row is the same switch as the one in a show's
-   drawer, so it is handled the same way and every view is updated at once. */
-document.addEventListener('change', async (event) => {
-  const box = event.target.closest('[data-watch]');
-  if (!box) return;
-  const id = box.dataset.watch;
-  const title = box.dataset.showTitle;
-  try {
-    if (box.checked) {
-      await api('/api/monitors', { method: 'POST', body: JSON.stringify(
-        { source: 'sonarr', source_id: String(id), title, mode: 'new_only' })});
-      toast(`${title}: episodes will be cleaned as they download`);
-    } else {
-      await api(`/api/monitors/sonarr/${id}`, { method: 'DELETE' });
-      toast(`${title}: no longer cleaned automatically`);
-    }
-  } catch (err) {
-    box.checked = !box.checked;
-    return toast(err.message);
-  }
-  (state.calendar || []).forEach((e) => {
-    if (String(e.series_id) === String(id)) e.monitored = box.checked;
-  });
-  const show = state.shows.find((s) => String(s.id) === String(id));
-  if (show) { show.monitored = box.checked; renderShows(); }
-  renderCalendar();
-});
+/* ======================================================================
+   Queue
+   ====================================================================== */
 
-// --------------------------------------------------------- the poster wall
-function posterCard(item, kind) {
-  const chips = [];
-  if (kind === 'show') {
-    if (item.monitored) chips.push('<span class="chip auto">auto</span>');
-    if (item.pending) chips.push(`<span class="chip pending">${item.pending} queued</span>`);
-    if (item.failed) chips.push(`<span class="chip failed">${item.failed} failed</span>`);
-    if (item.cleaned) {
-      chips.push(`<span class="chip done">${item.cleaned}/${item.episodes} clean</span>`);
-    }
-    // A show with nothing on disk is worth opening anyway - to set it cleaning
-    // itself before the first episode ever arrives.
-    if (!item.episodes) chips.push('<span class="chip empty">no files</span>');
-  } else if (item.job_status) {
-    const label = { done: 'cleaned', skipped: 'nothing found', running: 'cleaning',
-                    queued: 'queued', failed: 'failed' }[item.job_status] || item.job_status;
-    const cls = { done: 'done', skipped: 'done', running: 'pending',
-                  queued: 'pending', failed: 'failed' }[item.job_status] || '';
-    chips.push(`<span class="chip ${cls}">${label}</span>`);
-  }
-  // Home holds its own short list of films, so its cards index that rather
-  // than the full Movies wall - the two are never the same array.
-  const attr = kind === 'show' ? 'data-series'
-    : (item.home ? 'data-home-movie' : 'data-movie');
-  const value = kind === 'show' ? item.id : item.index;
-  const line = kind === 'show'
-    ? (item.episodes ? `${item.episodes} ep` : 'nothing downloaded yet')
-    : (item.home ? ago(item.added) : escapeHtml(item.quality || ''));
-  return `
-    <div class="poster" ${attr}="${value}" data-title="${escapeHtml(item.title)}">
-      <img class="art" loading="lazy" alt=""
-           src="${posterUrl(item, kind)}"
-           onerror="this.classList.add('missing');this.removeAttribute('src');
-                    this.dataset.initial='${escapeHtml((item.title || '?')[0])}'">
-      <div class="corner">${chips.join('')}</div>
-      <div class="meta">
-        <div class="name">${escapeHtml(item.title)}</div>
-        <div class="year">${[item.year || '', line].filter(Boolean).join(' · ')}</div>
-      </div>
-    </div>`;
-}
-
-async function loadShows() {
-  $('#show-grid').innerHTML = `<p class="muted">Asking ${sourceName('show')}…</p>`;
-  try {
-    const data = await api('/api/series');
-    noteLibrarySource(data);
-    const { items } = data;
-    state.shows = items;
-    renderShows();
-  } catch (err) {
-    $('#show-grid').innerHTML =
-      `<p class="muted">${sourceName('show')}: ${escapeHtml(err.message)} — check Settings.</p>`;
-  }
-}
-
-/* Newest first, with anything undated at the back. `latest` is when a file
-   last arrived for this title, not when the title was added to the library. */
-const byRecent = (a, b) => String(b.latest || '').localeCompare(String(a.latest || ''));
-const byTitle = (a, b) => (a.title || '').toLowerCase()
-  .localeCompare((b.title || '').toLowerCase());
-
-function renderShows() {
-  const needle = $('#show-search').value.trim().toLowerCase();
-  const filter = $('#show-filter').value;
-  const items = state.shows.filter((s) => {
-    if (needle && !s.title.toLowerCase().includes(needle)) return false;
-    if (filter === 'cleaned') return s.cleaned > 0;
-    if (filter === 'monitored') return s.monitored;
-    if (filter === 'untouched') return !s.cleaned && !s.pending;
-    if (filter === 'nofiles') return !s.episodes;
-    return true;
-  }).sort($('#show-sort').value === 'recent' ? byRecent : byTitle);
-  $('#show-count').textContent = `${items.length} show${items.length === 1 ? '' : 's'}`;
-  $('#show-grid').innerHTML = items.map((s) => posterCard(s, 'show')).join('')
-    || '<p class="muted">Nothing matches.</p>';
-}
-$('#show-search').addEventListener('input', renderShows);
-$('#show-filter').addEventListener('change', renderShows);
-$('#show-sort').addEventListener('change', renderShows);
-
-async function loadMovies() {
-  $('#movie-grid').innerHTML = `<p class="muted">Asking ${sourceName('movie')}…</p>`;
-  try {
-    const data = await api('/api/movies');
-    noteLibrarySource(data);
-    const { items } = data;
-    state.movies = items.map((m, index) => ({ ...m, index }));
-    renderMovies();
-  } catch (err) {
-    $('#movie-grid').innerHTML =
-      `<p class="muted">${sourceName('movie')}: ${escapeHtml(err.message)} — check Settings.</p>`;
-  }
-}
-
-function renderMovies() {
-  const needle = $('#movie-search').value.trim().toLowerCase();
-  const filter = $('#movie-filter').value;
-  const items = state.movies.filter((m) => {
-    if (needle && !m.title.toLowerCase().includes(needle)) return false;
-    if (filter === 'cleaned') return ['done', 'skipped'].includes(m.job_status);
-    if (filter === 'untouched') return !m.job_status;
-    return true;
-  }).sort($('#movie-sort').value === 'recent' ? byRecent : byTitle);
-  $('#movie-count').textContent = `${items.length} movie${items.length === 1 ? '' : 's'}`;
-  $('#movie-grid').innerHTML = items.map((m) => posterCard(m, 'movie')).join('')
-    || '<p class="muted">Nothing matches.</p>';
-}
-$('#movie-search').addEventListener('input', renderMovies);
-$('#movie-filter').addEventListener('change', renderMovies);
-$('#movie-sort').addEventListener('change', renderMovies);
-
-// --------------------------------------------------------- episode drawer
-async function openSeries(seriesId, title) {
-  const drawer = $('#drawer');
-  // Opened from Home the poster wall may never have loaded, so fall back to
-  // asking which shows are watched rather than showing the tick box unticked.
-  let show = state.shows.find((s) => String(s.id) === String(seriesId));
-  if (!show) {
-    const { items } = await api('/api/monitors').catch(() => ({ items: [] }));
-    show = { monitored: items.some((m) => m.source === 'sonarr'
-      && String(m.source_id) === String(seriesId)) };
-  }
-  $('#drawer-title').textContent = title;
-  $('#drawer-body').innerHTML = '<p class="muted">Loading episodes…</p>';
-  $('#monitor-toggle').hidden = false;
-  $('#clean-show').hidden = false;
-  $('#monitor-check').checked = !!show.monitored;
-  drawer._series = { id: seriesId, title };
-  // Which seasons were open belongs to the show being looked at, not to the
-  // drawer - without this, opening a 37-season show inherits whatever was
-  // expanded on the last one.
-  drawer._openSeasons = null;
-  openDrawer();
-
-  // Wrapped, because the click handler that calls this returns the promise
-  // rather than awaiting it - so a rejection here reaches nobody and the
-  // drawer sits on "Loading episodes…" for ever. A failure has to say so.
-  try {
-    const { items } = await api(`/api/series/${seriesId}/episodes`);
-    drawer._episodes = items;
-    drawer._title = title;
-    renderSeasons();
-  } catch (err) {
-    drawer._episodes = null;
-    $('#clean-show').hidden = true;
-    $('#remove-show').hidden = true;
-    $('#drawer-body').innerHTML = `
-      <p class="muted">Could not load the episodes: ${escapeHtml(err.message)}</p>
-      <p class="muted">The auto-clean switch above still works. Try again in a
-        moment, or check ${sourceName('show')} under Settings.</p>
-      <button class="small" data-open-series="${escapeHtml(String(seriesId))}"
-              data-title="${escapeHtml(title)}">Try again</button>`;
-  }
-}
-
-function renderSeasons() {
-  const drawer = $('#drawer');
-  const items = drawer._episodes || [];
-  // A show with no files yet has nothing to list. Say so, and point at the
-  // one control that still does something useful here.
-  if (!items.length) {
-    $('#clean-show').hidden = true;
-    $('#remove-show').hidden = true;
-    $('#drawer-body').innerHTML = `
-      <p class="muted">Nothing on disk for this show yet — ${
-        sourceName('show')} has no episode for it. There is nothing to clean
-        today.</p>
-      <p class="muted">Tick <strong>Clean newly downloaded episodes</strong>
-        above and every episode that arrives from now on is cleaned as it
-        lands, without you coming back here.</p>`;
+function renderQueue() {
+  const data = state.jobs;
+  if (!data) {
+    $('#job-list').innerHTML = loading('Loading the queue…', skeletonRows(4));
     return;
   }
-  const open = drawer._openSeasons || new Set();
-  const seasons = [...new Set(items.map((e) => e.season))].sort((a, b) => a - b);
-  // One season opens itself; a dozen stay shut until asked for.
-  if (!drawer._openSeasons && seasons.length === 1) open.add(seasons[0]);
-  drawer._openSeasons = open;
-
-  $('#drawer-body').innerHTML = seasons.map((season) => {
-    const eps = items.filter((e) => e.season === season);
-    const clean = eps.filter((e) => ['done', 'skipped'].includes(e.job_status)).length;
-    const busy = eps.filter((e) => ['queued', 'running'].includes(e.job_status)).length;
-    const isOpen = open.has(season);
-    return `
-      <div class="season ${isOpen ? 'open' : ''}" data-toggle="${season}">
-        <span class="caret">▶</span>
-        <span class="season-name">${season === 0 ? 'Specials' : `Season ${season}`}</span>
-        <span class="season-count">${clean} of ${eps.length} cleaned${
-          busy ? ` · ${busy} queued` : ''}</span>
-        <button class="small ghost" data-season="${season}">Clean the season</button>
-        ${clean ? `<button class="small ghost" data-remove-season="${season}"
-          title="Take the cleaned tracks back out of this season">Remove cleaned</button>` : ''}
-      </div>
-      <div class="season-episodes ${isOpen ? 'open' : ''}" data-season-body="${season}">
-        ${eps.map((e) => `
-          <div class="card">
-            <div class="grow">
-              <div class="title">${String(e.episode).padStart(2, '0')}. ${escapeHtml(e.title)}</div>
-              <div class="sub">${escapeHtml(e.quality || '')} ${gb(e.size)}${
-                e.muted ? ` · ${e.muted} muted` : ''}${
-                e.added_bytes ? ` · +${size(e.added_bytes)}` : ''}${
-                e.cleaned_at ? ` · ${when(e.cleaned_at)}` : ''}</div>
-            </div>
-            ${statusBadge(e.job_status)}
-            ${e.job_id ? `<button class="small ghost" data-job="${e.job_id}">Details</button>` : ''}
-            ${['done', 'skipped'].includes(e.job_status)
-              ? `<button class="small ghost" data-remove-episode="${e.id}"
-                   title="Take the cleaned track back out">Remove</button>` : ''}
-            <button class="small ghost" data-from="${e.id}"
-                    title="Clean this episode and every one after it">From here</button>
-            <button class="small" data-episode="${e.id}">Clean</button>
-          </div>`).join('')}
-      </div>`;
-  }).join('');
-}
-
-$('#remove-show').addEventListener('click', async () => {
-  const drawer = $('#drawer');
-  try {
-    await removeTracks(drawer._episodes || [], `Every cleaned episode of ${drawer._title}`);
-  } catch (err) { toast(err.message); }
-});
-
-$('#clean-show').addEventListener('click', async () => {
-  const drawer = $('#drawer');
-  const outstanding = (drawer._episodes || [])
-    .filter((e) => !['done', 'skipped', 'queued', 'running'].includes(e.job_status));
-  if (!outstanding.length) return toast('every episode on disk is already cleaned or queued');
-  const hours = outstanding.length * 2.5 / 60;
-  const answer = await ask(`Clean ${outstanding.length} episode${outstanding.length === 1 ? '' : 's'}?`,
-    `Everything on disk for this show that has not been cleaned yet — roughly `
-    + `${hours < 1 ? `${Math.round(outstanding.length * 2.5)} minutes` : `${hours.toFixed(1)} hours`} of work.`,
-    [{ label: 'Queue them', value: 'yes', primary: true }]);
-  if (answer !== 'yes') return;
-  try {
-    await queueEpisodes(outstanding, drawer._title);
-  } catch (err) { toast(err.message); }
-});
-
-const statusBadge = (status) => {
-  if (!status) return '';
-  const label = { done: 'cleaned', running: 'cleaning', queued: 'queued',
-                  skipped: 'nothing found', failed: 'failed' }[status] || status;
-  return `<span class="badge ${status}">${label}</span>`;
-};
-
-$('#monitor-check').addEventListener('change', async (event) => {
-  const show = $('#drawer')._series;
-  if (!show) return;
-  try {
-    if (event.target.checked) {
-      // Exactly one meaning: episodes that arrive from now on. Cleaning what
-      // is already on disk is a separate, deliberate button.
-      await api('/api/monitors', { method: 'POST', body: JSON.stringify(
-        { source: 'sonarr', source_id: String(show.id), title: show.title,
-          mode: 'new_only' })});
-      toast('episodes downloaded from now on will be cleaned automatically');
-    } else {
-      await api(`/api/monitors/sonarr/${show.id}`, { method: 'DELETE' });
-      toast('stopped cleaning new episodes automatically');
-    }
-    const found = state.shows.find((s) => String(s.id) === String(show.id));
-    if (found) { found.monitored = event.target.checked; renderShows(); }
-    // The same show may be sitting on the calendar with its own tick box.
-    if (state.calendar) {
-      state.calendar.forEach((e) => {
-        if (String(e.series_id) === String(show.id)) e.monitored = event.target.checked;
-      });
-      renderCalendar();
-    }
-  } catch (err) { toast(err.message); }
-});
-
-// -------------------------------------------------------------- queueing
-async function queue(items, monitor) {
-  if (!items.length) return;
-  const body = { items };
-  if (monitor) body.monitor = monitor;
-  const result = await api('/api/jobs', { method: 'POST', body: JSON.stringify(body) });
-  const parts = [`queued ${result.queued}`];
-  if (result.already_queued) parts.push(`${result.already_queued} already waiting`);
-  toast(parts.join(', '));
-  loadJobs();
-}
-
-/* Take the cleaned track back out of files, freeing what it costs. */
-async function removeTracks(episodes, label) {
-  const cleaned = episodes.filter((e) => ['done', 'skipped'].includes(e.job_status));
-  if (!cleaned.length) return toast('none of those have a cleaned track');
-  const freed = cleaned.reduce((sum, e) => sum + (e.added_bytes || 0), 0);
-  const answer = await ask(
-    `Remove the cleaned track from ${cleaned.length} file${cleaned.length === 1 ? '' : 's'}?`,
-    `${label}. The original audio and everything else in the file is untouched — `
-    + `only the “${escapeHtml(trackName())}” track is taken out`
-    + `${freed ? `, giving back about ${size(freed)}` : ''}.`,
-    [{ label: 'Remove them', value: 'yes', primary: true }]);
-  if (answer !== 'yes') return;
-  const drawer = $('#drawer');
-  await queue(cleaned.map((e) => ({
-    kind: 'episode', title: drawer._title || label,
-    subtitle: `S${String(e.season).padStart(2, '0')}E${String(e.episode).padStart(2, '0')}`
-              + ` · ${e.title} (removing)`,
-    path: e.path, source: 'sonarr', source_id: String(e.id), action: 'remove',
-  })));
-}
-
-/* Queue episodes, having first said which of them are already done. */
-async function queueEpisodes(episodes, showTitle) {
-  const drawer = $('#drawer');
-  const labelled = episodes.map((e) => ({
-    ...e,
-    label: `S${String(e.season).padStart(2, '0')}E${String(e.episode).padStart(2, '0')} · ${e.title}`,
-  }));
-  const wanted = await confirmRedo(labelled);
-  if (!wanted.length) return;
-  const monitor = drawer._series
-    ? { source: 'sonarr', source_id: String(drawer._series.id), title: drawer._series.title }
-    : null;
-  await queue(wanted.map((e) => ({
-    ...episodeItem(e, showTitle),
-    force: ['done', 'skipped'].includes(e.job_status),
-  })), monitor);
-  $('#monitor-check').checked = true;
-  wanted.forEach((w) => {
-    const found = (drawer._episodes || []).find((e) => e.id === w.id);
-    if (found) found.job_status = 'queued';
-  });
-  renderSeasons();
-}
-
-document.addEventListener('click', async (event) => {
-  const el = event.target.closest('[data-series],[data-movie],[data-home-movie],[data-open-series],[data-new-episode],[data-episode],[data-from],[data-season],[data-toggle],[data-job],[data-cancel],[data-retry],[data-test],[data-again],[data-remove-episode],[data-remove-season],[data-remove-job]');
-  if (!el) return;
-
-  try {
-    if (el.dataset.series) return openSeries(el.dataset.series, el.dataset.title);
-    if (el.dataset.openSeries) {
-      return openSeries(el.dataset.openSeries, el.dataset.title);
-    }
-
-    // Home: one of the episodes that just landed.
-    if (el.dataset.newEpisode !== undefined && el.dataset.newEpisode !== '') {
-      const e = (state.home?.episodes || [])[Number(el.dataset.newEpisode)];
-      if (!e) return;
-      const label = `${e.series} S${String(e.season).padStart(2, '0')}E${
-        String(e.episode).padStart(2, '0')}`;
-      const wanted = await confirmRedo([{ ...e, label }]);
-      if (!wanted.length) return;
-      await queue([{ kind: 'episode', title: e.series,
-                     subtitle: `S${String(e.season).padStart(2, '0')}E${
-                       String(e.episode).padStart(2, '0')} · ${e.title}`,
-                     path: e.path, source: 'sonarr', source_id: String(e.episode_id),
-                     force: ['done', 'skipped'].includes(e.job_status) }]);
-      return loadHome();
-    }
-
-    const movieIndex = el.dataset.movie ?? el.dataset.homeMovie;
-    if (movieIndex !== undefined && movieIndex !== '') {
-      const m = (el.dataset.homeMovie !== undefined
-        ? (state.home?.movies || []) : state.movies)[Number(movieIndex)];
-      if (!m) return;
-      const wanted = await confirmRedo([{ ...m, label: `${m.title} (${m.year || ''})` }]);
-      if (!wanted.length) return;
-      return queue([{ kind: 'movie', title: m.title, subtitle: String(m.year || ''),
-                      path: m.path, source: 'radarr', source_id: String(m.id),
-                      force: ['done', 'skipped'].includes(m.job_status) }]);
-    }
-
-    const drawer = $('#drawer');
-
-    if (el.dataset.toggle !== undefined && !event.target.closest('[data-season]')) {
-      const season = Number(el.dataset.toggle);
-      const open = drawer._openSeasons;
-      if (open.has(season)) open.delete(season); else open.add(season);
-      return renderSeasons();
-    }
-
-    if (el.dataset.episode) {
-      const e = (drawer._episodes || []).find((x) => String(x.id) === el.dataset.episode);
-      return queueEpisodes([e], drawer._title);
-    }
-    // "I am up to here" - this episode and everything after it, across seasons.
-    if (el.dataset.from) {
-      const all = drawer._episodes || [];
-      const start = all.find((x) => String(x.id) === el.dataset.from);
-      if (!start) return;
-      const after = all.filter((e) => e.season > start.season
-        || (e.season === start.season && e.episode >= start.episode));
-      return queueEpisodes(after, drawer._title);
-    }
-    if (el.dataset.season) {
-      const season = Number(el.dataset.season);
-      return queueEpisodes((drawer._episodes || []).filter((e) => e.season === season),
-                           drawer._title);
-    }
-    if (el.dataset.removeEpisode) {
-      const e = (drawer._episodes || []).find(
-        (x) => String(x.id) === el.dataset.removeEpisode);
-      return removeTracks([e], `${drawer._title} ${e.title}`);
-    }
-    if (el.dataset.removeSeason) {
-      const season = Number(el.dataset.removeSeason);
-      return removeTracks((drawer._episodes || []).filter((e) => e.season === season),
-                          `${drawer._title}, season ${season}`);
-    }
-    if (el.dataset.removeJob) {
-      const row = JSON.parse(decodeURIComponent(el.dataset.removeJob));
-      const answer = await ask('Remove this cleaned track?',
-        `${row.title} ${row.subtitle}. The original audio is untouched`
-        + `${row.added_bytes ? `, and about ${size(row.added_bytes)} comes back` : ''}.`,
-        [{ label: 'Remove it', value: 'yes', primary: true }]);
-      if (answer !== 'yes') return;
-      await queue([{ kind: row.kind, title: row.title,
-                     subtitle: `${row.subtitle} (removing)`, path: row.path,
-                     source: row.source, source_id: row.source_id, action: 'remove' }]);
-      return loadCleaned();
-    }
-
-    if (el.dataset.job) return openJob(el.dataset.job);
-    if (el.dataset.again) {
-      const job = $('#drawer')._job;
-      await queue([{ kind: job.kind, title: job.title, subtitle: job.subtitle,
-                     path: job.path, source: job.source, source_id: job.source_id,
-                     force: true }]);
-      $('#drawer').hidden = true;
-      return;
-    }
-    if (el.dataset.retry) {
-      await api('/api/jobs/retry', { method: 'POST',
-        body: JSON.stringify({ ids: [Number(el.dataset.retry)] }) });
-      toast('back in the queue');
-      return loadJobs();
-    }
-    if (el.dataset.move) {
-      await api(`/api/jobs/${el.dataset.move}/move`, { method: 'POST',
-        body: JSON.stringify({ where: el.dataset.where }) });
-      return loadJobs();
-    }
-    if (el.dataset.cancel) {
-      await api(`/api/jobs/${el.dataset.cancel}`, { method: 'DELETE' });
-      toast('cancelled');
-      return loadJobs();
-    }
-    if (el.dataset.test) {
-      $('#test-result').textContent = 'testing…';
-      const result = await api(`/api/settings/test/${el.dataset.test}`, { method: 'POST' });
-      $('#test-result').textContent = result.ok
-        ? `${result.app} ${result.version} — connected`
-        : `failed: ${result.error}`;
-    }
-  } catch (err) {
-    toast(err.message);
-  }
-});
-
-const episodeItem = (e, showTitle) => ({
-  kind: 'episode',
-  title: showTitle,
-  subtitle: `S${String(e.season).padStart(2, '0')}E${String(e.episode).padStart(2, '0')} · ${e.title}`,
-  path: e.path, source: 'sonarr', source_id: String(e.id),
-});
-
-// ------------------------------------------------------------------ jobs
-async function loadJobs() {
-  let data;
-  try { data = await api('/api/jobs'); } catch (err) { return; }
-  const { items, stats } = data;
-  const open = stats.waiting ?? items.filter(
-    (j) => j.status === 'queued' || j.status === 'running').length;
-  $('#queue-count').textContent = open || '';
-  $('#clear-queue').hidden = !open;
-  $('#cleaned-count').textContent = stats.cleaned_files || '';
-  $('#stats').textContent =
-    `${stats.cleaned_files} file${stats.cleaned_files === 1 ? '' : 's'} cleaned · ` +
-    `${stats.words_muted} word${stats.words_muted === 1 ? '' : 's'} muted`;
-
-  $('#queue-hold').textContent = data.holding ? `⏸ ${data.holding}` : '';
-  $('#clean-anyway').hidden = !data.holding;
-  $('#purge-cancelled').hidden = !data.cancelled;
-  $('#purge-cancelled').textContent =
-    `Clear ${data.cancelled} cancelled from the list`;
-  $('#retry-failed').hidden = !data.failed;
-  $('#retry-failed').textContent = `Retry ${data.failed} failed`;
-  $('#purge-failed').hidden = !data.failed;
-  $('#purge-failed').textContent = `Remove ${data.failed} failed`;
-
-  // Say plainly that the watching happens by itself, and when it last ran.
-  const ago = data.last_check
-    ? Math.max(0, Math.round((Date.now() / 1000 - data.last_check) / 60)) : null;
-  $('#monitor-status').textContent = data.monitors
-    ? `${data.monitors} show${data.monitors === 1 ? '' : 's'} watched for new episodes`
-      + `, checked every 10 min${ago === null ? ''
-        : ` · last ${ago === 0 ? 'just now' : `${ago} min ago`}`}`
-    : 'No shows set to clean new episodes automatically';
-
-  // Keep ticks only for jobs still waiting - one that started or was cancelled
-  // should not stay silently selected.
-  state.queueIds = items.filter((j) => j.status === 'queued').map((j) => j.id);
+  const items = data.items;
+  const queued = items.filter((j) => j.status === 'queued');
+  const failed = items.filter((j) => j.status === 'failed');
+  const cancelled = items.filter((j) => j.status === 'cancelled');
+  state.queueIds = queued.map((j) => j.id);
   state.picked = new Set([...state.picked].filter((id) => state.queueIds.includes(id)));
+
+  morph($('#queue-now'), nowCard({ withCancel: true }));
+  $('#clear-queue').hidden = !queued.length;
+  const ago = data.last_check ? Math.max(0, Math.round((Date.now() / 1000 - data.last_check) / 60)) : null;
+  $('#monitor-status').textContent = data.monitors
+    ? `${plural(data.monitors, 'show')} cleaning new episodes. Checked every 10 minutes${
+      ago === null ? '' : `, last ${ago === 0 ? 'just now' : `${ago} min ago`}`}.`
+    : '';
   renderSelection();
 
-  $('#job-list').innerHTML = items.map((j) => `
-    <div class="card ${state.picked.has(j.id) ? 'picked' : ''}">
-      ${j.status === 'queued'
-        ? `<input type="checkbox" class="pick" data-pick="${j.id}"
-             ${state.picked.has(j.id) ? 'checked' : ''}
-             title="Select — shift-click to select a run of episodes">`
-        : ''}
+  const queuedRow = (j, i) => {
+    const picked = state.picked.has(j.id);
+    const name = `${j.title} ${j.subtitle || ''}`.trim();
+    return `<div class="row${picked ? ' picked' : ''}">
+      <input type="checkbox" class="pick" data-action="pick" data-id="${j.id}" data-key="pick-${j.id}"
+        aria-label="Select ${esc(name)}" ${picked ? 'checked' : ''}>
       <div class="grow">
-        <div class="title">${j.status === 'queued'
-          ? `<span class="show-pick" data-pick-show="${escapeHtml(j.title)}"
-               title="Select every queued episode of this show">${escapeHtml(j.title)}</span>`
-          : escapeHtml(j.title)} ${j.subtitle ? `<span class="muted">${escapeHtml(j.subtitle)}</span>` : ''}</div>
-        <div class="sub">${escapeHtml(j.message || j.stage || '')}${
-          j.status === 'running' && j.started_at
-            ? ` <span class="muted">· ${elapsed(j.started_at)}</span>` : ''}</div>
-        ${j.status === 'running' ? `<div class="bar"><div style="width:${Math.round(j.progress * 100)}%"></div></div>` : ''}
+        <div class="title"><button type="button" class="linkish" data-action="pick-show" data-title="${esc(j.title)}"
+          data-key="show-${j.id}" title="Select every queued episode of this show">${esc(j.title)}</button>
+          <span class="muted">${esc(j.subtitle || '')}</span></div>
+        <div class="sub">${i === 0 && !runningJob() ? 'Next up' : `#${i + 1} in line`}${
+          j.action === 'remove' ? ' · removing the cleaned track' : ''}${j.force ? ' · cleaning again' : ''}${
+          j.message && j.message !== 'retrying' ? ` · ${esc(j.message)}` : ''}</div>
       </div>
-      ${statusBadge(j.status)}
-      ${j.status === 'queued' ? `
-        <span class="order">
-          <button class="small ghost" data-move="${j.id}" data-where="top" title="Do this one first">⤒</button>
-          <button class="small ghost" data-move="${j.id}" data-where="up" title="Move up">▲</button>
-          <button class="small ghost" data-move="${j.id}" data-where="down" title="Move down">▼</button>
-          <button class="small ghost" data-move="${j.id}" data-where="bottom" title="Do this one last">⤓</button>
-        </span>` : ''}
-      ${j.muted ? `<button class="small ghost" data-job="${j.id}">${j.muted} muted</button>` : ''}
-      ${(j.status === 'failed' || j.status === 'cancelled')
-        ? `<button class="small ghost" data-retry="${j.id}">Retry</button>` : ''}
-      ${(j.status === 'queued' || j.status === 'running')
-        ? `<button class="small ghost" data-cancel="${j.id}">Cancel</button>` : ''}
-    </div>`).join('') || '<p class="muted">Nothing queued. Pick a show or a movie.</p>';
+      <div class="actions">
+        <div class="btn-group">
+          <button type="button" class="icon-btn" data-action="move" data-id="${j.id}" data-where="top" data-key="top-${j.id}" aria-label="Run ${esc(name)} first" title="First" ${i === 0 ? 'disabled' : ''}>${icon('top')}</button>
+          <button type="button" class="icon-btn" data-action="move" data-id="${j.id}" data-where="up" data-key="up-${j.id}" aria-label="Move ${esc(name)} up" title="Up" ${i === 0 ? 'disabled' : ''}>${icon('up')}</button>
+          <button type="button" class="icon-btn" data-action="move" data-id="${j.id}" data-where="down" data-key="down-${j.id}" aria-label="Move ${esc(name)} down" title="Down" ${i === queued.length - 1 ? 'disabled' : ''}>${icon('down')}</button>
+          <button type="button" class="icon-btn" data-action="move" data-id="${j.id}" data-where="bottom" data-key="bottom-${j.id}" aria-label="Run ${esc(name)} last" title="Last" ${i === queued.length - 1 ? 'disabled' : ''}>${icon('bottom')}</button>
+        </div>
+        <button type="button" class="btn ghost sm" data-action="cancel-job" data-id="${j.id}" data-key="cancel-${j.id}" aria-label="Cancel ${esc(name)}">Cancel</button>
+      </div></div>`;
+  };
+  const endedRow = (j) => {
+    const name = `${j.title} ${j.subtitle || ''}`.trim();
+    return `<div class="row">
+      <div class="grow">
+        <div class="title">${esc(j.title)} <span class="muted">${esc(j.subtitle || '')}</span></div>
+        <div class="sub"${j.status === 'failed' ? ' style="color:var(--error)"' : ''}>${esc(j.message || '')}</div>
+      </div>
+      <div class="actions">${badge(j.status)}
+        <button type="button" class="btn ghost sm" data-action="open-job" data-id="${j.id}" data-key="details-${j.id}" aria-label="Details for ${esc(name)}">Details</button>
+        <button type="button" class="btn secondary sm" data-action="retry" data-id="${j.id}" data-key="retry-${j.id}" aria-label="Retry ${esc(name)}">Retry</button>
+      </div></div>`;
+  };
 
-  $('#status').textContent = data.holding
-    ? 'waiting for Plex' : (data.busy ? 'working…' : 'idle');
+  let html = '';
+  if (queued.length) {
+    html += `<div class="group-head"><h2>Up next · ${queued.length}</h2></div><div class="rows">${queued.map(queuedRow).join('')}</div>`;
+  }
+  if (failed.length) {
+    html += `<div class="group-head"><h2>Failed · ${failed.length}</h2>
+      <button type="button" class="btn secondary sm" data-action="retry-all" data-key="retry-all">Retry all</button>
+      <button type="button" class="btn ghost sm" data-action="purge" data-what="failed" data-key="purge-failed">Clear</button></div>
+      <div class="rows">${failed.map(endedRow).join('')}</div>`;
+  }
+  if (cancelled.length) {
+    html += `<div class="group-head"><h2>Cancelled · ${cancelled.length}</h2>
+      <button type="button" class="btn ghost sm" data-action="purge" data-what="cancelled" data-key="purge-cancelled">Clear</button></div>
+      <div class="rows">${cancelled.map(endedRow).join('')}</div>`;
+  }
+  if (!html && !runningJob()) {
+    html = empty({ icon: 'queue', title: 'Nothing waiting',
+      text: 'Pick a show or a film to clean. Shows set to clean new episodes add them here as they arrive.',
+      actions: `<a class="btn sm" href="#/shows">Browse shows</a><a class="btn secondary sm" href="#/movies">Browse films</a>` });
+  }
+  morph($('#job-list'), html);
 }
 
-$('#clean-anyway').addEventListener('click', async () => {
-  try {
-    await api('/api/queue/clean-anyway', { method: 'POST' });
-    toast('carrying on despite the transcode');
-    loadJobs();
-  } catch (err) { toast(err.message); }
-});
-
-$('#clear-queue').addEventListener('click', async () => {
-  const answer = await ask('Empty the queue?',
-    'Everything waiting is cancelled. A file being cleaned right now finishes.',
-    [{ label: 'Empty it', value: 'yes', primary: true }]);
-  if (answer !== 'yes') return;
-  try {
-    const { cancelled } = await api('/api/queue', { method: 'DELETE' });
-    toast(`cancelled ${cancelled}`);
-    loadJobs();
-  } catch (err) { toast(err.message); }
-});
-
-// ------------------------------------------------------- selecting in bulk
 function renderSelection() {
-  const count = state.picked.size;
-  $('#selection-bar').hidden = count === 0;
-  $('#selection-count').textContent =
-    `${count} selected${count ? ` of ${state.queueIds.length} waiting` : ''}`;
+  const n = state.picked.size;
+  $('#selection-bar').hidden = n === 0;
+  $('#selection-count').textContent = n ? `${n} selected of ${state.queueIds.length}` : '';
 }
 
-function togglePick(id, viaShift) {
-  // Shift-click selects everything between the last tick and this one, which
-  // is how you grab "the rest of season two" without thirty taps.
-  if (viaShift && state.lastPicked !== null) {
+ACTIONS.pick = (el, event) => {
+  const id = Number(el.dataset.id);
+  if (event.shiftKey && state.lastPicked !== null) {
     const from = state.queueIds.indexOf(state.lastPicked);
     const to = state.queueIds.indexOf(id);
     if (from !== -1 && to !== -1) {
       const [lo, hi] = from < to ? [from, to] : [to, from];
       state.queueIds.slice(lo, hi + 1).forEach((x) => state.picked.add(x));
-      state.lastPicked = id;
-      return;
     }
-  }
-  if (state.picked.has(id)) state.picked.delete(id);
-  else state.picked.add(id);
+  } else if (el.checked) state.picked.add(id);
+  else state.picked.delete(id);
   state.lastPicked = id;
-}
-
-document.addEventListener('click', async (event) => {
-  const pick = event.target.closest('[data-pick]');
-  if (pick) {
-    togglePick(Number(pick.dataset.pick), event.shiftKey);
-    return loadJobs();
+  renderQueue();
+};
+ACTIONS['pick-show'] = (el) => {
+  const ids = (state.jobs.items || []).filter((j) => j.status === 'queued' && j.title === el.dataset.title).map((j) => j.id);
+  const allOn = ids.every((id) => state.picked.has(id));
+  ids.forEach((id) => (allOn ? state.picked.delete(id) : state.picked.add(id)));
+  renderQueue();
+};
+ACTIONS.move = async (el) => {
+  await api(`/api/jobs/${el.dataset.id}/move`, { method: 'POST', body: { where: el.dataset.where } });
+  await poll();
+};
+ACTIONS['cancel-job'] = async (el) => {
+  await api(`/api/jobs/${el.dataset.id}`, { method: 'DELETE' });
+  toast('Cancelled');
+  await poll();
+  if (state.sheet?.kind === 'job') openJob(state.sheet.id);
+};
+ACTIONS.retry = async (el) => {
+  await api('/api/jobs/retry', { method: 'POST', body: { ids: [Number(el.dataset.id)] } });
+  toast('Back in the queue');
+  await poll();
+  if (state.sheet?.kind === 'job') openJob(state.sheet.id);
+};
+ACTIONS['retry-all'] = async () => {
+  const { retrying } = await api('/api/jobs/retry', { method: 'POST', body: {} });
+  toast(`${plural(retrying, 'job')} back in the queue`);
+  poll();
+};
+ACTIONS.purge = async (el) => {
+  const what = el.dataset.what;
+  if (what === 'failed') {
+    const answer = await ask('Clear the failed jobs?',
+      'They leave the list. The files were never changed: a job only touches a file after it verifies.',
+      [{ label: 'Clear them', value: 'yes', primary: true }]);
+    if (answer !== 'yes') return;
   }
-  const show = event.target.closest('[data-pick-show]');
-  if (show) {
-    // Every queued episode of this show, or none of them if they are all on.
-    const title = show.dataset.pickShow;
-    const rows = [...document.querySelectorAll('#job-list .card')]
-      .filter((card) => card.querySelector('[data-pick-show]')?.dataset.pickShow === title)
-      .map((card) => Number(card.querySelector('[data-pick]')?.dataset.pick))
-      .filter(Boolean);
-    const allOn = rows.every((id) => state.picked.has(id));
-    rows.forEach((id) => (allOn ? state.picked.delete(id) : state.picked.add(id)));
-    return loadJobs();
-  }
-
-  const bulk = event.target.closest('[data-bulk]');
-  if (!bulk) return;
+  const { removed } = await api(`/api/jobs/${what}`, { method: 'DELETE' });
+  toast(`Cleared ${plural(removed, 'job')}`);
+  poll();
+};
+$('#selection-bar').addEventListener('click', async (event) => {
+  const el = event.target.closest('[data-bulk]');
+  if (!el) return;
   const ids = [...state.picked];
   try {
-    if (bulk.dataset.bulk === 'clear') {
-      state.picked.clear();
-      state.lastPicked = null;
-    } else if (bulk.dataset.bulk === 'cancel') {
-      const answer = await ask(`Cancel ${ids.length} job${ids.length === 1 ? '' : 's'}?`,
+    if (el.dataset.bulk === 'clear') {
+      state.picked.clear(); state.lastPicked = null;
+      renderQueue();
+      $('#job-list .pick')?.focus();
+      return;
+    } else if (el.dataset.bulk === 'cancel') {
+      const answer = await ask(`Cancel ${plural(ids.length, 'job')}?`,
         'They come out of the queue. Nothing already cleaned is affected.',
         [{ label: 'Cancel them', value: 'yes', primary: true }]);
       if (answer !== 'yes') return;
-      const { cancelled } = await api('/api/jobs/cancel',
-        { method: 'POST', body: JSON.stringify({ ids }) });
-      toast(`cancelled ${cancelled}`);
+      const { cancelled } = await api('/api/jobs/cancel', { method: 'POST', body: { ids } });
+      toast(`Cancelled ${cancelled}`);
       state.picked.clear();
     } else {
-      await api('/api/jobs/move',
-        { method: 'POST', body: JSON.stringify({ ids, where: bulk.dataset.bulk }) });
+      await api('/api/jobs/move', { method: 'POST', body: { ids, where: el.dataset.bulk } });
     }
-  } catch (err) {
-    toast(err.message);
-  }
-  loadJobs();
+  } catch (err) { fail(err); }
+  await poll();
+  renderQueue();
 });
-
-$('#retry-failed').addEventListener('click', async () => {
-  try {
-    const { retrying } = await api('/api/jobs/retry', { method: 'POST', body: '{}' });
-    toast(`${retrying} back in the queue`);
-    loadJobs();
-  } catch (err) { toast(err.message); }
-});
-
-$('#purge-failed').addEventListener('click', async () => {
-  const answer = await ask('Remove the failed jobs?',
-    'They disappear from the queue. The files themselves were never changed — '
-    + 'a job only touches a file after it has been checked.',
-    [{ label: 'Remove them', value: 'yes', primary: true }]);
-  if (answer !== 'yes') return;
-  try {
-    const { removed } = await api('/api/jobs/failed', { method: 'DELETE' });
-    toast(`removed ${removed}`);
-    loadJobs();
-  } catch (err) { toast(err.message); }
-});
-
-$('#purge-cancelled').addEventListener('click', async () => {
-  try {
-    const { removed } = await api('/api/jobs/cancelled', { method: 'DELETE' });
-    toast(`removed ${removed} cancelled job${removed === 1 ? '' : 's'}`);
-    loadJobs();
-  } catch (err) { toast(err.message); }
-});
-
-$('#check-new').addEventListener('click', async () => {
+$('#check-new').addEventListener('click', async (event) => {
+  const btn = event.currentTarget;
+  setBusy(btn, true);
   try {
     const { queued } = await api('/api/monitors/check', { method: 'POST' });
-    toast(queued ? `queued ${queued} new episode(s)` : 'nothing new to clean');
-    loadJobs();
-  } catch (err) { toast(err.message); }
+    toast(queued ? `Queued ${plural(queued, 'new episode')}` : 'Nothing new to clean');
+    poll();
+  } catch (err) { fail(err); } finally { setBusy(btn, false); }
+});
+$('#clear-queue').addEventListener('click', async () => {
+  const answer = await ask('Empty the queue?',
+    'Everything waiting is cancelled. A file being cleaned right now finishes.',
+    [{ label: 'Empty it', value: 'yes', primary: true }], { danger: true });
+  if (answer !== 'yes') return;
+  try {
+    const { cancelled } = await api('/api/queue', { method: 'DELETE' });
+    toast(`Cancelled ${cancelled}`);
+    poll();
+  } catch (err) { fail(err); }
 });
 
-async function openJob(jobId) {
-  const { job, detections } = await api(`/api/jobs/${jobId}`);
-  const left = detections.filter((d) => !d.muted);
-  $('#drawer-title').textContent = `${job.title} ${job.subtitle || ''}`.trim();
-  $('#monitor-toggle').hidden = true;
-  $('#clean-show').hidden = true;
-  $('#drawer')._series = null;
-  $('#drawer-body').innerHTML = `
-    <p class="muted">${escapeHtml(job.message || '')}</p>
-    <div class="row">
-      <button class="small ghost" data-again="${job.id}">Clean again</button>
-      <span class="muted">Re-runs this file and replaces its cleaned track —
-        use after changing the word lists in Settings.</span>
-    </div>
-    ${left.length ? `<p class="muted">${left.length} found but left in, judged
-      an ordinary word in context.</p>` : ''}
-    <table class="detections">
-      <thead><tr><th>At</th><th>Word</th><th></th><th>Note</th></tr></thead>
-      <tbody>${detections.map((d) => `
-        <tr>
-          <td>${stamp(d.start)}</td>
-          <td>${escapeHtml(d.text)}</td>
-          <td>${d.muted ? '<span class="badge done">muted</span>'
-                        : '<span class="badge">left in</span>'}</td>
-          <td class="muted">${escapeHtml(d.reason || '')}</td>
-        </tr>`).join('')}</tbody>
-    </table>`;
-  $('#drawer')._job = job;
-  openDrawer();
-}
+/* ======================================================================
+   Cleaned
+   ====================================================================== */
 
-// --------------------------------------------------------------- cleaned
 async function loadCleaned() {
   const query = $('#cleaned-search').value.trim();
+  if (!state.history) $('#cleaned-list').innerHTML = loading('Loading…', skeletonRows(5));
   let data;
   try {
     data = await api(`/api/history?q=${encodeURIComponent(query)}`);
-  } catch (err) { return; }
-  const { items, stats } = data;
-  // Space is the thing you cannot see from the library, so it is said plainly
-  // here: what all these extra tracks are costing, in total and per file.
-  const shown = items.reduce((sum, j) => sum + (j.added_bytes || 0), 0);
-  const unknown = items.filter((j) => !j.added_bytes).length;
-  $('#cleaned-stats').innerHTML =
-    `${stats.cleaned_files} file${stats.cleaned_files === 1 ? '' : 's'} · `
-    + `${stats.words_muted} word${stats.words_muted === 1 ? '' : 's'} muted · `
-    + `<strong>${size(stats.added_bytes) || '0 MB'}</strong> of cleaned audio`
-    + (unknown ? ` <span class="muted">(${unknown} cleaned before sizes were
-        recorded, so the total is an undercount)</span>` : '');
-
-  $('#remove-all').hidden = !stats.cleaned_files;
-  $('#cleaned-list').innerHTML = items.map((j) => `
-    <div class="card">
-      <div class="grow">
-        <div class="title">${escapeHtml(j.title)} ${j.subtitle
-          ? `<span class="muted">${escapeHtml(j.subtitle)}</span>` : ''}</div>
-        <div class="sub">${when(j.finished_at)}${j.muted
-          ? ` · ${j.muted} word${j.muted === 1 ? '' : 's'} muted`
-          : ' · nothing found to mute'}${
-          j.added_bytes ? ` · ${size(j.added_bytes)}` : ''}</div>
-      </div>
-      ${statusBadge(j.status)}
-      <button class="small ghost" data-job="${j.id}">Details</button>
-      <button class="small ghost" data-remove-job="${encodeURIComponent(JSON.stringify({
-        kind: j.kind, title: j.title, subtitle: j.subtitle, path: j.path,
-        source: j.source, source_id: j.source_id, added_bytes: j.added_bytes }))}"
-        title="Take the cleaned track back out of this file">Remove</button>
-    </div>`).join('')
-    || `<p class="muted">${query ? 'Nothing matches.'
-        : 'Nothing cleaned yet — pick a show or a movie.'}</p>`;
+  } catch (err) {
+    if (err.status === 401) return;
+    $('#cleaned-list').innerHTML = problem('Could not load what has been cleaned', err.message, 'reload-cleaned', { settings: false });
+    return;
+  }
+  const onlyCheck = $('#cleaned-filter').value === 'check';
+  state.history = onlyCheck ? data.items.filter((j) => j.to_check) : data.items;
+  const { stats } = data;
+  const unknown = data.items.filter((j) => !j.added_bytes && j.status === 'done').length;
+  $('#cleaned-stats').innerHTML = `
+    <div class="stat"><b>${stats.cleaned_files}</b><span>${stats.cleaned_files === 1 ? 'file' : 'files'} with a cleaned track</span></div>
+    <div class="stat"><b>${stats.words_muted}</b><span>words muted</span></div>
+    <div class="stat"><b>${size(stats.added_bytes) || '0 MB'}</b><span>of cleaned audio${unknown ? ' (some older files not counted)' : ''}</span></div>`;
+  const items = state.history;
+  $('#cleaned-count-note').textContent = query || onlyCheck ? plural(items.length, 'match', 'matches') : '';
+  $('#remove-all-zone').hidden = !stats.cleaned_files;
+  $('#cleaned-list').innerHTML = items.length
+    ? `<div class="rows">${items.map((j, i) => `
+      <div class="row">
+        <div class="grow">
+          <div class="title">${esc(j.title)} <span class="muted">${esc(j.subtitle || '')}</span></div>
+          <div class="sub">${esc([when(j.finished_at), j.muted ? plural(j.muted, 'word') + ' muted' : 'nothing to mute',
+            size(j.added_bytes)].filter(Boolean).join(' · '))}</div>
+        </div>
+        <div class="actions">
+          ${j.to_check ? `<span class="badge queued">${j.to_check} worth a listen</span>` : ''}
+          <button type="button" class="btn ghost sm" data-action="open-job" data-id="${j.id}" aria-label="Details for ${esc(j.title)} ${esc(j.subtitle || '')}">Details</button>
+          ${j.status === 'done' ? `<button type="button" class="btn ghost sm" data-action="remove-history" data-index="${i}"
+            aria-label="Remove the cleaned track from ${esc(j.title)} ${esc(j.subtitle || '')}">Remove</button>` : ''}
+        </div></div>`).join('')}</div>`
+    : (onlyCheck && !query ? empty({ icon: 'check', title: 'Nothing to check',
+        text: 'No cleaned file has a word Whisper was unsure of, or one its subtitles disagree with.' })
+      : query ? empty({ icon: 'search', title: 'Nothing matches', text: `No cleaned file matches “${esc(query)}”.` })
+      : empty({ icon: 'done', title: 'Nothing cleaned yet',
+        text: 'Files you clean show up here, with what was muted and what the extra track costs.',
+        actions: '<a class="btn sm" href="#/shows">Pick a show</a>' }));
 }
+ACTIONS['reload-cleaned'] = loadCleaned;
+$('#cleaned-search').addEventListener('input', debounce(loadCleaned, 250));
+$('#cleaned-filter').addEventListener('change', loadCleaned);
+
+ACTIONS['remove-history'] = async (el) => {
+  const j = state.history[Number(el.dataset.index)];
+  await removeTracks([{ ...j, job_status: j.status }], `${j.title} ${j.subtitle || ''}`.trim(),
+    (x) => ({ kind: x.kind, title: x.title, subtitle: `${x.subtitle || ''} (removing)`, path: x.path,
+      source: x.source, source_id: x.source_id, action: 'remove' }));
+  loadCleaned();
+};
+
 $('#remove-all').addEventListener('click', async () => {
-  const { stats } = await api('/api/history?limit=1');
-  // Two steps on purpose: this undoes every hour the service has ever spent,
-  // and the only way back is cleaning them all again.
-  const first = await ask(
-    `Remove the cleaned track from all ${stats.cleaned_files} files?`,
-    `Every “${escapeHtml(trackName())}” track goes, giving back ${size(stats.added_bytes)}. `
-    + `The original audio in every file is untouched. Re-cleaning them later `
-    + `would take hours.`,
-    [{ label: 'Continue', value: 'go' }]);
-  if (first !== 'go') return;
-  const second = await ask('Are you sure?',
-    `This queues ${stats.cleaned_files} removals and cannot be undone except by `
-    + `cleaning everything again.`,
-    [{ label: `Yes — remove all ${stats.cleaned_files}`, value: 'yes' }]);
-  if (second !== 'yes') return;
   try {
-    const { queued } = await api('/api/history/remove-all',
-      { method: 'POST', body: JSON.stringify({ confirm: 'REMOVE ALL' }) });
-    toast(`queued ${queued} removals`);
-    loadJobs(); loadCleaned();
-  } catch (err) { toast(err.message); }
+    const { stats } = await api('/api/history?limit=1');
+    const first = await ask(`Remove the cleaned track from all ${stats.cleaned_files} files?`,
+      `Every “${trackName()}” track goes, giving back ${size(stats.added_bytes) || 'its space'}. The original audio is untouched. Putting them back means cleaning everything again.`,
+      [{ label: 'Continue', value: 'go', primary: true }], { danger: true });
+    if (first !== 'go') return;
+    const second = await ask('Are you sure?', `This queues ${plural(stats.cleaned_files, 'removal')}.`,
+      [{ label: `Remove all ${stats.cleaned_files}`, value: 'yes', primary: true }], { danger: true });
+    if (second !== 'yes') return;
+    const { queued } = await api('/api/history/remove-all', { method: 'POST', body: { confirm: 'REMOVE ALL' } });
+    toast(`Queued ${plural(queued, 'removal')}`);
+    poll(); loadCleaned();
+  } catch (err) { fail(err); }
 });
 
-$('#cleaned-search').addEventListener('input', () => {
-  clearTimeout(loadCleaned._t);
-  loadCleaned._t = setTimeout(loadCleaned, 250);
+/* ======================================================================
+   Settings
+   ====================================================================== */
+
+const form = $('#settings-form');
+const F = (name) => form.elements[name];
+const radio = (name) => ($$(`input[name="${name}"]`).find((r) => r.checked) || {}).value;
+let snapshot = '';
+
+/* A word list as chips, with a box to add more. Enter or a comma adds;
+   pasting a list adds each line. */
+function tagInput(host, words) {
+  host._words = [...words];
+  const label = $(`#${host.getAttribute('aria-labelledby')}`)?.textContent || 'this list';
+  const draw = () => {
+    host.innerHTML = host._words.map((w, i) => `<span class="tag">${esc(w)}<button type="button"
+      data-remove="${i}" aria-label="Remove ${esc(w)}">${icon('x')}</button></span>`).join('')
+      + `<input type="text" aria-label="Add a word to ${esc(label)}" placeholder="${host._words.length ? 'Add…' : 'Type a word and press Enter'}" autocomplete="off" autocapitalize="none">`;
+  };
+  const add = (text) => {
+    const fresh = text.split(/[\n,]/).map((w) => w.trim()).filter(Boolean);
+    let changed = false;
+    fresh.forEach((w) => {
+      if (!host._words.some((x) => x.toLowerCase() === w.toLowerCase())) { host._words.push(w); changed = true; }
+    });
+    return changed;
+  };
+  host.onkeydown = (e) => {
+    const input = e.target.closest('input');
+    if (!input) return;
+    if ((e.key === 'Enter' || e.key === ',') && input.value.trim()) {
+      e.preventDefault();
+      add(input.value); draw(); host.querySelector('input').focus(); markDirty();
+    } else if (e.key === 'Backspace' && !input.value && host._words.length) {
+      host._words.pop(); draw(); host.querySelector('input').focus(); markDirty();
+    }
+  };
+  host.onpaste = (e) => {
+    const text = e.clipboardData?.getData('text') || '';
+    if (/[\n,]/.test(text)) { e.preventDefault(); add(text); draw(); host.querySelector('input').focus(); markDirty(); }
+  };
+  host.onfocusout = (e) => {
+    const input = e.target.closest('input');
+    if (input && input.value.trim() && !host.contains(e.relatedTarget)) {
+      if (add(input.value)) { draw(); markDirty(); } else input.value = '';
+    }
+  };
+  host.onclick = (e) => {
+    const btn = e.target.closest('[data-remove]');
+    if (btn) {
+      host._words.splice(Number(btn.dataset.remove), 1);
+      draw(); host.querySelector('input').focus(); markDirty();
+    } else if (e.target === host) host.querySelector('input').focus();
+  };
+  draw();
+}
+const tags = (name) => tagWords($(`[data-tags="${name}"]`));
+const tagWords = (host) => {
+  const pending = host.querySelector('input')?.value.trim();
+  const words = [...(host._words || [])];
+  if (pending && !words.some((w) => w.toLowerCase() === pending.toLowerCase())) words.push(pending);
+  return words;
+};
+
+function collect() {
+  return {
+    library_source: radio('library_source') || 'arr',
+    sonarr: { url: F('sonarr.url').value.trim(), api_key: F('sonarr.api_key').value.trim(), enabled: true },
+    radarr: { url: F('radarr.url').value.trim(), api_key: F('radarr.api_key').value.trim(), enabled: true },
+    plex_url: F('plex_url').value.trim(), plex_token: F('plex_token').value.trim(),
+    jellyfin_url: F('jellyfin_url').value.trim(), jellyfin_api_key: F('jellyfin_api_key').value.trim(),
+    categories: $$('#categories input:checked').map((i) => i.value),
+    custom_words: tags('custom_words'),
+    allow_words: tags('allow_words'),
+    asr_backend: radio('asr_backend') || 'builtin',
+    asr_url: F('asr_url').value.trim(), asr_api_key: F('asr_api_key').value.trim(),
+    asr_remote_model: F('asr_remote_model').value.trim(),
+    device: F('device').value,
+    trim_silence: F('trim_silence').checked,
+    pad_start: F('pad_start').value, pad_end: F('pad_end').value, fade: F('fade').value,
+    track_title: F('track_title').value.trim(),
+    check_in_context: tags('check_in_context'),
+    allow_words_by_title: Object.fromEntries($$('[data-title-tags]')
+      .map((host) => [host.dataset.titleTags, tagWords(host)])
+      .filter(([, list]) => list.length)),
+    judge_url: F('judge_url').value.trim(), judge_model: F('judge_model').value.trim(),
+    judge_threads: Number(F('judge_threads').value),
+    media_server: radio('media_server') || 'none',
+    hold_policy: F('hold_policy').value,
+    bitrate_surround: F('bitrate_surround').value.trim(), bitrate_stereo: F('bitrate_stereo').value.trim(),
+    ffmpeg_threads: F('ffmpeg_threads').value, compute_type: F('compute_type').value,
+    judge_keep_alive: F('judge_keep_alive').value.trim(),
+    keep_backup: F('keep_backup').checked,
+  };
+}
+
+function markDirty() {
+  if (!snapshot) return;
+  settingsDirty = JSON.stringify(collect()) !== snapshot;
+  const bar = $('#save-bar');
+  bar.hidden = !settingsDirty;
+  if (settingsDirty && !bar.classList.contains('error')) $('#save-state').textContent = 'Unsaved changes';
+  renderContextNote();
+}
+form.addEventListener('input', markDirty);
+form.addEventListener('change', (e) => {
+  if (e.target.name === 'library_source') renderLibrarySource();
+  if (e.target.name === 'media_server') { renderMediaServer(); mediaNow(); }
+  if (e.target.name === 'asr_backend') renderAsrBackend();
+  if (e.target.name === 'device') renderHardwareNote();
+  if (e.target.getAttribute('aria-invalid')) clearError(e.target.name);
+  markDirty();
+});
+form.addEventListener('input', (e) => { if (e.target.getAttribute('aria-invalid')) clearError(e.target.name); });
+window.addEventListener('beforeunload', (e) => { if (settingsDirty) { e.preventDefault(); e.returnValue = ''; } });
+
+async function loadSettings({ fill = true, force = false } = {}) {
+  if (state.settings && !force && form._filled) return state.settings;
+  if (fill && !form._filled) {
+    $('#settings-loading').innerHTML = loading('Loading settings…', skeletonRows(3));
+  }
+  let settings;
+  try {
+    settings = await api('/api/settings');
+  } catch (err) {
+    if (fill && err.status !== 401) {
+      $('#settings-loading').innerHTML = problem('Could not load settings', err.message, 'reload-settings', { settings: false });
+    }
+    throw err;
+  }
+  state.settings = settings;
+  settings.available_categories.forEach((c) => { state.labels[c.key] = c.label; });
+  noteSource(settings);
+  window.__auth = { configured: !!settings.auth_enabled, username: settings.auth_user || '' };
+  $('#more-signout').hidden = !settings.auth_enabled;
+  if (fill) fillSettings(settings);
+  return settings;
+}
+ACTIONS['reload-settings'] = () => loadSettings({ force: true });
+
+function fillSettings(s) {
+  $('#settings-loading').innerHTML = '';
+  form.hidden = false;
+  $('#s-security').hidden = false;
+  const set = (name, value) => { if (F(name)) F(name).value = value ?? ''; };
+  const check = (name, value) => $$(`input[name="${name}"]`).forEach((r) => { r.checked = r.value === value; });
+  check('library_source', s.library_source || 'arr');
+  check('asr_backend', s.asr_backend || 'builtin');
+  check('media_server', s.media_server || 'none');
+  set('sonarr.url', s.sonarr.url); set('sonarr.api_key', s.sonarr.api_key);
+  set('radarr.url', s.radarr.url); set('radarr.api_key', s.radarr.api_key);
+  set('plex_url', s.plex_url); set('plex_token', s.plex_token);
+  set('jellyfin_url', s.jellyfin_url); set('jellyfin_api_key', s.jellyfin_api_key);
+  set('asr_url', s.asr_url); set('asr_api_key', s.asr_api_key); set('asr_remote_model', s.asr_remote_model);
+  set('device', s.device || 'auto');
+  F('trim_silence').checked = !!s.trim_silence;
+  set('pad_start', s.pad_start); set('pad_end', s.pad_end); set('fade', s.fade);
+  set('track_title', s.track_title);
+  set('judge_url', s.judge_url); set('judge_model', s.judge_model);
+  set('judge_threads', String(s.judge_threads));
+  if (F('judge_threads').value !== String(s.judge_threads)) {
+    F('judge_threads').insertAdjacentHTML('beforeend', `<option value="${Number(s.judge_threads)}">${Number(s.judge_threads)}</option>`);
+    set('judge_threads', String(s.judge_threads));
+  }
+  set('bitrate_surround', s.bitrate_surround); set('bitrate_stereo', s.bitrate_stereo);
+  set('ffmpeg_threads', s.ffmpeg_threads); set('compute_type', s.compute_type || 'auto');
+  set('judge_keep_alive', s.judge_keep_alive);
+  F('keep_backup').checked = !!s.keep_backup;
+
+  $('#categories').innerHTML = '<legend class="sr-only">Word lists</legend>' + s.available_categories.map((c) => `
+    <label class="toggle"><span class="grow">${esc(c.label)}<span>${c.count} words and phrases</span></span>
+      <span class="switch"><input type="checkbox" role="switch" value="${esc(c.key)}" ${s.categories.includes(c.key) ? 'checked' : ''}>
+      <span class="track" aria-hidden="true"></span></span></label>`).join('');
+  tagInput($('[data-tags="custom_words"]'), s.custom_words || []);
+  tagInput($('[data-tags="allow_words"]'), s.allow_words || []);
+  tagInput($('[data-tags="check_in_context"]'), s.check_in_context || []);
+  renderTitleExceptions(s.allow_words_by_title || {});
+
+  renderLibrarySource();
+  renderMediaServer();
+  set('hold_policy', s.hold_policy);
+  renderAsrBackend();
+  clearErrors();
+  form._filled = true;
+  snapshot = JSON.stringify(collect());
+  settingsDirty = false;
+  $('#save-bar').hidden = true;
+  $('#save-bar').classList.remove('error');
+  renderContextNote();
+  renderSecurity();
+  refreshPathReport();
+  loadModels();
+  loadHardware();
+  mediaNow();
+  loadSetup();
+}
+
+function renderTitleExceptions(byTitle) {
+  const titles = Object.keys(byTitle).sort((a, b) => a.localeCompare(b));
+  const host = $('#title-exceptions');
+  host.innerHTML = titles.length ? titles.map((title, i) => `
+    <div class="title-exception">
+      <div class="title-exception-head"><strong id="l-title-${i}">${esc(title)}</strong>
+        <button type="button" class="btn ghost sm" data-drop-title="${i}"
+          aria-label="Remove every exception for ${esc(title)}">Remove all</button></div>
+      <div class="tags" data-title-tags="${esc(title)}" aria-labelledby="l-title-${i}"></div>
+    </div>`).join('')
+    : '<p class="hint">None yet.</p>';
+  $$('[data-title-tags]', host).forEach((el, i) => tagInput(el, byTitle[titles[i]]));
+}
+$('#title-exceptions').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-drop-title]');
+  if (!btn) return;
+  btn.closest('.title-exception').remove();
+  if (!$('#title-exceptions .title-exception')) $('#title-exceptions').innerHTML = '<p class="hint">None yet.</p>';
+  markDirty();
 });
 
+function renderContextNote() {
+  const words = tags('check_in_context').length;
+  const note = $('#context-note');
+  if (!note) return;
+  if (!words) note.textContent = 'Empty: nothing is checked, and no model is ever asked.';
+  else if (!F('judge_url').value.trim()) note.textContent = `No address below, so ${plural(words, 'word')} here ${words === 1 ? 'is' : 'are'} simply muted.`;
+  else note.textContent = `${plural(words, 'word')} ${words === 1 ? 'is' : 'are'} sent for a second opinion when heard.`;
+}
 
-/* ===========================================================================
+/* One set of Plex fields and one set of Jellyfin fields, moved to whichever
+   section needs them: two inputs bound to one setting drift apart. */
+function placeServerFields() {
+  const lib = radio('library_source') || 'arr';
+  const srv = radio('media_server') || 'none';
+  ['plex', 'jellyfin'].forEach((name) => {
+    const block = $(`#server-${name}`);
+    if (lib === name) { $('#lib-server').appendChild(block); block.hidden = false; }
+    else if (srv === name) { $('#media-server-fields').appendChild(block); block.hidden = false; }
+    else block.hidden = true;
+  });
+  $('#server-shared').hidden = !(srv !== 'none' && srv === lib);
+}
+
+function renderLibrarySource() {
+  const which = radio('library_source') || 'arr';
+  $('#lib-arr').hidden = which !== 'arr';
+  $('#lib-server').hidden = which === 'arr';
+  placeServerFields();
+  $('#path-note').textContent = which === 'arr'
+    ? 'TV paths come from Sonarr, film paths from Radarr.'
+    : `${which === 'plex' ? 'Plex' : 'Jellyfin'} reports paths as it sees them, so if it runs in a container too, both need the same mount.`;
+}
+
+function renderMediaServer() {
+  const which = radio('media_server') || 'none';
+  placeServerFields();
+  $('#hold-row').hidden = which === 'none';
+  const name = { plex: 'Plex', jellyfin: 'Jellyfin' }[which] || 'your media server';
+  const select = F('hold_policy');
+  const keep = select.value || state.settings?.hold_policy || 'video_transcode';
+  select.innerHTML = [
+    ['never', 'Never wait: clean whenever there is work'],
+    ['video_transcode', `Wait while ${name} transcodes video (it needs the GPU)`],
+    ['any_transcode', `Wait while ${name} transcodes anything`],
+    ['playing', 'Wait while anything at all is playing'],
+  ].map(([key, label]) => `<option value="${key}">${esc(label)}</option>`).join('');
+  select.value = keep;
+}
+
+function renderAsrBackend() {
+  const remote = radio('asr_backend') === 'remote';
+  $('#asr-remote').hidden = !remote;
+  $('#asr-builtin').hidden = remote;
+}
+
+function clearErrors() {
+  $$('[data-error-for]', form).forEach((p) => { p.textContent = ''; });
+  $$('[aria-invalid]', form).forEach((el) => el.removeAttribute('aria-invalid'));
+}
+function clearError(name) {
+  const p = $(`[data-error-for="${CSS.escape(name)}"]`);
+  if (p) p.textContent = '';
+  if (F(name)) { F(name).removeAttribute('aria-invalid'); F(name).removeAttribute('aria-describedby'); }
+}
+function showErrors(errors) {
+  clearErrors();
+  let first = null;
+  Object.entries(errors).forEach(([name, message]) => {
+    const p = $(`[data-error-for="${CSS.escape(name)}"]`);
+    const input = F(name);
+    if (p) { p.textContent = message; p.id = p.id || `err-${name.replace('.', '-')}`; }
+    if (input && input.setAttribute) {
+      input.setAttribute('aria-invalid', 'true');
+      if (p) input.setAttribute('aria-describedby', p.id);
+    }
+    if (!first) first = input && input.focus ? input : p;
+  });
+  // Hidden sections cannot take focus: show the one the error is in.
+  if (errors.asr_url) { $$('input[name="asr_backend"]').forEach((r) => { r.checked = r.value === 'remote'; }); renderAsrBackend(); }
+  if (first) {
+    first.scrollIntoView({ block: 'center' });
+    if (first.focus) first.focus({ preventScroll: true });
+  }
+}
+
+async function saveSettings() {
+  const btn = $('#settings-save');
+  setBusy(btn, true);
+  const before = state.settings?.library_source;
+  try {
+    await api('/api/settings', { method: 'PUT', body: collect() });
+  } catch (err) {
+    setBusy(btn, false);
+    if (err.errors) {
+      const n = Object.keys(err.errors).length;
+      $('#save-bar').classList.add('error');
+      $('#save-state').textContent = `${plural(n, 'thing')} to fix before saving`;
+      showErrors(err.errors);
+    } else fail(err);
+    return false;
+  }
+  setBusy(btn, false);
+  settingsDirty = false;
+  $('#save-bar').hidden = true;
+  $('#save-bar').classList.remove('error');
+  toast('Settings saved');
+  form._filled = false;
+  const fresh = await loadSettings({ force: true });
+  if (fresh.library_source !== before) {
+    state.shows = null; state.movies = null; state.home = null; state.calendar = null;
+  }
+  return true;
+}
+form.addEventListener('submit', (e) => { e.preventDefault(); saveSettings(); });
+
+function discardSettings() {
+  if (state.settings) fillSettings(state.settings);
+}
+$('#settings-discard').addEventListener('click', discardSettings);
+
+/* Which section is on screen, for the index. */
+if ('IntersectionObserver' in window) {
+  const seen = new Map();
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((en) => seen.set(en.target.id, en.intersectionRatio));
+    let best = null;
+    let ratio = 0;
+    seen.forEach((r, id) => { if (r > ratio) { ratio = r; best = id; } });
+    $$('.settings-index a').forEach((a) => {
+      if (best && `s-${a.dataset.section}` === best) a.setAttribute('aria-current', 'true');
+      else a.removeAttribute('aria-current');
+    });
+  }, { threshold: [0, 0.2, 0.5, 0.8] });
+  $$('.panel').forEach((p) => io.observe(p));
+}
+
+/* ---------------------------------------------------------- test buttons */
+
+function showResult(el, ok, text) {
+  el.className = `test-result ${ok ? 'good' : 'bad'}`;
+  el.textContent = text;
+}
+
+$$('[data-test]').forEach((btn) => btn.addEventListener('click', async () => {
+  const service = btn.dataset.test;
+  const out = $(`[data-result="${service}"]`);
+  const fields = {
+    sonarr: ['sonarr.url', 'sonarr.api_key'], radarr: ['radarr.url', 'radarr.api_key'],
+    plex: ['plex_url', 'plex_token'], jellyfin: ['jellyfin_url', 'jellyfin_api_key'],
+  }[service];
+  out.className = 'test-result';
+  out.textContent = 'Testing…';
+  setBusy(btn, true);
+  try {
+    const r = await api(`/api/settings/test/${service}`, { method: 'POST',
+      body: { url: F(fields[0]).value.trim(), api_key: F(fields[1]).value.trim() } });
+    showResult(out, r.ok, r.ok ? `Connected to ${r.app} ${r.version || ''}`.trim() : r.error);
+  } catch (err) {
+    showResult(out, false, err.message);
+  } finally { setBusy(btn, false); }
+}));
+
+$('#asr-test').addEventListener('click', async (e) => {
+  const out = $('#asr-result');
+  out.className = 'test-result';
+  out.textContent = 'Sending a second of silence…';
+  setBusy(e.currentTarget, true);
+  try {
+    const r = await api('/api/asr/test', { method: 'POST', body: {
+      url: F('asr_url').value.trim(), model: F('asr_remote_model').value.trim(), api_key: F('asr_api_key').value.trim() } });
+    showResult(out, r.ok, r.ok ? `Works: ${r.note}` : r.error);
+  } catch (err) { showResult(out, false, err.message); } finally { setBusy(e.currentTarget, false); }
+});
+
+$('#asr-list').addEventListener('click', async (e) => {
+  const out = $('#asr-result');
+  if (!F('asr_url').value.trim()) { showResult(out, false, 'Put the server address in first.'); return; }
+  out.className = 'test-result';
+  out.textContent = 'Asking…';
+  setBusy(e.currentTarget, true);
+  try {
+    const r = await api('/api/asr/remote-models', { method: 'POST',
+      body: { url: F('asr_url').value.trim(), api_key: F('asr_api_key').value.trim() } });
+    $('#asr-model-options').innerHTML = (r.models || []).map((m) => `<option value="${esc(m)}">`).join('');
+    showResult(out, r.ok, r.ok && r.models.length
+      ? `${plural(r.models.length, 'model')}: pick one from the model box`
+      : (r.ok ? 'It lists no models; type the name yourself.' : `Could not list them (${r.error}). Type the name yourself.`));
+  } catch (err) { showResult(out, false, err.message); } finally { setBusy(e.currentTarget, false); }
+});
+
+async function checkJudge() {
+  const out = $('#judge-result');
+  const btn = $('#judge-check');
+  $('#judge-pull').hidden = true;
+  if (!F('judge_url').value.trim()) { showResult(out, false, 'Put the address in first.'); return; }
+  out.className = 'test-result';
+  out.textContent = 'Asking…';
+  setBusy(btn, true);
+  try {
+    const r = await api('/api/judge/check', { method: 'POST',
+      body: { url: F('judge_url').value.trim(), model: F('judge_model').value.trim() } });
+    if (!r.reachable) showResult(out, false, `Could not reach it: ${r.error || 'no answer'}`);
+    else if (r.has_selected) showResult(out, true, `${r.api === 'openai' ? 'The server' : 'Ollama'} has ${r.selected}.`);
+    else {
+      showResult(out, false, `Reachable, but it does not have ${r.selected}.${r.can_pull ? '' : ` It offers: ${r.models.slice(0, 5).join(', ') || 'nothing'}.`}`);
+      $('#judge-pull').hidden = !r.can_pull || settingsDirty;
+      if (r.can_pull && settingsDirty) out.textContent += ' Save first, then download it here.';
+    }
+  } catch (err) { showResult(out, false, err.message); } finally { setBusy(btn, false); }
+}
+$('#judge-check').addEventListener('click', checkJudge);
+
+$('#judge-pull').addEventListener('click', async () => {
+  const out = $('#judge-result');
+  try {
+    const r = await api('/api/judge/pull', { method: 'POST', body: {} });
+    $('#judge-pull').hidden = true;
+    out.className = 'test-result';
+    out.textContent = `Ollama is downloading ${r.model || 'the model'}. It carries on if you leave this page.`;
+    const timer = setInterval(async () => {
+      const s = await api('/api/judge/pull').catch(() => ({}));
+      if (!s.downloading) {
+        clearInterval(timer);
+        if (s.error) showResult(out, false, `The download failed: ${s.error}`);
+        else checkJudge();
+      }
+    }, 4000);
+  } catch (err) { showResult(out, false, err.message); }
+});
+
+/* ----------------------------------------------------------- the model */
+
+async function loadModels() {
+  let data;
+  try { data = await api('/api/models'); } catch (err) { return; }
+  $('#model-list').innerHTML = data.items.map((m) => `
+    <div class="model">
+      <div class="grow">
+        <div class="title">${esc(m.name)} ${m.name === data.selected ? '<span class="badge auto">In use</span>' : ''}</div>
+        <div class="sub">${m.ready ? `Downloaded · ${size(m.bytes)}` : `Not downloaded · about ${esc(m.approx_size || 'unknown size')}`}</div>
+        ${m.error ? `<div class="hint bad" role="alert">${esc(m.error)}</div>` : ''}
+      </div>
+      ${m.downloading
+        ? `<div class="dl"><div class="progress" role="progressbar" aria-label="Downloading ${esc(m.name)}"
+             aria-valuemin="0" aria-valuemax="100" ${m.percent !== undefined ? `aria-valuenow="${m.percent}"` : ''}>
+             <span style="width:${m.percent ?? 5}%"></span></div>
+           <span class="hint">${m.percent !== undefined ? `${m.percent}% · ${size(m.bytes)} of ${size(m.total)}` : `Downloading… ${size(m.bytes)}`}</span></div>`
+        : (m.ready ? `<span class="badge done">${icon('check')}Ready</span>`
+          : `<button type="button" class="btn sm" data-action="download-model" data-name="${esc(m.name)}">${icon('download')}${m.error ? 'Try again' : 'Download'}</button>`)}
+    </div>`).join('')
+    + `<p class="hint">Kept in <code>${esc(data.folder)}</code>, so it survives updating the container.
+       Downloading it now saves a long wait on the first clean.</p>`;
+  clearTimeout(loadModels._t);
+  if (data.items.some((m) => m.downloading)) loadModels._t = setTimeout(loadModels, 1500);
+  else if (loadModels._was) loadSetup();
+  loadModels._was = data.items.some((m) => m.downloading);
+}
+ACTIONS['download-model'] = async (el) => {
+  setBusy(el, true);
+  await api(`/api/models/${encodeURIComponent(el.dataset.name)}/download`, { method: 'POST', body: {} });
+  toast('Downloading. It carries on if you leave this page.');
+  loadModels();
+};
+
+let cudaPresent = null;
+async function loadHardware() {
+  try { cudaPresent = (await api('/api/hardware')).cuda_available; } catch (err) { return; }
+  renderHardwareNote();
+}
+function renderHardwareNote() {
+  const note = $('#hardware-note');
+  if (cudaPresent === null) return;
+  const chosen = F('device').value;
+  const amd = 'An AMD card cannot be used here; point Cleanarr at your own Whisper server instead.';
+  let msg; let bad = false;
+  if (chosen === 'cuda' && !cudaPresent) {
+    msg = `No NVIDIA GPU is visible to this container, so every job would fail. Choose CPU or "whatever is available". ${amd}`;
+    bad = true;
+  } else if (chosen === 'cuda') msg = 'Listening runs on the NVIDIA GPU.';
+  else if (chosen === 'cpu') msg = cudaPresent ? 'An NVIDIA GPU is here, but the CPU is chosen: expect minutes rather than seconds per episode.' : 'Listening runs on the CPU.';
+  else msg = cudaPresent ? 'An NVIDIA GPU was found, so listening runs on it.' : `No NVIDIA GPU found, so listening runs on the CPU. ${amd}`;
+  note.className = bad ? 'hint bad' : 'hint';
+  note.textContent = msg;
+}
+
+async function mediaNow() {
+  const out = $('#plex-now');
+  if ((radio('media_server') || 'none') === 'none') { out.textContent = ''; return; }
+  try {
+    const data = await api('/api/media/sessions');
+    out.textContent = data.sessions.length
+      ? `Right now: ${data.sessions.map((s) => s.description).join('; ')}${data.holding ? ' (the queue is waiting)' : ''}.`
+      : 'Nothing is playing right now.';
+  } catch (err) { out.textContent = ''; }
+}
+
+/* ----------------------------------------------------------- the paths */
+
+async function refreshPathReport() {
+  const host = $('#path-report');
+  host.innerHTML = '<p class="hint">Checking where your media is…</p>';
+  let data;
+  try { data = await api('/api/paths'); } catch (err) {
+    host.innerHTML = `<p class="hint bad">Could not check: ${esc(err.message)}</p>`;
+    return;
+  }
+  if (data.error) { host.innerHTML = `<p class="hint bad">${esc(data.error)}</p>`; return; }
+  if (!data.roots.length) {
+    host.innerHTML = '<p class="hint">No library folders reported yet. Save the library details above, then check again.</p>';
+    return;
+  }
+  const bad = data.roots.filter((r) => !r.ok);
+  host.innerHTML = `<table class="paths-table">
+    <thead><tr><th class="state-cell"><span class="sr-only">State</span></th><th>Library</th><th>Reported path</th><th>From this container</th></tr></thead>
+    <tbody>${data.roots.map((r) => `<tr>
+      <td class="state-cell ${r.ok ? 'ok' : 'bad'}">${r.ok ? icon('check') : icon('x')}<span class="sr-only">${r.ok ? 'reachable' : 'not reachable'}</span></td>
+      <td>${esc(r.library || '')}</td><td><code>${esc(r.path)}</code></td>
+      <td>${r.ok ? 'Opens' : (r.elsewhere
+        ? `Not here, but it looks mounted at <code>${esc(r.elsewhere)}</code>. Mount it as <code>${esc(r.path)}</code> instead.`
+        : 'Not mounted in this container')}</td></tr>`).join('')}</tbody></table>
+    ${bad.length
+      ? `<p class="hint bad">${bad.length} of ${data.roots.length} folders cannot be opened here, so jobs for them fail with “not found”.
+         In docker-compose, a line like <code>- /your/media:${esc(bad[0].path)}</code> fixes it.</p>`
+      : '<p class="hint good">Every library folder opens from this container.</p>'}
+    <p class="hint">This container can see: ${data.visible.map((v) => `<code>${esc(v)}</code>`).join(' ') || 'nothing mounted'}</p>`;
+}
+$('#path-recheck').addEventListener('click', () => { refreshPathReport(); loadSetup(); });
+
+/* --------------------------------------------------------- who can use it */
+
+function renderSecurity() {
+  const auth = window.__auth || {};
+  $('#security').innerHTML = auth.configured ? `
+    <p>Signed in as <strong>${esc(auth.username)}</strong>. Everyone who opens Cleanarr needs this password.</p>
+    <form id="sec-form" class="fields two" novalidate>
+      <div class="field"><label for="sec-current">Current password</label>
+        <input id="sec-current" type="password" autocomplete="current-password"></div>
+      <div class="field"><label for="sec-new">New password</label>
+        <input id="sec-new" type="password" autocomplete="new-password" minlength="8">
+        <p class="hint">At least 8 characters. Changing it signs out every other browser.</p></div>
+      <div class="field"><label for="sec-user">New username <span class="muted">(optional)</span></label>
+        <input id="sec-user" autocomplete="username" autocapitalize="none" placeholder="${esc(auth.username)}"></div>
+    </form>
+    <div class="test-row">
+      <button type="button" class="btn sm" data-action="sec-change">Change password</button>
+      <button type="button" class="btn ghost sm" data-action="sec-off">Turn the login off</button>
+      <button type="button" class="btn ghost sm" data-signout>Sign out</button>
+      <span class="test-result" id="sec-result" role="status"></span>
+    </div>`
+    : `<div class="callout">${icon('info')}<p><strong>Anyone who can reach this address can use it.</strong>
+        Fine on a home network you trust. Set a password if it is reachable from anywhere else.</p></div>
+    <form id="sec-form" class="fields two" novalidate>
+      <div class="field"><label for="sec-user">Username</label>
+        <input id="sec-user" autocomplete="username" autocapitalize="none" minlength="3"></div>
+      <div class="field"><label for="sec-new">Password</label>
+        <input id="sec-new" type="password" autocomplete="new-password" minlength="8">
+        <p class="hint">At least 8 characters.</p></div>
+    </form>
+    <div class="test-row"><button type="button" class="btn sm" data-action="sec-create">Turn the login on</button>
+      <span class="test-result" id="sec-result" role="status"></span></div>`;
+}
+
+ACTIONS['sec-create'] = async () => {
+  const username = $('#sec-user').value.trim();
+  const password = $('#sec-new').value;
+  try {
+    await api('/api/auth/setup', { method: 'POST', body: { username, password } });
+  } catch (err) { showResult($('#sec-result'), false, err.message); return; }
+  window.__auth = { configured: true, username };
+  $('#more-signout').hidden = false;
+  renderSecurity();
+  toast('Login is on');
+  loadSetup();
+};
+ACTIONS['sec-change'] = async () => {
+  try {
+    const data = await api('/api/auth/change', { method: 'POST', body: {
+      current: $('#sec-current').value, password: $('#sec-new').value, username: $('#sec-user').value.trim() } });
+    window.__auth = { configured: true, username: data.username };
+    renderSecurity();
+    toast('Password changed. Other browsers are signed out.');
+  } catch (err) { showResult($('#sec-result'), false, err.message); }
+};
+ACTIONS['sec-off'] = async () => {
+  const current = $('#sec-current').value;
+  if (!current) { showResult($('#sec-result'), false, 'Type the current password first.'); $('#sec-current').focus(); return; }
+  const answer = await ask('Turn the login off?',
+    'Anyone who can reach this address will be able to use it without a password.',
+    [{ label: 'Turn it off', value: 'yes', primary: true }], { danger: true });
+  if (answer !== 'yes') return;
+  try {
+    await api('/api/auth/change', { method: 'POST', body: { current, disable: true } });
+  } catch (err) { showResult($('#sec-result'), false, err.message); return; }
+  window.__auth = { configured: false, username: '' };
+  $('#more-signout').hidden = true;
+  renderSecurity();
+  toast('Login turned off');
+  loadSetup();
+};
+document.addEventListener('click', async (e) => {
+  if (!e.target.closest('[data-signout]')) return;
+  await api('/api/auth/logout', { method: 'POST', body: {} }).catch(() => {});
+  if ($('#more-sheet').open) $('#more-sheet').close();
+  showGate('login');
+});
+
+/* ======================================================================
+   The phone's More menu
+   ====================================================================== */
+
+$('#more-button').addEventListener('click', () => $('#more-sheet').showModal());
+$('#more-sheet').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget || e.target.closest('a')) $('#more-sheet').close();
+});
+
+/* ======================================================================
    Signing in
-   ---------------------------------------------------------------------------
-   Off entirely until somebody sets a username, which is right for a box on
-   your own LAN. Once set, this is the first thing the page does.
-   =========================================================================== */
+   ====================================================================== */
 
 let gateMode = 'login';
 
@@ -1195,521 +2206,66 @@ function showGate(mode) {
   gateMode = mode;
   const setup = mode === 'setup';
   $('#gate-blurb').textContent = setup
-    ? 'Pick a username and password. You will need these every time you open '
-      + 'Cleanarr from now on.'
+    ? 'Pick a username and password. You will need them each time you open Cleanarr.'
     : 'Sign in to continue.';
   $('#gate-submit').textContent = setup ? 'Create account' : 'Sign in';
   $('#gate-confirm-row').hidden = !setup;
   $('#gate-pass').autocomplete = setup ? 'new-password' : 'current-password';
   $('#gate-error').hidden = true;
   $('#gate').hidden = false;
-  setTimeout(() => $('#gate-user').focus(), 40);
+  $('.shell').inert = true;
+  setTimeout(() => $('#gate-user').focus(), 30);
 }
 
 function hideGate() {
   $('#gate').hidden = true;
+  $('.shell').inert = false;
   $('#gate-pass').value = '';
   $('#gate-confirm').value = '';
 }
 
 $('#gate-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const username = $('#gate-user').value.trim();
-  const password = $('#gate-pass').value;
   const error = $('#gate-error');
   error.hidden = true;
-
+  const username = $('#gate-user').value.trim();
+  const password = $('#gate-pass').value;
+  if (!username || !password) {
+    error.textContent = 'Enter a username and password.';
+    error.hidden = false;
+    return;
+  }
   if (gateMode === 'setup' && password !== $('#gate-confirm').value) {
     error.textContent = 'Those two passwords are not the same.';
     error.hidden = false;
     return;
   }
-
+  const btn = $('#gate-submit');
+  setBusy(btn, true);
   try {
-    const res = await fetch(`/api/auth/${gateMode}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || 'that did not work');
-    }
+    await api(`/api/auth/${gateMode === 'setup' ? 'setup' : 'login'}`, { method: 'POST', body: { username, password } });
     hideGate();
-    boot();
+    boot({ signedIn: true });
   } catch (err) {
     error.textContent = err.message;
     error.hidden = false;
-  }
+  } finally { setBusy(btn, false); }
 });
 
-/* The page asks this before it draws anything. */
 async function checkAuth() {
-  let state;
-  try {
-    state = await (await fetch('/api/auth/state')).json();
-  } catch (err) {
-    return true;          // cannot ask: let the app try and fail honestly
-  }
-  state.username = state.username || '';
-  window.__auth = state;
-  if (!state.configured) return true;   // no login on this instance
-
-  // Configured: find out whether this browser is already signed in.
-  const probe = await fetch('/api/settings');
+  let auth;
+  try { auth = await (await fetch('/api/auth/state')).json(); } catch (err) { return true; }
+  window.__auth = auth;
+  if (!auth.configured) return true;
+  const probe = await fetch('/api/jobs');
   if (probe.status === 401) { showGate('login'); return false; }
   return true;
 }
 
-/* ===========================================================================
-   The speech model
-   =========================================================================== */
+/* ======================================================================
+   Installable app, and starting up
+   ====================================================================== */
 
-async function loadModels() {
-  let data;
-  try { data = await api('/api/models'); } catch (err) { return; }
-  state.models = data;
-
-  $('#model-list').innerHTML = data.items.map((m) => `
-    <div class="model ${m.name === data.selected ? 'chosen' : ''}">
-      <div class="grow">
-        <div class="title">${escapeHtml(m.name)}${
-          m.name === data.selected ? ' <span class="chip auto">in use</span>' : ''}</div>
-        <div class="sub">${m.ready
-          ? `on disk · ${size(m.bytes)}`
-          : `not downloaded · about ${escapeHtml(m.approx_size)}`}</div>
-      </div>
-      ${m.downloading
-        ? (m.percent !== undefined
-          ? `<div class="dl">
-               <div class="bar"><span style="width:${m.percent}%"></span></div>
-               <span class="chip pending">${m.percent}% · ${size(m.bytes)} of ${size(m.total)}</span>
-             </div>`
-          : `<span class="chip pending">downloading… ${size(m.bytes)}</span>`)
-        : (m.ready
-          ? '<span class="chip done">ready</span>'
-          : `<button type="button" class="small" data-get-model="${escapeHtml(m.name)}">Download</button>`)}
-    </div>`).join('')
-    + `<p class="muted">Kept in <code>${escapeHtml(data.folder)}</code>, so it
-        survives updating the container.</p>`;
-
-  // Keep refreshing only while something is actually coming down.
-  if (data.items.some((m) => m.downloading)) {
-    clearTimeout(loadModels._t);
-    loadModels._t = setTimeout(loadModels, 1500);
-  }
-}
-
-/* ===========================================================================
-   Ollama
-   =========================================================================== */
-
-async function checkJudge() {
-  const out = $('#judge-result');
-  out.textContent = 'asking…';
-  $('#judge-pull').hidden = true;
-  try {
-    const data = await api('/api/judge/models');
-    if (!data.reachable) {
-      out.textContent = `could not reach Ollama: ${data.error || 'no answer'}`;
-      return;
-    }
-    if (data.has_selected) {
-      out.textContent = `Ollama has ${data.selected} — nothing to do.`;
-    } else {
-      out.textContent = `Ollama is up but does not have ${data.selected}.`;
-      $('#judge-pull').hidden = false;
-    }
-  } catch (err) {
-    out.textContent = err.message;
-  }
-}
-
-async function pullJudge() {
-  const out = $('#judge-result');
-  try {
-    const data = await api('/api/judge/pull', { method: 'POST', body: '{}' });
-    out.textContent = `Ollama is downloading ${data.model}. This takes a few `
-      + 'minutes and carries on if you leave this page.';
-    $('#judge-pull').hidden = true;
-    const poll = setInterval(async () => {
-      const s2 = await api('/api/judge/pull').catch(() => ({}));
-      if (!s2.downloading) { clearInterval(poll); checkJudge(); }
-    }, 5000);
-  } catch (err) {
-    out.textContent = err.message;
-  }
-}
-
-/* ===========================================================================
-   Who can use this
-   =========================================================================== */
-
-function renderSecurity() {
-  const on = !!(window.__auth && window.__auth.configured);
-  $('#security').innerHTML = on ? `
-    <p class="help">Signed in as <strong>${escapeHtml(window.__auth.username)}</strong>.
-      Everyone who opens Cleanarr needs this password.</p>
-    <div class="grid">
-      <label>Current password<input id="sec-current" type="password" autocomplete="current-password"></label>
-      <label>New password<input id="sec-new" type="password" autocomplete="new-password"></label>
-      <label>New username (optional)<input id="sec-user" placeholder="${escapeHtml(window.__auth.username)}"></label>
-    </div>
-    <div class="row">
-      <button type="button" class="small" id="sec-save">Change password</button>
-      <button type="button" class="small ghost" id="sec-off">Turn the login off</button>
-      <button type="button" class="small ghost" id="sec-out">Sign out</button>
-      <span id="sec-result" class="muted"></span>
-    </div>
-    <p class="help">Changing the password signs out every other browser.</p>
-  ` : `
-    <div class="callout">
-      <strong>Anyone who can reach this address can use it.</strong>
-      That is fine on a home network you trust. Set a password if this is
-      reachable from anywhere else — or if you would rather it were not
-      one click from the family iPad.
-    </div>
-    <div class="grid">
-      <label>Username<input id="sec-user" autocapitalize="none"></label>
-      <label>Password<input id="sec-new" type="password" autocomplete="new-password"></label>
-    </div>
-    <div class="row">
-      <button type="button" class="small" id="sec-create">Turn the login on</button>
-      <span id="sec-result" class="muted"></span>
-    </div>`;
-}
-
-document.addEventListener('click', async (event) => {
-  const get = event.target.closest('[data-get-model]');
-  if (get) {
-    get.disabled = true;
-    get.textContent = 'starting…';
-    try {
-      await api(`/api/models/${encodeURIComponent(get.dataset.getModel)}/download`,
-                { method: 'POST', body: '{}' });
-      toast('downloading — it carries on if you leave this page');
-    } catch (err) { toast(err.message); }
-    return loadModels();
-  }
-
-  if (event.target.id === 'judge-check') return checkJudge();
-  if (event.target.id === 'judge-pull') return pullJudge();
-
-  const out = $('#sec-result');
-  try {
-    if (event.target.id === 'sec-create') {
-      const username = $('#sec-user').value.trim();
-      const password = $('#sec-new').value;
-      await api('/api/auth/setup', { method: 'POST',
-        body: JSON.stringify({ username, password }) });
-      out.textContent = 'login is on';
-      window.__auth = { configured: true, username };
-      renderSecurity();
-    } else if (event.target.id === 'sec-save') {
-      const body = JSON.stringify({
-        current: $('#sec-current').value,
-        password: $('#sec-new').value,
-        username: $('#sec-user').value.trim(),
-      });
-      const data = await api('/api/auth/change', { method: 'POST', body });
-      window.__auth = { configured: true, username: data.username };
-      out.textContent = 'changed — other browsers are signed out';
-      renderSecurity();
-    } else if (event.target.id === 'sec-off') {
-      const answer = await ask('Turn the login off?',
-        'Anyone who can reach this address will be able to use it, with no '
-        + 'password. Only do this on a network you trust.',
-        [{ label: 'Turn it off', value: 'yes', primary: true }]);
-      if (answer !== 'yes') return;
-      await api('/api/auth/change', { method: 'POST',
-        body: JSON.stringify({ current: $('#sec-current').value, disable: true }) });
-      window.__auth = { configured: false, username: '' };
-      renderSecurity();
-      toast('login turned off');
-    } else if (event.target.id === 'sec-out') {
-      await api('/api/auth/logout', { method: 'POST', body: '{}' });
-      showGate('login');
-    }
-  } catch (err) {
-    if (out) out.textContent = err.message;
-  }
-});
-
-
-/* Which half of the Listening section applies. */
-
-/* Which media server's fields to show. "Neither" hides the wait policy too -
-   there is nothing to wait for. */
-const SERVER_NAMES = { plex: 'Plex', jellyfin: 'Jellyfin', none: 'your media server' };
-
-
-/* Which library fields apply, and whether Upcoming means anything.
-
-   Only Sonarr knows what has not aired yet, so on Plex or Jellyfin the tab is
-   hidden rather than shown empty - an empty calendar invites the question
-   "why is this broken", and the honest answer is that it cannot exist. */
-
-/* One set of Plex fields and one set of Jellyfin fields, moved to whichever
-   section needs them.
- 
-   Duplicating the inputs would be simpler to write and worse to use: two boxes
-   bound to the same setting drift apart, and whichever was typed in last wins
-   silently. Moving the node means there is only ever one truth.
- 
-   Which section wins: the library, because that is the first thing a new
-   install sets and it is no use telling someone to scroll for it. */
-function placeServerFields() {
-  const lib = ($$('input[name="library_source"]').find((r) => r.checked) || {}).value || 'arr';
-  const srv = ($$('input[name="media_server"]').find((r) => r.checked) || {}).value || 'none';
-  const libHost = $('#lib-server-fields');
-  const srvHost = $('#media-server-fields');
-  if (!libHost || !srvHost) return;
-
-  ['plex', 'jellyfin'].forEach((name) => {
-    const block = $(`#server-${name}`);
-    if (!block) return;
-    if (lib === name) {
-      libHost.appendChild(block);
-      block.hidden = false;
-    } else if (srv === name) {
-      srvHost.appendChild(block);
-      block.hidden = false;
-    } else {
-      block.hidden = true;
-    }
-  });
-
-  // When the same server does both jobs, say so rather than leaving step 6
-  // looking unfinished.
-  const shared = $('#server-shared');
-  if (shared) shared.hidden = !(srv !== 'none' && srv === lib);
-}
-
-function renderLibrarySource() {
-  const chosen = $$('input[name="library_source"]').find((r) => r.checked);
-  const which = chosen ? chosen.value : 'arr';
-  $('#lib-arr').hidden = which !== 'arr';
-  $('#lib-server').hidden = which === 'arr';
-  $('#test-plex').hidden = which !== 'plex';
-  $('#test-jellyfin').hidden = which !== 'jellyfin';
-
-  placeServerFields();
-
-  const upcoming = $$('.tab').find((t) => t.dataset.view === 'upcoming');
-  if (upcoming) upcoming.hidden = which !== 'arr';
-
-  // A media server reports the path as IT sees it, which is a common place to
-  // come unstuck: Plex in a container may call the same file something else
-  // again. Say so where the mismatch would bite.
-  const note = $('#path-note');
-  if (note) {
-    note.textContent = which === 'arr'
-      ? ' TV paths come from Sonarr, film paths from Radarr.'
-      : ` Note that ${which === 'plex' ? 'Plex' : 'Jellyfin'} reports paths as `
-        + 'it sees them, so if it runs in a container too, both it and Cleanarr '
-        + 'need the same mount.';
-  }
-}
-$$('input[name="library_source"]').forEach((r) =>
-  r.addEventListener('change', () => {
-    renderLibrarySource();
-    // The lists came from somewhere else a moment ago; drop them so the next
-    // visit fetches from the new source rather than showing the old one.
-    state.shows = []; state.movies = []; state.home = null; state.calendar = null;
-  }));
-
-function renderMediaServer() {
-  const chosen = $$('input[name="media_server"]').find((r) => r.checked);
-  const which = chosen ? chosen.value : 'none';
-  placeServerFields();
-  $('#hold-row').hidden = which === 'none';
-  if (which === 'none') $('#plex-now').textContent = '';
-
-  // The wait options name the server, so they are rebuilt whenever the choice
-  // changes - otherwise switching to Jellyfin leaves them saying Plex until the
-  // page is reloaded, which reads as "there is no Jellyfin option".
-  //
-  // Built from this template rather than by rewriting whatever the API sent.
-  // That version depended on a regex here matching the server's own wording,
-  // and quietly did nothing when it did not. One place owns the words.
-  const name = SERVER_NAMES[which] || SERVER_NAMES.none;
-  const select = $('#hold-policy');
-  const keep = select.value;
-  select.innerHTML = [
-    ['never', 'Never wait — clean whenever there is work'],
-    ['video_transcode', `Wait only while ${name} is transcoding video (it needs the GPU)`],
-    ['any_transcode', `Wait while ${name} is transcoding anything`],
-    ['playing', 'Wait while anything at all is playing'],
-  ].map(([key, label]) => `<option value="${key}">${escapeHtml(label)}</option>`).join('');
-  if (keep) select.value = keep;
-}
-$$('input[name="media_server"]').forEach((r) =>
-  r.addEventListener('change', () => { renderMediaServer(); plexNow(); }));
-
-function renderAsrBackend() {
-  const chosen = $$('input[name="asr_backend"]').find((r) => r.checked);
-  const remote = chosen && chosen.value === 'remote';
-  $('#asr-remote').hidden = !remote;
-  $('#asr-builtin').hidden = remote;
-}
-$$('input[name="asr_backend"]').forEach((r) =>
-  r.addEventListener('change', renderAsrBackend));
-
-
-/* Ask the remote server what it has, rather than making people guess its
-   naming. Servers that have no /v1/models are not broken - the field stays
-   free text and says so. */
-async function listRemoteModels() {
-  const out = $('#asr-result');
-  const url = $('#settings-form').elements.asr_url.value.trim();
-  if (!url) { out.textContent = 'put the server address in first'; return; }
-  out.textContent = 'asking…';
-  try {
-    const data = await api(`/api/asr/remote-models?url=${encodeURIComponent(url)}`);
-    const list = $('#asr-model-options');
-    list.innerHTML = (data.models || [])
-      .map((m) => `<option value="${escapeHtml(m)}">`).join('');
-    out.textContent = data.ok && data.models.length
-      ? `${data.models.length} model(s) — click the box to choose`
-      : (data.ok ? 'it lists no models; type the name yourself'
-                 : `could not list them (${data.error}) — type the name yourself`);
-  } catch (err) {
-    out.textContent = err.message;
-  }
-}
-$('#asr-list').addEventListener('click', listRemoteModels);
-
-$('#asr-test').addEventListener('click', async () => {
-  const out = $('#asr-result');
-  out.textContent = 'sending a second of silence…';
-  try {
-    const data = await api('/api/asr/test', { method: 'POST', body: JSON.stringify({
-      url: $('#settings-form').elements.asr_url.value.trim(),
-      model: $('#settings-form').elements.asr_remote_model.value.trim(),
-    })});
-    out.textContent = data.ok ? `works — ${data.note}` : `no: ${data.error}`;
-  } catch (err) {
-    out.textContent = err.message;
-  }
-});
-
-// -------------------------------------------------------------- settings
-async function plexNow() {
-  try {
-    const data = await api('/api/media/sessions');
-    $('#plex-now').innerHTML = data.sessions.length
-      ? `Right now: ${data.sessions.map((s) => escapeHtml(s.description)).join('; ')}
-         ${data.holding ? '— the queue is waiting' : '— not a reason to wait'}`
-      : 'Nothing is playing right now.';
-  } catch (err) { $('#plex-now').textContent = ''; }
-}
-
-async function loadSettings() {
-  const settings = await api('/api/settings');
-  state.settings = settings;
-  const form = $('#settings-form');
-  const set = (name, value) => { if (form.elements[name]) form.elements[name].value = value ?? ''; };
-
-  $('#hold-policy').innerHTML = settings.hold_policies
-    .map((p) => `<option value="${p.key}">${escapeHtml(p.label)}</option>`).join('');
-
-  set('sonarr.url', settings.sonarr.url); set('sonarr.api_key', settings.sonarr.api_key);
-  set('radarr.url', settings.radarr.url); set('radarr.api_key', settings.radarr.api_key);
-  set('pad_start', settings.pad_start); set('pad_end', settings.pad_end);
-  set('fade', settings.fade); set('track_title', settings.track_title);
-  set('plex_url', settings.plex_url);
-  set('plex_token', settings.plex_token);
-  set('keep_backup', String(!!settings.keep_backup));
-  set('trim_silence', String(!!settings.trim_silence));
-  const backend = settings.asr_backend || 'builtin';
-  $$('input[name="asr_backend"]').forEach((r) => { r.checked = r.value === backend; });
-  const server = settings.media_server || 'none';
-  $$('input[name="media_server"]').forEach((r) => { r.checked = r.value === server; });
-  set('jellyfin_url', settings.jellyfin_url);
-  set('jellyfin_api_key', settings.jellyfin_api_key);
-  const libSource = settings.library_source || 'arr';
-  noteLibrarySource(settings);
-  $$('input[name="library_source"]').forEach((r) => { r.checked = r.value === libSource; });
-  renderLibrarySource();
-  renderMediaServer();
-  refreshPathReport();
-  set('asr_url', settings.asr_url); set('asr_api_key', settings.asr_api_key);
-  set('asr_remote_model', settings.asr_remote_model);
-  set('device', settings.device || 'auto');
-  renderAsrBackend();
-  loadHardware();
-  window.__auth = { configured: !!settings.auth_enabled,
-                    username: settings.auth_user || '' };
-  renderSecurity();
-  loadModels();
-  set('custom_words', (settings.custom_words || []).join('\n'));
-  set('allow_words', (settings.allow_words || []).join('\n'));
-  set('judge_url', settings.judge_url); set('judge_model', settings.judge_model);
-  set('judge_threads', String(settings.judge_threads));
-  set('check_in_context', (settings.check_in_context || []).join('\n'));
-  set('hold_policy', settings.hold_policy);
-
-  $('#categories').innerHTML = settings.available_categories.map((c) => `
-    <label><input type="checkbox" value="${c.key}"
-      ${settings.categories.includes(c.key) ? 'checked' : ''}> ${escapeHtml(c.label)}</label>`).join('');
-}
-
-$('#settings-form').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const form = event.target;
-  const lines = (name) => form.elements[name].value.split('\n').map((s) => s.trim()).filter(Boolean);
-  const payload = {
-    sonarr: { url: form.elements['sonarr.url'].value.trim(),
-              api_key: form.elements['sonarr.api_key'].value.trim(), enabled: true },
-    radarr: { url: form.elements['radarr.url'].value.trim(),
-              api_key: form.elements['radarr.api_key'].value.trim(), enabled: true },
-    categories: $$('#categories input:checked').map((i) => i.value),
-    custom_words: lines('custom_words'),
-    allow_words: lines('allow_words'),
-    pad_start: Number(form.elements.pad_start.value),
-    pad_end: Number(form.elements.pad_end.value),
-    fade: Number(form.elements.fade.value),
-    track_title: form.elements.track_title.value.trim() || 'Cleaned - English',
-    keep_backup: form.elements.keep_backup.value === 'true',
-    trim_silence: form.elements.trim_silence.value === 'true',
-    asr_backend: ($$('input[name="asr_backend"]').find((r) => r.checked)
-                  || {}).value || 'builtin',
-    library_source: ($$('input[name="library_source"]').find((r) => r.checked)
-                     || {}).value || 'arr',
-    media_server: ($$('input[name="media_server"]').find((r) => r.checked)
-                   || {}).value || 'none',
-    jellyfin_url: form.elements.jellyfin_url.value.trim(),
-    jellyfin_api_key: form.elements.jellyfin_api_key.value.trim(),
-    asr_url: form.elements.asr_url.value.trim(),
-    asr_api_key: form.elements.asr_api_key.value.trim(),
-    asr_remote_model: form.elements.asr_remote_model.value.trim(),
-    device: form.elements.device.value,
-    plex_url: form.elements.plex_url.value.trim(),
-    plex_token: form.elements.plex_token.value.trim(),
-    judge_url: form.elements.judge_url.value.trim(),
-    judge_model: form.elements.judge_model.value.trim() || 'qwen3.5:9b',
-    judge_threads: Number(form.elements.judge_threads.value),
-    check_in_context: lines('check_in_context'),
-    hold_policy: form.elements.hold_policy.value,
-  };
-  try {
-    await api('/api/settings', { method: 'PUT', body: JSON.stringify(payload) });
-    $('#save-result').textContent = 'saved';
-    state.shows = []; state.movies = [];
-    await loadSettings();
-    plexNow();
-    setTimeout(() => { $('#save-result').textContent = ''; }, 2500);
-  } catch (err) {
-    $('#save-result').textContent = `could not save: ${err.message}`;
-  }
-});
-
-
-/* Installable-app plumbing.
-   The worker is served from /static/ but the app lives at /, so it asks for
-   the wider scope; the server sends the Service-Worker-Allowed header that
-   permits it. Failing to register is not worth bothering anyone about - the
-   app works fine, it just cannot be installed. */
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/static/sw.js', { scope: '/' })
@@ -1717,137 +2273,20 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// ------------------------------------------------------------------ boot
-async function boot() {
-  if (!(await checkAuth())) return;    // the gate is up; stop here
-  loadSettings().then(loadHome).catch(() => {});
-  loadJobs();
+let timers = [];
+async function boot({ signedIn = false } = {}) {
+  noteSource({ library_source: state.libSource });
+  if (!signedIn && !(await checkAuth())) return;
+  timers.forEach(clearInterval);
+  // The page first, so it is never blank; the queue's numbers follow.
+  route();
+  poll();
+  loadSettings({ fill: false }).catch(() => {});
+  timers = [
+    setInterval(() => { if ($('#gate').hidden && !document.hidden) poll(); }, 3000),
+    // Home asks the library, so it refreshes slowly and only while shown.
+    setInterval(() => { if (state.view === 'home' && !document.hidden) loadHome(); }, 60000),
+  ];
 }
 
 boot();
-setInterval(() => { if ($('#gate').hidden) loadJobs(); }, 3000);
-/* Home asks both Sonarr and Radarr, so it refreshes on a slow beat rather
-   than with the queue - and only while it is the page being looked at. */
-setInterval(() => {
-  if ($('#view-home').classList.contains('active')) loadHome();
-}, 60000);
-
-
-/* ---------------------------------------------------------------------------
-   The path check
-
-   The library says where a file is; this container opens that exact path.
-   They agree when the media is mounted here at the path the library reports,
-   and not otherwise — routine when the library is on another host.
-
-   Shows what the library reported, whether it opens from in here, and where
-   the same folder appears to be if it is mounted somewhere else. The fix is
-   always the mount; there is no path rewriting.
-   --------------------------------------------------------------------------- */
-
-async function refreshPathReport() {
-  const host = $('#path-report');
-  if (!host) return;
-  host.innerHTML = '<p class="help">Checking where your media is…</p>';
-  let data;
-  try {
-    data = await api('/api/paths');
-  } catch (err) {
-    host.innerHTML = `<p class="help bad">Could not check paths: ${escapeHtml(String(err))}</p>`;
-    return;
-  }
-  if (data.error) {
-    host.innerHTML = `<p class="help bad">${escapeHtml(data.error)}</p>`;
-    return;
-  }
-  if (!data.roots.length) {
-    host.innerHTML = '<p class="help">No libraries reported yet. Save your server '
-      + 'details above first.</p>';
-    return;
-  }
-  const bad = data.roots.filter((r) => !r.ok);
-  const rows = data.roots.map((r) => `
-    <tr class="${r.ok ? 'ok' : 'bad'}">
-      <td>${r.ok ? '✓' : '✗'}</td>
-      <td>${escapeHtml(r.library || '')}</td>
-      <td><code>${escapeHtml(r.path)}</code></td>
-      <td>${r.ok ? 'Cleanarr can open this'
-        : (r.elsewhere
-            ? `not here — but this folder looks mounted at
-               <code>${escapeHtml(r.elsewhere)}</code>. Change that volume so it
-               appears here as <code>${escapeHtml(r.path)}</code>.`
-            : 'not mounted in this container')}</td>
-    </tr>`).join('');
-  host.innerHTML = `
-    <table class="paths">
-      <thead><tr><th></th><th>Library</th><th>It says the media is here</th><th></th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    ${bad.length
-      ? `<p class="help bad">${bad.length} of ${data.roots.length} library folders
-         cannot be opened from this container, so jobs for anything in them will
-         fail with “not found”. Mount them here at the paths above — in
-         docker-compose, a line like
-         <code>- /your/media:${escapeHtml(bad[0].path)}</code> — then re-check.</p>`
-      : '<p class="help good">Every library folder is reachable from this container.</p>'}
-    <p class="help">This container can see: ${
-      data.visible.map((v) => `<code>${escapeHtml(v)}</code>`).join(' ') || 'nothing mounted'}</p>`;
-}
-
-$('#path-recheck')?.addEventListener('click', refreshPathReport);
-
-
-/* What Whisper will actually run on.
-
-   Describes the option currently SELECTED, not the one saved. Re-reading the
-   server on every change asked it about a setting it had not been told about
-   yet, so picking "NVIDIA GPU" appeared to do nothing at all. */
-let CUDA_PRESENT = null;
-
-async function loadHardware() {
-  if (!$('#hardware-note')) return;
-  try {
-    CUDA_PRESENT = (await api('/api/hardware')).cuda_available;
-  } catch (err) {
-    $('#hardware-note').textContent = '';
-    return;
-  }
-  renderHardwareNote();
-}
-
-function renderHardwareNote() {
-  const note = $('#hardware-note');
-  const form = $('#settings-form');
-  if (!note || !form || !form.elements.device || CUDA_PRESENT === null) return;
-
-  const chosen = form.elements.device.value;
-  const cuda = CUDA_PRESENT;
-  const amd = 'CUDA is NVIDIA-only and the speech engine has no AMD backend, '
-    + 'so an AMD card cannot be used here — point Cleanarr at your own Whisper '
-    + 'server to use one.';
-  let msg;
-  let bad = false;
-
-  if (chosen === 'cuda' && !cuda) {
-    msg = 'No NVIDIA GPU found here, so every job would fail. Choose CPU, or '
-      + 'whatever is available. ' + amd;
-    bad = true;
-  } else if (chosen === 'cuda') {
-    msg = 'Listening will run on the NVIDIA GPU.';
-  } else if (chosen === 'cpu') {
-    msg = cuda
-      ? 'An NVIDIA GPU is available, but you have chosen the CPU. Expect '
-        + 'minutes rather than seconds per episode.'
-      : 'Listening will run on the CPU.';
-  } else {
-    msg = cuda
-      ? 'An NVIDIA GPU was found, so listening runs on it.'
-      : 'No NVIDIA GPU found, so listening runs on the CPU. ' + amd;
-  }
-  note.className = bad ? 'help bad' : 'help';
-  note.textContent = msg;
-}
-
-$('#settings-form')?.addEventListener('change', (e) => {
-  if (e.target && e.target.name === 'device') renderHardwareNote();
-});

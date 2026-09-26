@@ -13,7 +13,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 FFMPEG = os.environ.get("FFMPEG", "ffmpeg")
@@ -110,6 +110,29 @@ class AudioStream:
         return bool(handler) and handler in KNOWN_TITLES
 
 
+# Subtitle formats that are text, and so can be read. Picture-based ones -
+# Blu-ray PGS, DVD VobSub - would need OCR, and are skipped.
+TEXT_SUBTITLES = {"subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "text"}
+
+
+@dataclass
+class SubtitleStream:
+    sub_index: int      # index among subtitle streams only (the s:N form)
+    codec: str
+    language: str
+    title: str
+    forced: bool
+
+    @property
+    def is_text(self) -> bool:
+        return self.codec in TEXT_SUBTITLES
+
+    @property
+    def is_forced(self) -> bool:
+        """Forced by flag, or by name - plenty of files only say so in the title."""
+        return self.forced or "forced" in self.title.lower()
+
+
 @dataclass
 class Probe:
     path: Path
@@ -117,6 +140,7 @@ class Probe:
     video_streams: int
     audio: list[AudioStream]
     container: str
+    subtitles: list[SubtitleStream] = field(default_factory=list)
 
     @property
     def cleaned_track(self) -> AudioStream | None:
@@ -136,11 +160,21 @@ def probe(path: str | Path) -> Probe:
     data = json.loads(out.stdout or "{}")
     streams = data.get("streams", [])
     audio: list[AudioStream] = []
+    subtitles: list[SubtitleStream] = []
     ai = 0
     for s in streams:
+        tags = {k.lower(): v for k, v in (s.get("tags") or {}).items()}
+        if s.get("codec_type") == "subtitle":
+            subtitles.append(SubtitleStream(
+                sub_index=len(subtitles),
+                codec=str(s.get("codec_name", "")),
+                language=str(tags.get("language", "")),
+                title=str(tags.get("title", "")),
+                forced=bool((s.get("disposition") or {}).get("forced")),
+            ))
+            continue
         if s.get("codec_type") != "audio":
             continue
-        tags = {k.lower(): v for k, v in (s.get("tags") or {}).items()}
         audio.append(AudioStream(
             index=int(s.get("index", 0)),
             audio_index=ai,
@@ -160,6 +194,7 @@ def probe(path: str | Path) -> Probe:
         video_streams=sum(1 for s in streams if s.get("codec_type") == "video"),
         audio=audio,
         container=path.suffix.lower().lstrip("."),
+        subtitles=subtitles,
     )
 
 
@@ -193,11 +228,42 @@ def pick_source_track(p: Probe, prefer_language: str = "eng") -> AudioStream:
     return usable[0]
 
 
-def extract_for_asr(path: Path, track: AudioStream, dest: Path) -> Path:
-    """16 kHz mono WAV, which is what Whisper wants and nothing else does."""
+def pick_subtitles(p: Probe, prefer_language: str = "eng") -> SubtitleStream | None:
+    """The English text subtitles to check the transcript against, if any.
+
+    Forced subtitles only cover the odd line of foreign speech, so they would
+    make every swear look unconfirmed. A track tagged English wins over an
+    untagged one.
+    """
+    def usable(s: SubtitleStream) -> bool:
+        lang = s.language.lower()
+        return (s.is_text and not s.is_forced
+                and (lang.startswith(prefer_language[:2]) or lang in ("", "und")))
+
+    tagged = [s for s in p.subtitles if usable(s) and s.language]
+    untagged = [s for s in p.subtitles if usable(s) and not s.language]
+    return (tagged or untagged or [None])[0]
+
+
+def extract_for_asr(path: Path, track: AudioStream, dest: Path,
+                    subtitles: SubtitleStream | None = None,
+                    subtitle_dest: Path | None = None) -> Path:
+    """16 kHz mono WAV, which is what Whisper wants and nothing else does.
+
+    The subtitles, when asked for, come out of the same pass as SRT: reading a
+    large file off a network share twice to get a few kilobytes of text is not
+    worth it. If they cannot be converted, the audio is extracted on its own.
+    """
     cmd = [FFMPEG, "-nostdin", "-v", "error", "-y", *_threads(), "-i", str(path),
            "-map", f"0:a:{track.audio_index}", "-vn", "-sn", "-dn",
            "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(dest)]
+    if subtitles is not None and subtitle_dest is not None:
+        out = _run([*cmd, "-map", f"0:s:{subtitles.sub_index}", "-c:s", "srt",
+                    str(subtitle_dest)])
+        if out.returncode == 0 and dest.exists():
+            return dest
+        if subtitle_dest.exists():
+            subtitle_dest.unlink()
     out = _run(cmd)
     if out.returncode != 0 or not dest.exists():
         raise MediaError(f"could not extract audio: {out.stderr.strip()[:300]}")
@@ -224,56 +290,6 @@ def _encoder_for(container: str, channels: int, source_codec: str = "",
             return (["-c:a", "eac3", "-b:a", surround_bitrate], "eac3")
         return (["-c:a", "aac", "-b:a", surround_bitrate], "aac")
     return (["-c:a", "aac", "-b:a", stereo_bitrate], "aac")
-
-
-def render_muted_track(path: Path, track: AudioStream, spans: list[tuple[float, float]],
-                       dest: Path, fade: float = 0.02,
-                       container: str = "mkv", progress=None,
-                       surround_bitrate: str = "384k",
-                       stereo_bitrate: str = "192k") -> Path:
-    """The source track with `spans` silenced, as a standalone audio file.
-
-    The muting is done with ffmpeg's volume filter rather than by cutting, so
-    the track stays exactly as long as the original - a cleaned track that
-    drifts out of sync with the picture is worse than no cleaned track.
-
-    A short fade at each edge keeps the mute from clicking. The filter is
-    written to a file because a long episode can carry hundreds of spans and
-    the expression outgrows a command line.
-    """
-    args, _codec = _encoder_for(container, track.channels, track.codec,
-                                surround_bitrate, stereo_bitrate)
-    if spans:
-        # volume=0 inside each span, with `fade` seconds of ramp at each edge.
-        # Each term is a straight line in time, clamped by min/max.
-        terms = []
-        for start, end in spans:
-            terms.append(
-                f"min(1,max(0,(({start:.3f}-t)/{fade:.3f})))"
-                f"+min(1,max(0,((t-{end:.3f})/{fade:.3f})))"
-            )
-        expr = "*".join(f"min(1,({t}))" for t in terms)
-        filter_text = f"volume=volume='min(1,max(0,{expr}))':eval=frame"
-    else:
-        filter_text = "anull"
-
-    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False,
-                                     encoding="utf8") as fh:
-        fh.write(filter_text)
-        filter_file = Path(fh.name)
-
-    try:
-        cmd = [FFMPEG, "-nostdin", "-v", "error", "-y", *_threads(), "-i", str(path),
-               "-map", f"0:a:{track.audio_index}", "-vn", "-sn", "-dn",
-               "-filter_script:a", str(filter_file), *args, "-progress", "pipe:1",
-               "-nostats", str(dest)]
-        _run_with_progress(cmd, progress)
-    finally:
-        filter_file.unlink(missing_ok=True)
-
-    if not dest.exists() or dest.stat().st_size == 0:
-        raise MediaError("the cleaned audio track came out empty")
-    return dest
 
 
 def _run_with_progress(cmd: list[str], progress=None) -> None:
@@ -333,7 +349,18 @@ def build_cleaned_file(original: Probe, track: AudioStream,
             # the name is changed later.
             f"-metadata:s:a:{new_index}", f"{MARK_KEY}={MARK_VALUE}",
             f"-disposition:a:{new_index}", "0",
-            # A muxer option, so it belongs after the inputs - see add_track.
+            # Interleave strictly. Left to itself ffmpeg gives up on ordering
+            # after max_interleave_delta (10s) when a file has sparse streams -
+            # one episode with 38 subtitle tracks ended up with its cleaned
+            # audio for the 30-minute mark written 470MB from the matching
+            # picture, which plays fine from a local disk and stalls forever
+            # over a share.
+            #
+            # This is a MUXER option, so it belongs here, after the inputs.
+            # Written before -i it is read as an input option and silently does
+            # nothing - which is exactly what happened on the first attempt,
+            # and is why the verify step measures the result rather than
+            # trusting the flag.
             "-max_interleave_delta", "0",
             "-progress", "pipe:1", "-nostats", str(dest)]
     script = cmd[cmd.index("-filter_complex_script") + 1]
@@ -363,51 +390,6 @@ def _filter_script(spans: list[tuple[float, float]], track: AudioStream,
                                      encoding="utf8") as fh:
         fh.write(text)
         return Path(fh.name)
-
-
-def add_track(original: Probe, cleaned_audio: Path, dest: Path,
-              title: str = "", language: str = "eng",
-              drop_audio: tuple[int, ...] = (), progress=None) -> Path:
-    """Every stream of the original, copied, plus the cleaned track.
-
-    `drop_audio` holds audio-stream indexes to leave out - used when a file is
-    cleaned a second time, so the previous cleaned track is replaced rather
-    than joined by a second one.
-
-    The new track is explicitly NOT default: the file must play exactly as it
-    did before for anyone who does not choose otherwise.
-    """
-    title = title or CLEAN_TITLE
-    new_index = len(original.audio) - len(drop_audio)
-    cmd = [FFMPEG, "-nostdin", "-v", "error", "-y", *_threads(),
-           "-i", str(original.path), "-i", str(cleaned_audio), "-map", "0"]
-    for index in drop_audio:
-        cmd += ["-map", f"-0:a:{index}"]
-    cmd += ["-map", "1:a:0", "-c", "copy",
-            # Interleave strictly. Left to itself ffmpeg gives up on ordering
-            # after max_interleave_delta (10s) when a file has sparse streams -
-            # one episode with 38 subtitle tracks ended up with its cleaned
-            # audio for the 30-minute mark written 470MB from the matching
-            # picture, which plays fine from a local disk and stalls forever
-            # over a share.
-            #
-            # This is a MUXER option, so it belongs here, after the inputs.
-            # Written before -i it is read as an input option and silently does
-            # nothing - which is exactly what happened on the first attempt,
-            # and is why the verify step measures the result rather than
-            # trusting the flag.
-            "-max_interleave_delta", "0",
-            f"-metadata:s:a:{new_index}", f"title={title}",
-            # MP4 drops the title and keeps this one. Harmless on Matroska.
-            f"-metadata:s:a:{new_index}", f"handler_name={title}",
-            f"-metadata:s:a:{new_index}", f"language={language}",
-            # See build_cleaned_file: a name-independent mark, where the
-            # container keeps one.
-            f"-metadata:s:a:{new_index}", f"{MARK_KEY}={MARK_VALUE}",
-            f"-disposition:a:{new_index}", "0",
-            "-progress", "pipe:1", "-nostats", str(dest)]
-    _run_with_progress(cmd, progress)
-    return dest
 
 
 def track_bytes(path: Path, audio_index: int) -> int:
@@ -473,8 +455,13 @@ def check_interleave(path: Path, cleaned_index: int, duration: float,
 
 
 def verify_replacement(original: Probe, candidate: Path,
-                       expected_audio: int | None = None) -> Probe:
-    """Refuse a file that lost anything on the way through."""
+                       expected_audio: int | None = None,
+                       expect_cleaned: bool = True) -> Probe:
+    """Refuse a file that lost anything on the way through.
+
+    `expect_cleaned` is False for a removal, where the new file is meant to
+    have no track of ours.
+    """
     got = probe(candidate)
     expected = len(original.audio) + 1 if expected_audio is None else expected_audio
     if got.video_streams != original.video_streams:
@@ -484,14 +471,16 @@ def verify_replacement(original: Probe, candidate: Path,
     if len(got.audio) != expected:
         raise MediaError(
             f"the new file has {len(got.audio)} audio tracks, expected {expected}")
-    if got.cleaned_track is None:
+    if expect_cleaned and got.cleaned_track is None:
         raise MediaError(
             f"the new file has no track named “{CLEAN_TITLE}”")
+    if not expect_cleaned and any(a.written_here for a in got.audio):
+        raise MediaError("the new file still has a track this install wrote")
     if original.duration and abs(got.duration - original.duration) > DURATION_TOLERANCE:
         raise MediaError(
             f"the new file is {got.duration:.1f}s long, the original was "
             f"{original.duration:.1f}s")
-    cleaned = got.cleaned_track
+    cleaned = got.cleaned_track if expect_cleaned else None
     if cleaned is not None and cleaned.audio_index != 0:
         check_interleave(candidate, cleaned.audio_index, got.duration)
     return got
@@ -512,7 +501,8 @@ def remove_cleaned_track(original: Probe, dest: Path, drop=None,
            "-i", str(original.path), "-map", "0"]
     for index in drop:
         cmd += ["-map", f"-0:a:{index}"]
-    # After the inputs: -max_interleave_delta is a muxer option (see add_track).
+    # After the inputs: -max_interleave_delta is a muxer option (see
+    # build_cleaned_file).
     cmd += ["-c", "copy", "-max_interleave_delta", "0",
             "-progress", "pipe:1", "-nostats", str(dest)]
     _run_with_progress(cmd, progress)

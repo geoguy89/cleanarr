@@ -230,6 +230,21 @@ class Match:
     category: str
     needs_review: bool = False
     reason: str = ""
+    # How sure Whisper was of the word, 0-1, where it said. None for a
+    # transcript that does not carry it.
+    confidence: float | None = None
+    # What the file's own subtitles say at that moment, and whether that
+    # agrees - see subtitles.py. Neither changes whether the word is muted.
+    subtitle: str = ""
+    subtitle_state: str = ""
+
+
+def _confidence(word: dict) -> float | None:
+    value = word.get("probability")
+    try:
+        return None if value is None else round(float(value), 3)
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass
@@ -243,6 +258,7 @@ class Matcher:
     # "always mute this one" and meaning it.
     context_words: frozenset[str] = frozenset({"jesus", "christ"})
     _index: dict[str, str] = field(default_factory=dict, init=False)
+    _never: frozenset[str] = field(default_factory=frozenset, init=False)
 
     def __post_init__(self) -> None:
         index: dict[str, str] = {}
@@ -257,8 +273,9 @@ class Matcher:
             word = normalize(word)
             if word:
                 index[word] = "custom"
-        for word in self.never:
-            index.pop(normalize(word), None)
+        self._never = frozenset(normalize(w) for w in self.never)
+        for word in self._never:
+            index.pop(word, None)
         self._index = index
 
     # -- helpers ---------------------------------------------------------
@@ -318,6 +335,10 @@ class Matcher:
                         # nothing is chopped that should not be.
                         spoken = " ".join(phrase.words)
                         for offset in phrase.mute:
+                            # The never list wins here too: a name Whisper
+                            # keeps hearing as "god" is fixed by listing it.
+                            if norms[i + offset] in self._never:
+                                continue
                             word = words[i + offset]
                             out.append(Match(
                                 start=float(word.get("start", 0.0)),
@@ -327,6 +348,7 @@ class Matcher:
                                 needs_review=True,
                                 reason="the Lord's name used as an exclamation"
                                        f" (in “{spoken}”)",
+                                confidence=_confidence(word),
                             ))
                     i = end_i
                     continue
@@ -345,6 +367,7 @@ class Matcher:
                     category=category,
                     needs_review=solo_blasphemy,
                     reason="said on its own, so read as an exclamation" if solo_blasphemy else "",
+                    confidence=_confidence(words[i]),
                 ))
             i += 1
 

@@ -31,9 +31,13 @@ class Client:
     url: str
     api_key: str
 
+    @property
+    def name(self) -> str:
+        return type(self).__name__ if type(self) is not Client else "The service"
+
     def _get(self, path: str, **params):
         if not self.url or not self.api_key:
-            raise ArrError("not configured")
+            raise ArrError(f"{self.name} address and API key are not set")
         base = self.url.rstrip("/")
         try:
             resp = httpx.get(f"{base}/api/v3/{path}", params=params,
@@ -41,10 +45,17 @@ class Client:
         except httpx.HTTPError as exc:
             raise ArrError(f"could not reach {base}: {exc}") from exc
         if resp.status_code == 401:
-            raise ArrError("the API key was rejected")
+            raise ArrError(f"{self.name} rejected the API key")
+        if resp.status_code == 404:
+            raise ArrError(f"{self.name} answered 404 at {base}/api/v3/{path} - check "
+                           f"the address, including any URL base")
         if resp.status_code >= 400:
             raise ArrError(f"{resp.status_code} from {base}/api/v3/{path}")
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise ArrError(f"{base} did not answer like {self.name} - check the "
+                           f"address") from exc
 
     def test(self) -> dict:
         status = self._get("system/status")

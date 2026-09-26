@@ -58,16 +58,42 @@ def load_model(name: str, device: str = "auto", compute_type: str = "auto",
 
     if device == "auto":
         device = "cuda" if _cuda_available() else "cpu"
+    elif device == "cuda" and not _cuda_available():
+        raise ModelError(
+            "Settings → Listening says to use the NVIDIA GPU, but this container "
+            "can see none. Choose \"Whatever is available\" or CPU, or give the "
+            "container the GPU (see Hardware in the README)")
     if compute_type == "auto":
         compute_type = "float16" if device == "cuda" else "int8"
 
     key = (name, device, compute_type)
     with _lock:
         if _model is None or _model_key != key:
-            _model = WhisperModel(name, device=device, compute_type=compute_type,
-                                  download_root=download_root)
+            try:
+                _model = WhisperModel(name, device=device, compute_type=compute_type,
+                                      download_root=download_root)
+            except RuntimeError:
+                raise          # out of memory: _load_with_patience handles it
+            except ValueError as exc:
+                if "invalid model size" in str(exc).lower():
+                    raise ModelError(
+                        f"“{name}” is not a speech model faster-whisper knows. "
+                        f"Set model: in config.yaml to medium.en") from exc
+                raise ModelError(_load_failed(name, exc)) from exc
+            except Exception as exc:  # noqa: BLE001
+                raise ModelError(_load_failed(name, exc)) from exc
             _model_key = key
     return _model
+
+
+class ModelError(Exception):
+    """The speech model cannot be loaded, for a reason a person can fix."""
+
+
+def _load_failed(name: str, exc: Exception) -> str:
+    return (f"could not load the speech model {name} ({type(exc).__name__}: {exc}). "
+            f"If it is not downloaded yet, this container has to reach "
+            f"huggingface.co - or download it first under Settings → Listening")
 
 
 def _cuda_available() -> bool:
@@ -219,9 +245,16 @@ def transcribe_remote(audio: Path, url: str, model: str, api_key: str = "",
             "to mute single words - check it supports "
             "timestamp_granularities[]=word")
 
-    out = [{"word": str(w.get("word", "")),
-            "start": round(float(w.get("start", 0.0)), 3),
-            "end": round(float(w.get("end", 0.0)), 3)} for w in words]
+    out = []
+    for w in words:
+        row = {"word": str(w.get("word", "")),
+               "start": round(float(w.get("start", 0.0)), 3),
+               "end": round(float(w.get("end", 0.0)), 3)}
+        # The OpenAI API has no per-word confidence; some servers add one.
+        sure = w.get("probability", w.get("confidence"))
+        if isinstance(sure, (int, float)):
+            row["probability"] = round(float(sure), 3)
+        out.append(row)
     duration = float(body.get("duration") or (out[-1]["end"] if out else 0.0))
     return Transcript(words=out, language=str(body.get("language", "en")),
                       duration=duration, model=f"remote:{model}")
@@ -314,7 +347,8 @@ def transcribe(audio: Path, *, model_name: str = "medium.en",
     for segment in segments:  # generator: this is where the time goes
         for w in (segment.words or []):
             words.append({"word": w.word, "start": round(float(w.start), 3),
-                          "end": round(float(w.end), 3)})
+                          "end": round(float(w.end), 3),
+                          "probability": round(float(getattr(w, "probability", 1.0)), 3)})
         if progress and duration:
             progress(min(1.0, float(segment.end) / duration))
 

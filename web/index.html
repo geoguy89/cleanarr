@@ -4,464 +4,725 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cleanarr</title>
-<link rel="icon" href="/static/icon.png?v=4">
-<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=4">
+<link rel="icon" href="/static/logo.svg?v=5" type="image/svg+xml">
+<link rel="alternate icon" href="/static/icon.png?v=5" type="image/png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=5">
 <meta name="application-name" content="Cleanarr">
 <link rel="manifest" href="/static/manifest.json">
-<meta name="theme-color" content="#12141a">
-<meta name="color-scheme" content="dark">
-<!-- So it opens without browser chrome when added to a phone's home screen. -->
+<meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<meta name="color-scheme" content="dark light">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Cleanarr">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=6">
 </head>
 <body>
+<!-- Icons: drawn for this app, one stroke weight, currentColor. -->
+<svg xmlns="http://www.w3.org/2000/svg" hidden>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/></symbol>
+  <symbol id="i-tv" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/><path d="M18 16l3 2-3 2z"/></symbol>
+  <symbol id="i-done" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></symbol>
+  <symbol id="i-top" viewBox="0 0 24 24"><path d="M6 4h12M7 13l5-5 5 5M12 8v12"/></symbol>
+  <symbol id="i-bottom" viewBox="0 0 24 24"><path d="M6 20h12M7 11l5 5 5-5M12 16V4"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.01"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4h12l-2.5 4 2.5 4H5"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5M15 3v5M7 8h10v3a5 5 0 0 1-10 0zM12 16v5"/></symbol>
+  <symbol id="i-wave" viewBox="0 0 24 24"><path d="M4 11v2M8 8v8M12 5v14M16 8v8M20 11v2"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9.5l4 5M21 9.5l-4 5"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="7" rx="1.5"/><rect x="4" y="13" width="16" height="7" rx="1.5"/><path d="M8 7.5h.01M8 16.5h.01"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/><path d="M9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M3 15h4M17 9h4M17 15h4"/></symbol>
+  <symbol id="i-words" viewBox="0 0 24 24"><path d="M5 7V5h14v2M12 5v14M9 19h6"/></symbol>
+  <symbol id="i-signout" viewBox="0 0 24 24"><path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/></symbol>
+</svg>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<!-- Sign in / create the account. Covers everything: until signed in there is
+     no app behind it. -->
 <div id="gate" class="gate" hidden>
-  <form id="gate-form" class="gate-box">
-    <img src="/static/icon.png?v=4" alt="" class="gate-logo">
+  <form id="gate-form" class="gate-box" novalidate>
+    <img src="/static/logo.svg?v=5" alt="" class="gate-logo" width="88" height="88">
     <h1 class="gate-title">Cleanarr</h1>
     <p id="gate-blurb" class="muted"></p>
-    <label>Username<input id="gate-user" autocomplete="username" autocapitalize="none"></label>
-    <label>Password<input id="gate-pass" type="password" autocomplete="current-password"></label>
-    <label id="gate-confirm-row" hidden>Password again
-      <input id="gate-confirm" type="password" autocomplete="new-password"></label>
-    <button id="gate-submit" type="submit">Sign in</button>
-    <p id="gate-error" class="gate-error" hidden></p>
+    <div class="field">
+      <label for="gate-user">Username</label>
+      <input id="gate-user" autocomplete="username" autocapitalize="none" required>
+    </div>
+    <div class="field">
+      <label for="gate-pass">Password</label>
+      <input id="gate-pass" type="password" autocomplete="current-password" required>
+    </div>
+    <div class="field" id="gate-confirm-row" hidden>
+      <label for="gate-confirm">Password again</label>
+      <input id="gate-confirm" type="password" autocomplete="new-password">
+    </div>
+    <p id="gate-error" class="alert error" role="alert" hidden></p>
+    <button id="gate-submit" class="btn" type="submit">Sign in</button>
   </form>
 </div>
 
-
-<header>
-  <h1><img src="/static/icon.png?v=4" alt=""> Cleanarr</h1>
-  <nav>
-    <button class="tab active" data-view="home">Home</button>
-    <button class="tab" data-view="shows">Shows</button>
-    <button class="tab" data-view="upcoming">Upcoming</button>
-    <button class="tab" data-view="movies">Movies</button>
-    <button class="tab" data-view="queue">Queue <span id="queue-count" class="pill"></span></button>
-    <button class="tab" data-view="cleaned">Cleaned <span id="cleaned-count" class="pill"></span></button>
-    <button class="tab" data-view="settings">Settings</button>
+<div class="shell">
+  <!-- Sidebar on a wide screen; on a phone the same links sit in a bar at the
+       bottom, with the three least-used behind "More". -->
+  <nav class="sidebar" aria-label="Main">
+    <a class="brand" href="#/home">
+      <img src="/static/logo.svg?v=5" alt="" width="40" height="40">
+      <span>Cleanarr</span>
+    </a>
+    <ul class="nav">
+      <li><a href="#/home" data-nav="home"><svg class="i"><use href="#i-home"/></svg><span>Home</span></a></li>
+      <li><a href="#/shows" data-nav="shows"><svg class="i"><use href="#i-tv"/></svg><span>Shows</span></a></li>
+      <li><a href="#/movies" data-nav="movies"><svg class="i"><use href="#i-film"/></svg><span>Movies</span></a></li>
+      <li class="secondary" id="nav-upcoming"><a href="#/upcoming" data-nav="upcoming"><svg class="i"><use href="#i-calendar"/></svg><span>Upcoming</span></a></li>
+      <li><a href="#/queue" data-nav="queue"><svg class="i"><use href="#i-queue"/></svg><span>Queue</span><span class="count" id="queue-count" aria-label="waiting"></span></a></li>
+      <li class="secondary"><a href="#/cleaned" data-nav="cleaned"><svg class="i"><use href="#i-done"/></svg><span>Cleaned</span><span class="count subtle" id="cleaned-count"></span></a></li>
+      <li class="secondary"><a href="#/settings" data-nav="settings"><svg class="i"><use href="#i-settings"/></svg><span>Settings</span><span class="dot" id="settings-dot" hidden title="Setup is not finished"></span></a></li>
+      <li class="more-item"><button type="button" id="more-button" aria-haspopup="dialog" aria-controls="more-sheet"><svg class="i"><use href="#i-more"/></svg><span>More</span><span class="dot" id="more-dot" hidden></span></button></li>
+    </ul>
+    <div class="side-status" id="side-status" role="status" aria-live="polite"></div>
   </nav>
-  <div id="status" class="status"></div>
-</header>
 
-<main>
-  <section id="view-home" class="view active">
-    <div id="home-summary" class="summary"></div>
-    <h2 class="section-head">Episodes that just landed
-      <span class="muted" id="home-episodes-note">newest first</span></h2>
-    <div id="home-episodes" class="list"></div>
-    <h2 class="section-head">Films that just landed
-      <span class="muted" id="home-movies-note">newest first</span></h2>
-    <div id="home-movies" class="grid-posters"></div>
-  </section>
+  <main id="main" tabindex="-1">
+    <!-- ================================================================ home -->
+    <section class="view" id="view-home" data-title="Home" hidden>
+      <header class="page-head">
+        <h1 tabindex="-1">Home</h1>
+        <p class="lede muted" id="home-lede">What landed lately, and what cleaning has cost so far.</p>
+      </header>
+      <div id="home-setup"></div>
+      <div id="home-now"></div>
+      <div id="home-stats" class="stats"></div>
+      <div id="home-problems"></div>
+      <section class="block" aria-labelledby="home-eps-h">
+        <div class="block-head">
+          <h2 id="home-eps-h">Episodes that just landed</h2>
+          <span class="muted" id="home-eps-note"></span>
+        </div>
+        <div id="home-episodes"></div>
+      </section>
+      <section class="block" aria-labelledby="home-films-h">
+        <div class="block-head">
+          <h2 id="home-films-h">Films that just landed</h2>
+          <span class="muted" id="home-films-note"></span>
+        </div>
+        <div id="home-movies"></div>
+      </section>
+    </section>
 
-  <section id="view-shows" class="view">
-    <div class="toolbar">
-      <input id="show-search" type="search" placeholder="Search shows…" autocomplete="off">
-      <select id="show-filter">
-        <option value="all">All shows</option>
-        <option value="cleaned">Has cleaned episodes</option>
-        <option value="monitored">Auto-cleaning</option>
-        <option value="untouched">Not cleaned yet</option>
-        <option value="nofiles">Nothing on disk yet</option>
-      </select>
-      <select id="show-sort">
-        <option value="title">A to Z</option>
-        <option value="recent">Recently added</option>
-      </select>
-      <span id="show-count" class="muted"></span>
-    </div>
-    <div id="show-grid" class="grid-posters"></div>
-  </section>
-
-  <section id="view-upcoming" class="view">
-    <div class="toolbar">
-      <select id="calendar-days">
-        <option value="7">Next 7 days</option>
-        <option value="14">Next 14 days</option>
-        <option value="21" selected>Next 3 weeks</option>
-        <option value="60">Next 2 months</option>
-      </select>
-      <select id="calendar-filter">
-        <option value="all">Everything airing</option>
-        <option value="missing">Not downloaded yet</option>
-        <option value="monitored">Shows I clean</option>
-        <option value="unmonitored">Shows I don't clean</option>
-      </select>
-      <span id="calendar-count" class="muted"></span>
-    </div>
-    <p class="muted" style="margin:0 0 14px">Straight from Sonarr's calendar.
-      Tick <strong>Clean it</strong> on anything here and every episode of that
-      show is cleaned as it is downloaded — no need to come back once it airs.</p>
-    <div id="calendar-list"></div>
-  </section>
-
-  <section id="view-movies" class="view">
-    <div class="toolbar">
-      <input id="movie-search" type="search" placeholder="Search movies…" autocomplete="off">
-      <select id="movie-filter">
-        <option value="all">All movies</option>
-        <option value="cleaned">Cleaned</option>
-        <option value="untouched">Not cleaned yet</option>
-      </select>
-      <select id="movie-sort">
-        <option value="title">A to Z</option>
-        <option value="recent">Recently added</option>
-      </select>
-      <span id="movie-count" class="muted"></span>
-    </div>
-    <div id="movie-grid" class="grid-posters"></div>
-  </section>
-
-  <section id="view-queue" class="view">
-    <div class="toolbar">
-      <span id="stats" class="muted"></span>
-      <span id="queue-hold" class="muted"></span>
-      <button id="clean-anyway" class="small ghost" hidden>Clean anyway</button>
-      <button id="check-new" class="small ghost">Check for new episodes</button>
-      <button id="clear-queue" class="small ghost">Empty the queue</button>
-      <button id="purge-cancelled" class="small ghost" hidden>Remove cancelled</button>
-      <button id="retry-failed" class="small ghost" hidden>Retry failed</button>
-      <button id="purge-failed" class="small ghost" hidden>Remove failed</button>
-    </div>
-    <div id="monitor-status" class="muted" style="margin-bottom:10px"></div>
-    <div id="selection-bar" class="selection-bar" hidden>
-      <span id="selection-count"></span>
-      <button class="small ghost" data-bulk="top" title="Run these first">⤒ First</button>
-      <button class="small ghost" data-bulk="up">▲ Up</button>
-      <button class="small ghost" data-bulk="down">▼ Down</button>
-      <button class="small ghost" data-bulk="bottom" title="Run these last">⤓ Last</button>
-      <button class="small ghost" data-bulk="cancel">Cancel these</button>
-      <button class="small ghost" data-bulk="clear">Clear selection</button>
-    </div>
-    <div id="job-list" class="list"></div>
-  </section>
-
-  <section id="view-cleaned" class="view">
-    <div class="toolbar">
-      <input id="cleaned-search" type="search" placeholder="Search what's been cleaned…" autocomplete="off">
-      <span id="cleaned-stats" class="muted"></span>
-      <button id="remove-all" class="small ghost" hidden>Remove every cleaned track</button>
-    </div>
-    <div id="cleaned-list" class="list"></div>
-  </section>
-
-  <section id="view-settings" class="view">
-    <form id="settings-form">
-
-      <h2>1 · Your library</h2>
-      <p class="help">Where your list of shows and films comes from. Read-only
-        — Cleanarr never changes anything in it.</p>
-      <div class="choices">
-        <label class="choice">
-          <input type="radio" name="library_source" value="arr" checked>
-          <span><strong>Sonarr and Radarr</strong>
-            <em>Knows the most. Needed for the Upcoming calendar.</em></span>
+    <!-- =============================================================== shows -->
+    <section class="view" id="view-shows" data-title="Shows" hidden>
+      <header class="page-head">
+        <h1 tabindex="-1">Shows</h1>
+      </header>
+      <div class="toolbar" role="search">
+        <label class="search">
+          <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
+          <span class="sr-only">Search shows</span>
+          <input id="show-search" type="search" placeholder="Search shows" autocomplete="off">
         </label>
-        <label class="choice">
-          <input type="radio" name="library_source" value="plex">
-          <span><strong>Plex</strong>
-            <em>No \*arr apps needed. Artwork comes from Plex too.</em></span>
-        </label>
-        <label class="choice">
-          <input type="radio" name="library_source" value="jellyfin">
-          <span><strong>Jellyfin</strong>
-            <em>No \*arr apps needed. Artwork comes from Jellyfin too.</em></span>
-        </label>
-      </div>
-
-      <div id="lib-arr">
-      <p class="help">The API key is on each of their <em>Settings → General</em>
-        pages.</p>
-      <div class="grid">
-        <label>Sonarr address<input name="sonarr.url" placeholder="http://192.168.1.10:8989"></label>
-        <label>Sonarr API key<input name="sonarr.api_key" type="password" autocomplete="off"></label>
-        <label>Radarr address<input name="radarr.url" placeholder="http://192.168.1.10:7878"></label>
-        <label>Radarr API key<input name="radarr.api_key" type="password" autocomplete="off"></label>
-      </div>
-      <div class="row">
-        <button type="button" class="ghost" data-test="sonarr">Test Sonarr</button>
-        <button type="button" class="ghost" data-test="radarr">Test Radarr</button>
-      </div>
-      </div>
-
-      <div id="lib-server" hidden>
-        <div id="lib-server-fields"></div>
-        <p class="help">The same details used further down for refreshing and
-          transcode pauses — one set, not two.</p>
-        <div class="row">
-          <button type="button" class="ghost" data-test="plex" id="test-plex">Test Plex</button>
-          <button type="button" class="ghost" data-test="jellyfin" id="test-jellyfin">Test Jellyfin</button>
-        </div>
-      </div>
-      <div class="row"><span id="test-result" class="muted"></span></div>
-      <div class="callout">
-        <strong>There is no “media folder” to set.</strong>
-        Your library reports where each file is, and Cleanarr opens that exact
-        path — so mount your media into this container at the same paths your
-        library reports. The check below says whether it worked.
-        <span id="path-note"></span>
-      </div>
-      <div id="path-report" class="path-report"></div>
-      <div class="row">
-        <button type="button" id="path-recheck" class="ghost">Re-check</button>
-      </div>
-
-      <h2>2 · What gets silenced</h2>
-      <p class="help">Four lists, each switchable. Matching is whole-word, so
-        “class” and “cockpit” are never caught by the words inside them.</p>
-      <div id="categories" class="checks"></div>
-      <div class="grid">
-        <label>Always silence, one per line
-          <textarea name="custom_words" rows="3" placeholder="a word this household does not want"></textarea></label>
-        <label>Never silence, one per line
-          <textarea name="allow_words" rows="3" placeholder="a name or word that keeps getting caught"></textarea></label>
-      </div>
-      <p class="help">A phrase silences only the profane word inside it — “oh my
-        god” mutes “god” and leaves “oh my” audible, so the track is not chopped
-        about more than it needs to be.</p>
-
-      <h2>3 · Listening</h2>
-      <p class="help">Run the speech model here, or hand the audio to a
-        Whisper server you already have.</p>
-      <div class="choices">
-        <label class="choice">
-          <input type="radio" name="asr_backend" value="builtin" checked>
-          <span><strong>Run Whisper here</strong>
-            <em>Self-hosted in this container. The model downloads once. An
-              NVIDIA GPU is much faster; CPU works.</em></span>
-        </label>
-        <label class="choice">
-          <input type="radio" name="asr_backend" value="remote">
-          <span><strong>Use my own Whisper server</strong>
-            <em>No model or GPU needed here.</em></span>
-        </label>
-      </div>
-
-      <div id="asr-builtin">
-        <div class="callout">
-          <strong>Download the model now.</strong> Left alone it downloads
-          silently during your first clean, which looks like a stalled job. It
-          is kept in your config folder and survives updates.
-        </div>
-        <div id="model-list" class="model-list"></div>
-        <div class="grid">
-          <label>Run it on
-            <select name="device">
-              <option value="auto">Whatever is available (recommended)</option>
-              <option value="cuda">NVIDIA GPU</option>
-              <option value="cpu">CPU</option>
-            </select></label>
-        </div>
-        <p class="help" id="hardware-note"></p>
-      </div>
-
-      <div id="asr-remote" hidden>
-        <div class="callout">
-          <strong>The server must return word-level timestamps.</strong>
-          Cleanarr mutes half a second around one word; with line-level timings
-          it would have to blank four seconds of dialogue to catch one
-          syllable. Anything speaking the OpenAI transcription API with
-          <code>timestamp_granularities[]=word</code> works — speaches,
-          faster-whisper-server, LocalAI. Any model size is fine; test below.
-        </div>
-        <div class="grid">
-          <label>Whisper server address
-            <input name="asr_url" placeholder="http://192.168.1.10:8000"></label>
-          <label>Model on that server
-            <input name="asr_remote_model" list="asr-model-options"
-                   placeholder="Systran/faster-whisper-medium.en">
-            <datalist id="asr-model-options"></datalist></label>
-          <label>API key (blank if it needs none)
-            <input name="asr_api_key" type="password" autocomplete="off"></label>
-        </div>
-        <div class="row">
-          <button type="button" class="ghost" id="asr-list">List its models</button>
-          <button type="button" class="ghost" id="asr-test">Test the Whisper server</button>
-          <span id="asr-result" class="muted"></span>
-        </div>
-        <p class="help">Audio goes over as 16 kHz mono WAV, ~85 MB per
-          45-minute episode. Keep it on your own network.</p>
-      </div>
-      <div class="grid">
-        <label>Skip over silence
-          <select name="trim_silence">
-            <option value="false">No — listen to the whole thing (recommended)</option>
-            <option value="true">Yes</option>
+        <label class="select-inline"><span class="sr-only">Show</span>
+          <select id="show-filter">
+            <option value="all">All shows</option>
+            <option value="cleaned">Has cleaned episodes</option>
+            <option value="monitored">Cleaning new episodes</option>
+            <option value="untouched">Not cleaned yet</option>
+            <option value="nofiles">Nothing on disk yet</option>
           </select></label>
-        <label>Keep a backup of each original
-          <select name="keep_backup"><option value="false">No</option><option value="true">Yes</option></select></label>
-      </div>
-      <details class="explain">
-        <summary>Why only medium.en, and what “skip over silence” costs</summary>
-        <p><strong>medium.en is the only model offered, and that is a decision
-          rather than a limitation.</strong> It hears about 2½ minutes of a
-          half-hour episode per run and it is what everything here was tuned
-          against.</p>
-        <p><strong>large-v3</strong> sounds like it should be better and is not.
-          Measured on one real episode it took 50% longer and caught
-          <em>fewer</em> swears — it favours tidy prose, and tidy prose smooths
-          swearing away. <strong>small.en</strong> is about twice as fast and
-          misses noticeably more. Offering three choices where two are worse
-          only invites picking a worse one.</p>
-        <p>If you disagree, <code>model:</code> in <code>config.yaml</code> still
-          takes any faster-whisper name. It is this page that has an opinion,
-          not the code. Only <code>.en</code> models make sense here because
-          everything downstream assumes English.</p>
-        <p><strong>Skip over silence</strong> lets the model throw away quiet
-          passages before listening. On one 43-minute episode that lost 19 real
-          profanities — five “fucking”, a “bitch”, three “hell” — and saved no
-          time at all. Leave it off. Changing it makes previously-heard files be
-          heard again.</p>
-      </details>
-
-      <h2>4 · Muting</h2>
-      <p class="help">How the silence is applied. The defaults are fine; these
-        matter if a mute clips a neighbouring word or lets a syllable through.</p>
-      <div class="grid">
-        <label>Silence starts this early (seconds)<input name="pad_start" type="number" step="0.01" min="0" max="1"></label>
-        <label>Silence ends this late (seconds)<input name="pad_end" type="number" step="0.01" min="0" max="1"></label>
-        <label>Fade at each edge (seconds)<input name="fade" type="number" step="0.005" min="0" max="0.2"></label>
-        <label>Name of the new track<input name="track_title"></label>
-      </div>
-      <p class="help">The name applies to tracks written from now on. Files
-        already cleaned keep the name they were given, and are still
-        recognised — re-cleaning one replaces its track rather than adding a
-        second. Don’t reuse the name of a track your files already have.</p>
-
-      <h2>5 · Second opinion <span class="optional">optional</span></h2>
-      <div class="callout">
-        <strong>You almost certainly do not need this.</strong>
-        Over 196 checks on a real library it changed the outcome <em>twice</em>,
-        at 30–100 seconds each. Leave the word box below empty and Ollama is
-        never contacted. It is your own Ollama, on your own hardware — nothing
-        is sent anywhere else.
-      </div>
-      <details class="explain">
-        <summary>What it is, and the one case it exists for</summary>
-        <p>Speech recognition writes homophones. A scene in <em>The Bear</em>
-          about drywall and joint compound produced <strong>nine mutes of
-          “cock”</strong> — the word was <strong>“caulk”</strong>. No word list
-          can fix that, because the transcript genuinely says the rude one.</p>
-        <p>So a word you list below is sent to a local language model with the
-          sentence around it, and is only left in if the model can name the
-          ordinary word it heard instead. Anything it cannot answer stays muted.
-          Nothing leaves your network — Ollama runs on your own hardware.</p>
-        <p><strong>Leave the list empty to turn it off.</strong> Then every word
-          on the lists is simply muted, cleaning is much faster, and no model is
-          needed. Put a word on the list only when you have actually seen it
-          caught wrongly.</p>
-      </details>
-      <div class="grid">
-        <label>Double-check these words in context, one per line
-          <textarea name="check_in_context" rows="4" placeholder="empty = off (recommended)"></textarea></label>
-      </div>
-      <div class="grid">
-        <label>Ollama address (blank turns this off)<input name="judge_url" placeholder="http://192.168.1.10:11434"></label>
-        <label>Model<input name="judge_model" placeholder="qwen3.5:9b"></label>
-        <label>CPU threads it may use
-          <select name="judge_threads">
-            <option value="2">2 — leaves the server usable (recommended)</option>
-            <option value="4">4 — a little faster</option>
-            <option value="0">No limit — fastest, and you will notice</option>
+        <label class="select-inline"><span class="sr-only">Sort</span>
+          <select id="show-sort">
+            <option value="title">A to Z</option>
+            <option value="recent">Recently added</option>
           </select></label>
+        <span id="show-count" class="muted count-note" aria-live="polite"></span>
       </div>
-      <div class="row">
-        <button type="button" class="ghost" id="judge-check">Check Ollama</button>
-        <button type="button" class="ghost" id="judge-pull" hidden>Download the model</button>
-        <span id="judge-result" class="muted"></span>
-      </div>
+      <div id="show-grid"></div>
+    </section>
 
-      <h2>6 · Media server <span class="optional">optional</span></h2>
-      <p class="help">Optional. Connecting one makes the cleaned track appear
-        at once instead of at the next scan, and lets Cleanarr pause while your
-        server is transcoding on the same GPU. If Plex or Jellyfin is your
-        library above, it is told about changed files either way — this section
-        adds the transcode pause, or names a different server.</p>
-      <div class="callout">
-        <strong>The cleaned track works in both.</strong> It is an ordinary
-        extra audio stream with a title, so “Cleaned - English” shows up in the
-        audio menu of Plex or Jellyfin. Nothing here is Plex-specific.
+    <!-- ============================================================== movies -->
+    <section class="view" id="view-movies" data-title="Movies" hidden>
+      <header class="page-head">
+        <h1 tabindex="-1">Movies</h1>
+      </header>
+      <div class="toolbar" role="search">
+        <label class="search">
+          <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
+          <span class="sr-only">Search movies</span>
+          <input id="movie-search" type="search" placeholder="Search movies" autocomplete="off">
+        </label>
+        <label class="select-inline"><span class="sr-only">Show</span>
+          <select id="movie-filter">
+            <option value="all">All movies</option>
+            <option value="cleaned">Cleaned</option>
+            <option value="untouched">Not cleaned yet</option>
+          </select></label>
+        <label class="select-inline"><span class="sr-only">Sort</span>
+          <select id="movie-sort">
+            <option value="title">A to Z</option>
+            <option value="recent">Recently added</option>
+          </select></label>
+        <span id="movie-count" class="muted count-note" aria-live="polite"></span>
       </div>
-      <div class="choices">
-        <label class="choice">
-          <input type="radio" name="media_server" value="none" checked>
-          <span><strong>Neither</strong><em>No transcode pause, and nothing
-            told about changed files — unless Plex or Jellyfin is your library
-            above, which is told either way.</em></span>
-        </label>
-        <label class="choice">
-          <input type="radio" name="media_server" value="plex">
-          <span><strong>Plex</strong><em>Refresh by path, and read what is
-            transcoding.</em></span>
-        </label>
-        <label class="choice">
-          <input type="radio" name="media_server" value="jellyfin">
-          <span><strong>Jellyfin</strong><em>Same two things, via the Jellyfin
-            API.</em></span>
-        </label>
+      <div id="movie-grid"></div>
+    </section>
+
+    <!-- ============================================================ upcoming -->
+    <section class="view" id="view-upcoming" data-title="Upcoming" hidden>
+      <header class="page-head">
+        <h1 tabindex="-1">Upcoming</h1>
+        <p class="lede muted">Sonarr's calendar. Switch on <strong>Clean new
+          episodes</strong> for a show and each episode is cleaned as it
+          downloads.</p>
+      </header>
+      <div class="toolbar">
+        <label class="select-inline"><span class="sr-only">How far ahead</span>
+          <select id="calendar-days">
+            <option value="7">Next 7 days</option>
+            <option value="14">Next 14 days</option>
+            <option value="21" selected>Next 3 weeks</option>
+            <option value="60">Next 2 months</option>
+          </select></label>
+        <label class="select-inline"><span class="sr-only">Show</span>
+          <select id="calendar-filter">
+            <option value="all">Everything airing</option>
+            <option value="missing">Not downloaded yet</option>
+            <option value="monitored">Shows I clean</option>
+            <option value="unmonitored">Shows I don't clean</option>
+          </select></label>
+        <span id="calendar-count" class="muted count-note" aria-live="polite"></span>
       </div>
-      <div id="media-server-fields"></div>
-      <div id="server-plex" hidden>
-        <div class="grid">
-          <label>Plex address<input name="plex_url" placeholder="http://192.168.1.10:32400"></label>
-          <label>Plex token<input name="plex_token" type="password" autocomplete="off"></label>
+      <div id="calendar-list"></div>
+    </section>
+
+    <!-- =============================================================== queue -->
+    <section class="view" id="view-queue" data-title="Queue" hidden>
+      <header class="page-head">
+        <h1 tabindex="-1">Queue</h1>
+        <p class="lede muted" id="queue-lede">One file at a time, in this order.</p>
+      </header>
+      <div id="queue-now"></div>
+      <div class="toolbar wrap" id="queue-tools">
+        <button type="button" class="btn secondary sm" id="check-new">
+          <svg class="i"><use href="#i-refresh"/></svg>Check for new episodes</button>
+        <button type="button" class="btn ghost sm danger-text" id="clear-queue" hidden>Empty the queue</button>
+      </div>
+      <p class="muted small" id="monitor-status"></p>
+      <div id="selection-bar" class="selection-bar" role="region" aria-label="Selected jobs" hidden>
+        <span id="selection-count" aria-live="polite"></span>
+        <div class="btn-group">
+          <button type="button" class="icon-btn" data-bulk="top" aria-label="Run the selected first" title="Run first"><svg class="i"><use href="#i-top"/></svg></button>
+          <button type="button" class="icon-btn" data-bulk="up" aria-label="Move the selected up" title="Up"><svg class="i"><use href="#i-up"/></svg></button>
+          <button type="button" class="icon-btn" data-bulk="down" aria-label="Move the selected down" title="Down"><svg class="i"><use href="#i-down"/></svg></button>
+          <button type="button" class="icon-btn" data-bulk="bottom" aria-label="Run the selected last" title="Run last"><svg class="i"><use href="#i-bottom"/></svg></button>
+        </div>
+        <button type="button" class="btn ghost sm" data-bulk="cancel">Cancel these</button>
+        <button type="button" class="btn ghost sm" data-bulk="clear">Clear selection</button>
+      </div>
+      <div id="job-list"></div>
+    </section>
+
+    <!-- ============================================================= cleaned -->
+    <section class="view" id="view-cleaned" data-title="Cleaned" hidden>
+      <header class="page-head">
+        <h1 tabindex="-1">Cleaned</h1>
+        <p class="lede muted">Every file with a cleaned track right now, and
+          what the extra tracks cost in disk.</p>
+      </header>
+      <div id="cleaned-stats" class="stats"></div>
+      <div class="toolbar" role="search">
+        <label class="search">
+          <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
+          <span class="sr-only">Search what has been cleaned</span>
+          <input id="cleaned-search" type="search" placeholder="Search what's been cleaned" autocomplete="off">
+        </label>
+        <label class="select-inline"><span class="sr-only">Show</span>
+          <select id="cleaned-filter">
+            <option value="all">Everything cleaned</option>
+            <option value="check">Worth a listen</option>
+          </select></label>
+        <span id="cleaned-count-note" class="muted count-note" aria-live="polite"></span>
+      </div>
+      <div id="cleaned-list"></div>
+      <div class="danger-zone" id="remove-all-zone" hidden>
+        <div>
+          <h2>Remove every cleaned track</h2>
+          <p class="muted">Takes the cleaned track out of every file. The
+            original audio is never touched, but putting them back means
+            cleaning everything again.</p>
+        </div>
+        <button type="button" class="btn danger sm" id="remove-all">Remove all</button>
+      </div>
+    </section>
+
+    <!-- ============================================================ settings -->
+    <section class="view" id="view-settings" data-title="Settings" hidden>
+      <header class="page-head">
+        <h1 tabindex="-1">Settings</h1>
+        <p class="lede muted">In the order things need doing. Nothing is
+          written until you save.</p>
+      </header>
+      <div class="settings-layout">
+        <nav class="settings-index" aria-label="Settings sections">
+          <ul>
+            <li><a href="#/settings/library" data-section="library"><svg class="i"><use href="#i-plug"/></svg>Your library<span class="state" data-state="library"></span></a></li>
+            <li><a href="#/settings/words" data-section="words"><svg class="i"><use href="#i-words"/></svg>What gets silenced</a></li>
+            <li><a href="#/settings/listening" data-section="listening"><svg class="i"><use href="#i-wave"/></svg>Listening<span class="state" data-state="listening"></span></a></li>
+            <li><a href="#/settings/muting" data-section="muting"><svg class="i"><use href="#i-mute"/></svg>Muting</a></li>
+            <li><a href="#/settings/judge" data-section="judge"><svg class="i"><use href="#i-chat"/></svg>Second opinion</a></li>
+            <li><a href="#/settings/server" data-section="server"><svg class="i"><use href="#i-server"/></svg>Media server</a></li>
+            <li><a href="#/settings/advanced" data-section="advanced"><svg class="i"><use href="#i-cpu"/></svg>Advanced</a></li>
+            <li><a href="#/settings/security" data-section="security"><svg class="i"><use href="#i-lock"/></svg>Who can use this<span class="state" data-state="login"></span></a></li>
+          </ul>
+        </nav>
+
+        <div class="settings-body">
+          <div id="settings-loading"></div>
+          <form id="settings-form" novalidate hidden>
+
+            <!-- ---------------------------------------------------- library -->
+            <section class="panel" id="s-library" aria-labelledby="s-library-h">
+              <header class="panel-head">
+                <h2 id="s-library-h"><span class="step">1</span>Your library</h2>
+                <p class="muted">Where the list of shows and films comes from.
+                  Read-only: Cleanarr never changes anything in it.</p>
+              </header>
+              <fieldset class="choices">
+                <legend class="sr-only">Library source</legend>
+                <label class="choice">
+                  <input type="radio" name="library_source" value="arr">
+                  <span><strong>Sonarr and Radarr</strong>
+                    <em>Knows the most. Needed for the Upcoming calendar.</em></span>
+                </label>
+                <label class="choice">
+                  <input type="radio" name="library_source" value="plex">
+                  <span><strong>Plex</strong>
+                    <em>No *arr apps needed. Artwork comes from Plex.</em></span>
+                </label>
+                <label class="choice">
+                  <input type="radio" name="library_source" value="jellyfin">
+                  <span><strong>Jellyfin</strong>
+                    <em>No *arr apps needed. Artwork comes from Jellyfin.</em></span>
+                </label>
+              </fieldset>
+
+              <div id="lib-arr">
+                <div class="service">
+                  <h3>Sonarr <span class="muted small">shows</span></h3>
+                  <div class="fields two">
+                    <div class="field"><label for="f-sonarr-url">Address</label>
+                      <input id="f-sonarr-url" name="sonarr.url" inputmode="url" autocomplete="off" placeholder="http://sonarr:8989">
+                      <p class="error-text" data-error-for="sonarr.url"></p></div>
+                    <div class="field"><label for="f-sonarr-key">API key</label>
+                      <input id="f-sonarr-key" name="sonarr.api_key" type="password" autocomplete="off">
+                      <p class="hint">Sonarr → Settings → General.</p></div>
+                  </div>
+                  <div class="test-row"><button type="button" class="btn secondary sm" data-test="sonarr">Test Sonarr</button>
+                    <span class="test-result" data-result="sonarr" role="status"></span></div>
+                </div>
+                <div class="service">
+                  <h3>Radarr <span class="muted small">films</span></h3>
+                  <div class="fields two">
+                    <div class="field"><label for="f-radarr-url">Address</label>
+                      <input id="f-radarr-url" name="radarr.url" inputmode="url" autocomplete="off" placeholder="http://radarr:7878">
+                      <p class="error-text" data-error-for="radarr.url"></p></div>
+                    <div class="field"><label for="f-radarr-key">API key</label>
+                      <input id="f-radarr-key" name="radarr.api_key" type="password" autocomplete="off">
+                      <p class="hint">Radarr → Settings → General.</p></div>
+                  </div>
+                  <div class="test-row"><button type="button" class="btn secondary sm" data-test="radarr">Test Radarr</button>
+                    <span class="test-result" data-result="radarr" role="status"></span></div>
+                </div>
+              </div>
+
+              <!-- Filled with the Plex or Jellyfin fields when one of them is
+                   the library; the same fields serve the Media server section. -->
+              <div id="lib-server" hidden></div>
+
+              <div class="paths">
+                <h3>Can Cleanarr open the files?</h3>
+                <p class="muted small">Your library says where each file is and
+                  Cleanarr opens that exact path, so mount the media into this
+                  container at the paths the library reports.
+                  <span id="path-note"></span></p>
+                <div id="path-report" aria-live="polite"></div>
+                <button type="button" class="btn ghost sm" id="path-recheck">
+                  <svg class="i"><use href="#i-refresh"/></svg>Check again</button>
+              </div>
+            </section>
+
+            <!-- ------------------------------------------------------ words -->
+            <section class="panel" id="s-words" aria-labelledby="s-words-h">
+              <header class="panel-head">
+                <h2 id="s-words-h"><span class="step">2</span>What gets silenced</h2>
+                <p class="muted">Four lists, each switchable. Matching is
+                  whole-word, so “class” and “cockpit” are never caught by
+                  the words inside them. A phrase mutes only its profane word:
+                  “oh my god” silences “god” and leaves “oh my”.</p>
+              </header>
+              <fieldset class="toggles" id="categories">
+                <legend class="sr-only">Word lists</legend>
+              </fieldset>
+              <p class="error-text" data-error-for="categories"></p>
+              <div class="fields two">
+                <div class="field">
+                  <span class="label" id="l-custom">Always silence</span>
+                  <div class="tags" data-tags="custom_words" aria-labelledby="l-custom"></div>
+                  <p class="hint">Words this household does not want, on top of the lists.</p>
+                </div>
+                <div class="field">
+                  <span class="label" id="l-allow">Never silence</span>
+                  <div class="tags" data-tags="allow_words" aria-labelledby="l-allow"></div>
+                  <p class="hint">A name or word that keeps getting caught. Wins over every list.</p>
+                </div>
+              </div>
+              <div class="field">
+                <span class="label">Exceptions for one show or film</span>
+                <p class="hint">Never silenced in that show or film only, so a character
+                  called Dick keeps his name without the insult going unmuted everywhere
+                  else. Added from a job's details: <em>That was wrong → Never mute … in
+                  this show</em>.</p>
+                <div id="title-exceptions"></div>
+              </div>
+            </section>
+
+            <!-- -------------------------------------------------- listening -->
+            <section class="panel" id="s-listening" aria-labelledby="s-listening-h">
+              <header class="panel-head">
+                <h2 id="s-listening-h"><span class="step">3</span>Listening</h2>
+                <p class="muted">Run the speech model here, or hand the audio to
+                  a Whisper server you already have.</p>
+              </header>
+              <fieldset class="choices">
+                <legend class="sr-only">Where Whisper runs</legend>
+                <label class="choice">
+                  <input type="radio" name="asr_backend" value="builtin">
+                  <span><strong>Run Whisper here</strong>
+                    <em>The model downloads once. An NVIDIA GPU is much faster;
+                      CPU works.</em></span>
+                </label>
+                <label class="choice">
+                  <input type="radio" name="asr_backend" value="remote">
+                  <span><strong>Use my own Whisper server</strong>
+                    <em>Anything with the OpenAI transcription API and word
+                      timestamps. No model or GPU needed here.</em></span>
+                </label>
+              </fieldset>
+
+              <div id="asr-builtin">
+                <div id="model-list" class="model-list" aria-live="polite"></div>
+                <div class="fields two">
+                  <div class="field"><label for="f-device">Run it on</label>
+                    <select id="f-device" name="device">
+                      <option value="auto">Whatever is available (recommended)</option>
+                      <option value="cuda">NVIDIA GPU</option>
+                      <option value="cpu">CPU</option>
+                    </select>
+                    <p class="hint" id="hardware-note" aria-live="polite"></p></div>
+                </div>
+              </div>
+
+              <div id="asr-remote" hidden>
+                <div class="callout"><svg class="i"><use href="#i-info"/></svg>
+                  <p>The server must return <strong>word-level</strong>
+                  timestamps. Cleanarr mutes half a second around one word;
+                  with line timings it would blank four seconds to catch one
+                  syllable. The test checks for this.</p></div>
+                <div class="fields two">
+                  <div class="field"><label for="f-asr-url">Server address</label>
+                    <input id="f-asr-url" name="asr_url" inputmode="url" autocomplete="off" placeholder="http://whisper:8000">
+                    <p class="error-text" data-error-for="asr_url"></p></div>
+                  <div class="field"><label for="f-asr-model">Model on that server</label>
+                    <input id="f-asr-model" name="asr_remote_model" list="asr-model-options" autocomplete="off" placeholder="Systran/faster-whisper-medium.en">
+                    <datalist id="asr-model-options"></datalist></div>
+                  <div class="field"><label for="f-asr-key">API key <span class="muted">(if it needs one)</span></label>
+                    <input id="f-asr-key" name="asr_api_key" type="password" autocomplete="off"></div>
+                </div>
+                <div class="test-row">
+                  <button type="button" class="btn secondary sm" id="asr-test">Test the server</button>
+                  <button type="button" class="btn ghost sm" id="asr-list">List its models</button>
+                  <span class="test-result" id="asr-result" role="status"></span>
+                </div>
+                <p class="hint">Audio goes over as 16 kHz mono WAV, about 85 MB
+                  for a 45-minute episode. Keep it on your own network.</p>
+              </div>
+
+              <div class="fields two">
+                <div class="field"><label class="switch">
+                  <input type="checkbox" name="trim_silence" role="switch">
+                  <span class="track" aria-hidden="true"></span>
+                  <span>Skip over silence</span></label>
+                  <p class="hint">Off is recommended. On one 43-minute episode it
+                    skipped 19 real swears and saved no time.</p></div>
+              </div>
+              <details class="explain">
+                <summary>Why only medium.en?</summary>
+                <p>It is what everything here was tuned against. large-v3 took
+                  50% longer and caught <em>fewer</em> swears: it favours tidy
+                  prose, and tidy prose smooths swearing away. small.en is
+                  about twice as fast and misses noticeably more.</p>
+                <p><code>model:</code> in <code>config.yaml</code> still takes
+                  any faster-whisper name if you disagree. Only
+                  <code>.en</code> models make sense here.</p>
+              </details>
+            </section>
+
+            <!-- ----------------------------------------------------- muting -->
+            <section class="panel" id="s-muting" aria-labelledby="s-muting-h">
+              <header class="panel-head">
+                <h2 id="s-muting-h"><span class="step">4</span>Muting</h2>
+                <p class="muted">How the silence is applied. The defaults are
+                  fine; change these if a mute clips a neighbouring word or
+                  lets a syllable through.</p>
+              </header>
+              <div class="fields three">
+                <div class="field"><label for="f-pad-start">Start early by</label>
+                  <div class="unit"><input id="f-pad-start" name="pad_start" type="number" step="0.01" min="0" max="2" inputmode="decimal"><span>s</span></div>
+                  <p class="error-text" data-error-for="pad_start"></p></div>
+                <div class="field"><label for="f-pad-end">End late by</label>
+                  <div class="unit"><input id="f-pad-end" name="pad_end" type="number" step="0.01" min="0" max="2" inputmode="decimal"><span>s</span></div>
+                  <p class="error-text" data-error-for="pad_end"></p></div>
+                <div class="field"><label for="f-fade">Fade at each edge</label>
+                  <div class="unit"><input id="f-fade" name="fade" type="number" step="0.005" min="0" max="0.5" inputmode="decimal"><span>s</span></div>
+                  <p class="error-text" data-error-for="fade"></p></div>
+              </div>
+              <div class="fields two">
+                <div class="field"><label for="f-title">Name of the new track</label>
+                  <input id="f-title" name="track_title" maxlength="80" autocomplete="off">
+                  <p class="hint">Applies to tracks written from now on. Files
+                    cleaned under an older name are still recognised. Don't
+                    reuse a name your files' own tracks already have.</p>
+                  <p class="error-text" data-error-for="track_title"></p></div>
+              </div>
+            </section>
+
+            <!-- ------------------------------------------------------ judge -->
+            <section class="panel" id="s-judge" aria-labelledby="s-judge-h">
+              <header class="panel-head">
+                <h2 id="s-judge-h"><span class="step">5</span>Second opinion <span class="tag-optional">optional</span></h2>
+                <p class="muted">Speech recognition writes homophones: a scene
+                  about drywall once produced nine mutes of “cock” where the
+                  word was “caulk”. A word on the list below is sent with its
+                  sentence to your own Ollama (or any OpenAI-compatible server),
+                  and left in only if the model names the ordinary word it
+                  heard. Anything unanswered stays muted.</p>
+              </header>
+              <div class="callout"><svg class="i"><use href="#i-info"/></svg>
+                <p><strong>Most people can leave this off.</strong> Across 196
+                  checks on a real library it changed the outcome twice, at
+                  30–100 seconds each. Without an address, the words below are
+                  simply muted.</p></div>
+              <div class="field">
+                <span class="label" id="l-context">Check these words in context</span>
+                <div class="tags" data-tags="check_in_context" aria-labelledby="l-context"></div>
+                <p class="hint" id="context-note"></p>
+              </div>
+              <div class="fields two">
+                <div class="field"><label for="f-judge-url">Address <span class="muted">(blank turns this off)</span></label>
+                  <input id="f-judge-url" name="judge_url" inputmode="url" autocomplete="off" placeholder="http://ollama:11434">
+                  <p class="error-text" data-error-for="judge_url"></p></div>
+                <div class="field"><label for="f-judge-model">Model</label>
+                  <input id="f-judge-model" name="judge_model" autocomplete="off" placeholder="qwen3.5:9b">
+                  <p class="error-text" data-error-for="judge_model"></p></div>
+                <div class="field"><label for="f-judge-threads">CPU threads it may use</label>
+                  <select id="f-judge-threads" name="judge_threads">
+                    <option value="2">2 — leaves the server usable (recommended)</option>
+                    <option value="4">4 — a little faster</option>
+                    <option value="0">No limit — fastest, and you will notice</option>
+                  </select>
+                  <p class="hint">Ollama only.</p></div>
+              </div>
+              <div class="test-row">
+                <button type="button" class="btn secondary sm" id="judge-check">Check the server</button>
+                <button type="button" class="btn sm" id="judge-pull" hidden>
+                  <svg class="i"><use href="#i-download"/></svg>Download the model</button>
+                <span class="test-result" id="judge-result" role="status"></span>
+              </div>
+            </section>
+
+            <!-- ----------------------------------------------------- server -->
+            <section class="panel" id="s-server" aria-labelledby="s-server-h">
+              <header class="panel-head">
+                <h2 id="s-server-h"><span class="step">6</span>Media server <span class="tag-optional">optional</span></h2>
+                <p class="muted">Tells Plex or Jellyfin a file changed, so the
+                  cleaned track shows up at once, and can pause cleaning while
+                  the server transcodes on the same GPU. The cleaned track
+                  works in both either way: it is an ordinary extra audio
+                  stream with a name.</p>
+              </header>
+              <fieldset class="choices">
+                <legend class="sr-only">Media server</legend>
+                <label class="choice">
+                  <input type="radio" name="media_server" value="none">
+                  <span><strong>Neither</strong>
+                    <em>No transcode pause. A Plex or Jellyfin library is still
+                      told about changed files.</em></span>
+                </label>
+                <label class="choice">
+                  <input type="radio" name="media_server" value="plex">
+                  <span><strong>Plex</strong><em>Refresh by path, and see what is transcoding.</em></span>
+                </label>
+                <label class="choice">
+                  <input type="radio" name="media_server" value="jellyfin">
+                  <span><strong>Jellyfin</strong><em>The same two things, via the Jellyfin API.</em></span>
+                </label>
+              </fieldset>
+              <div id="media-server-fields"></div>
+              <p class="hint" id="server-shared" hidden>Using the address and key
+                from Your library: the same server does both jobs.</p>
+
+              <!-- The Plex and Jellyfin fields. Moved into whichever section
+                   needs them, so there is only ever one input per setting. -->
+              <div id="server-plex" class="service" hidden>
+                <h3>Plex</h3>
+                <div class="fields two">
+                  <div class="field"><label for="f-plex-url">Address</label>
+                    <input id="f-plex-url" name="plex_url" inputmode="url" autocomplete="off" placeholder="http://plex:32400">
+                    <p class="error-text" data-error-for="plex_url"></p></div>
+                  <div class="field"><label for="f-plex-token">Token</label>
+                    <input id="f-plex-token" name="plex_token" type="password" autocomplete="off">
+                    <p class="hint">Plex's support pages explain finding your X-Plex-Token.</p></div>
+                </div>
+                <div class="test-row"><button type="button" class="btn secondary sm" data-test="plex">Test Plex</button>
+                  <span class="test-result" data-result="plex" role="status"></span></div>
+              </div>
+              <div id="server-jellyfin" class="service" hidden>
+                <h3>Jellyfin</h3>
+                <div class="fields two">
+                  <div class="field"><label for="f-jf-url">Address</label>
+                    <input id="f-jf-url" name="jellyfin_url" inputmode="url" autocomplete="off" placeholder="http://jellyfin:8096">
+                    <p class="error-text" data-error-for="jellyfin_url"></p></div>
+                  <div class="field"><label for="f-jf-key">API key</label>
+                    <input id="f-jf-key" name="jellyfin_api_key" type="password" autocomplete="off">
+                    <p class="hint">Jellyfin → Dashboard → API Keys.</p></div>
+                </div>
+                <div class="test-row"><button type="button" class="btn secondary sm" data-test="jellyfin">Test Jellyfin</button>
+                  <span class="test-result" data-result="jellyfin" role="status"></span></div>
+              </div>
+
+              <div class="fields two" id="hold-row" hidden>
+                <div class="field"><label for="hold-policy">When to wait</label>
+                  <select id="hold-policy" name="hold_policy"></select>
+                  <p class="hint" id="plex-now" aria-live="polite"></p></div>
+              </div>
+            </section>
+
+            <!-- --------------------------------------------------- advanced -->
+            <section class="panel" id="s-advanced" aria-labelledby="s-advanced-h">
+              <header class="panel-head">
+                <h2 id="s-advanced-h"><span class="step">7</span>Advanced</h2>
+                <p class="muted">Rarely worth changing.</p>
+              </header>
+              <div class="fields three">
+                <div class="field"><label for="f-br-surround">Bitrate, surround</label>
+                  <input id="f-br-surround" name="bitrate_surround" autocomplete="off" placeholder="384k">
+                  <p class="error-text" data-error-for="bitrate_surround"></p></div>
+                <div class="field"><label for="f-br-stereo">Bitrate, stereo</label>
+                  <input id="f-br-stereo" name="bitrate_stereo" autocomplete="off" placeholder="192k">
+                  <p class="error-text" data-error-for="bitrate_stereo"></p></div>
+                <div class="field"><label for="f-ffmpeg-threads">ffmpeg threads</label>
+                  <input id="f-ffmpeg-threads" name="ffmpeg_threads" type="number" min="0" max="256" step="1" inputmode="numeric">
+                  <p class="hint">0 lets ffmpeg decide. A low cap keeps playback smooth.</p>
+                  <p class="error-text" data-error-for="ffmpeg_threads"></p></div>
+                <div class="field"><label for="f-compute">Number format</label>
+                  <select id="f-compute" name="compute_type">
+                    <option value="auto">Automatic (recommended)</option>
+                    <option value="int8">int8 — CPU default</option>
+                    <option value="float16">float16 — GPU default</option>
+                    <option value="int8_float16">int8_float16 — less GPU memory</option>
+                    <option value="float32">float32 — slowest</option>
+                  </select>
+                  <p class="hint">For the built-in Whisper only.</p></div>
+                <div class="field"><label for="f-keep-alive">Second opinion keeps its model loaded for</label>
+                  <input id="f-keep-alive" name="judge_keep_alive" autocomplete="off" placeholder="30s">
+                  <p class="hint">Ollama only. Released after the last question either way.</p>
+                  <p class="error-text" data-error-for="judge_keep_alive"></p></div>
+              </div>
+              <div class="field"><label class="switch">
+                <input type="checkbox" name="keep_backup" role="switch">
+                <span class="track" aria-hidden="true"></span>
+                <span>Keep a copy of each original</span></label>
+                <p class="hint">Saved beside the file as <code>.cleanarr-backup</code>.
+                  Doubles the disk each cleaned file takes.</p></div>
+            </section>
+          </form>
+
+          <!-- ------------------------------------------------------ security -->
+          <section class="panel" id="s-security" aria-labelledby="s-security-h" hidden>
+            <header class="panel-head">
+              <h2 id="s-security-h"><span class="step">8</span>Who can use this</h2>
+            </header>
+            <div id="security"></div>
+          </section>
         </div>
       </div>
-      <div id="server-jellyfin" hidden>
-        <div class="grid">
-          <label>Jellyfin address<input name="jellyfin_url" placeholder="http://192.168.1.10:8096"></label>
-          <label>Jellyfin API key<input name="jellyfin_api_key" type="password" autocomplete="off"></label>
-        </div>
-        <p class="help">Make a key in Jellyfin under
-          <em>Dashboard → Advanced → API Keys</em>.</p>
+
+      <div class="save-bar" id="save-bar" hidden role="region" aria-label="Unsaved changes">
+        <span id="save-state" aria-live="polite">Unsaved changes</span>
+        <button type="button" class="btn ghost sm" id="settings-discard">Discard</button>
+        <button type="submit" form="settings-form" class="btn sm" id="settings-save">Save</button>
       </div>
-      <p class="help" id="server-shared" hidden>Using the address and key from
-        step 1 — the same server is doing both jobs.</p>
-      <div class="grid" id="hold-row" hidden>
-        <label>When to wait
-          <select name="hold_policy" id="hold-policy"></select></label>
-      </div>
-      <div id="plex-now" class="muted"></div>
-
-      <div class="row"><button type="submit">Save settings</button><span id="save-result" class="muted"></span></div>
-    </form>
-
-    <h2>7 · Who can use this</h2>
-    <div id="security" class="security"></div>
-
-  </section>
-
-</main>
-
-<div id="scrim" class="scrim" hidden></div>
-<div id="drawer" class="drawer" hidden>
-  <div class="drawer-head">
-    <h2 id="drawer-title"></h2>
-    <button id="clean-show" class="small" hidden>Clean everything not cleaned yet</button>
-    <button id="remove-show" class="small ghost" hidden>Remove all cleaned tracks</button>
-    <label id="monitor-toggle" class="switch-label" hidden
-           title="Episodes downloaded from now on are cleaned when they arrive. Nothing already on disk is touched.">
-      <input type="checkbox" id="monitor-check"> Clean newly downloaded episodes
-    </label>
-    <button id="drawer-close" class="ghost">Close</button>
-  </div>
-  <div id="drawer-body"></div>
+    </section>
+  </main>
 </div>
 
-<div id="ask" class="modal" hidden>
-  <div class="modal-box">
-    <h3 id="ask-title"></h3>
+<!-- A panel over the page: a show's episodes, a film, or a job's details.
+     A native dialog, so focus stays inside and Escape closes it. -->
+<dialog id="sheet" class="sheet" aria-labelledby="sheet-title">
+  <div class="sheet-head">
+    <div class="sheet-heading">
+      <h2 id="sheet-title"></h2>
+      <p id="sheet-sub" class="muted small"></p>
+    </div>
+    <button type="button" class="icon-btn" id="sheet-close" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+  </div>
+  <div id="sheet-actions" class="sheet-actions"></div>
+  <div id="sheet-body" class="sheet-body"></div>
+</dialog>
+
+<!-- A question with named answers. -->
+<dialog id="ask" class="modal" aria-labelledby="ask-title" aria-describedby="ask-body">
+  <form method="dialog">
+    <h2 id="ask-title"></h2>
     <p id="ask-body" class="muted"></p>
-    <div class="row" id="ask-actions"></div>
-  </div>
-</div>
+    <div class="modal-actions" id="ask-actions"></div>
+  </form>
+</dialog>
 
-<div id="toast" class="toast" hidden></div>
+<!-- The overflow of the phone's bottom bar. -->
+<dialog id="more-sheet" class="menu-sheet" aria-label="More">
+  <ul>
+    <li><a href="#/upcoming" data-nav="upcoming" id="more-upcoming"><svg class="i"><use href="#i-calendar"/></svg>Upcoming</a></li>
+    <li><a href="#/cleaned" data-nav="cleaned"><svg class="i"><use href="#i-done"/></svg>Cleaned<span class="count subtle" id="more-cleaned-count"></span></a></li>
+    <li><a href="#/settings" data-nav="settings"><svg class="i"><use href="#i-settings"/></svg>Settings<span class="dot" id="more-settings-dot" hidden></span></a></li>
+    <li id="more-signout" hidden><button type="button" data-signout><svg class="i"><use href="#i-signout"/></svg>Sign out</button></li>
+  </ul>
+  <form method="dialog"><button class="btn ghost full">Close</button></form>
+</dialog>
 
-<script src="/static/app.js"></script>
+<div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+<script src="/static/app.js?v=6"></script>
 </body>
 </html>

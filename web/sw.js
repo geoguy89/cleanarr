@@ -14,12 +14,13 @@
  * because it looks correct.
  */
 
-const VERSION = 'cleanarr-v5';
+const VERSION = 'cleanarr-v7';
 const SHELL = [
   '/',
-  '/static/style.css',
-  '/static/app.js',
-  '/static/icon.png?v=4',
+  '/static/style.css?v=6',
+  '/static/app.js?v=6',
+  '/static/logo.svg?v=5',
+  '/static/icon.png?v=5',
   '/static/manifest.json',
 ];
 

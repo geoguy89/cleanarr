@@ -88,7 +88,8 @@ class PlexLibrary:
         try:
             return resp.json().get("MediaContainer") or {}
         except ValueError as exc:
-            raise LibraryError("Plex did not return JSON") from exc
+            raise LibraryError(f"{self.url} did not answer like Plex - check the "
+                               f"address") from exc
 
     def _sections(self, kind: str) -> list[str]:
         """Section keys of a given type - "show" or "movie"."""
@@ -269,7 +270,8 @@ class JellyfinLibrary:
         try:
             return resp.json()
         except ValueError as exc:
-            raise LibraryError("Jellyfin did not return JSON") from exc
+            raise LibraryError(f"{self.url} did not answer like Jellyfin - check the "
+                               f"address") from exc
 
     def _items(self, **params) -> list[dict]:
         params.setdefault("Recursive", "true")
@@ -428,8 +430,8 @@ class ArrLibrary:
         for app, kind in ((self.sonarr, "show"), (self.radarr, "movie")):
             for r in (getattr(app, "root_folders", lambda: [])() or []):
                 if r.get("path"):
-                    out.append({"library": r.get("path", ""), "kind": kind,
-                                "path": r["path"]})
+                    out.append({"library": "Sonarr" if kind == "show" else "Radarr",
+                                "kind": kind, "path": r["path"]})
         return out
 
 

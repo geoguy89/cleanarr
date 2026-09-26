@@ -1,5 +1,7 @@
 # Cleanarr
 
+<img src="web/logo.svg" alt="" width="112" align="right">
+
 Cleanarr is an \*arr-inspired, *vibe-coded* application that mutes profanity in
 media you already own.
 
@@ -21,7 +23,12 @@ uncertain the word gets muted.
 
 ## What it looks like
 
-**Home** — what landed lately, and what it has cost so far.
+The screenshots are of a made-up demo library (`python tools/screenshots.py`
+regenerates them), in the dark theme. The page follows the system's light or
+dark setting.
+
+**Home** — what is being cleaned, what landed lately, and what it has cost so
+far. On a new install it opens with a checklist of what is left to set up.
 
 ![Home](docs/images/home.jpg)
 
@@ -31,14 +38,21 @@ disk yet.
 ![Shows](docs/images/shows.jpg)
 
 **Inside a show** — clean one episode, a season, everything outstanding, or
-from here on. Removing a cleaned track is just as easy.
+from one episode to the end. Removing a cleaned track is just as easy.
 
 ![Episodes](docs/images/episodes.jpg)
 
-**Every mute is on the record**, so a wrong call can be found rather than
-guessed at.
+**Every mute is on the record**, with what Whisper thought of the word and what
+the file's subtitles say at that moment. When one is wrong — Whisper heard a
+name as a swear — **That was wrong** puts the word on a list: never mute it in
+this show, never mute it anywhere, or check it in context. A word the second
+opinion let through can be made always muted.
 
 ![Job details](docs/images/details.jpg)
+
+**The queue** — one file at a time, reorderable, with what is running now.
+
+![Queue](docs/images/queue.jpg)
 
 **Cleaned** — searchable history, and what the extra tracks cost in disk.
 
@@ -48,6 +62,15 @@ guessed at.
 hides itself otherwise.
 
 ![Upcoming](docs/images/upcoming.jpg)
+
+**Settings** are numbered in the order they need doing, and nothing is saved
+until you press Save. Each Test button tries what is typed, before it is saved.
+
+![What gets silenced](docs/images/settings.jpg)
+
+**On a phone** the sidebar becomes a bar along the bottom.
+
+<img src="docs/images/phone.jpg" alt="Home on a phone" width="300">
 
 ---
 
@@ -175,19 +198,25 @@ Whisper server**. Anything exposing the OpenAI transcription API works.
 
 ## First run
 
-Open `http://<host>:8477` and work down **Settings**; it is numbered in the
-order things need doing.
+Open `http://<host>:8477`. **Home** shows a checklist of what is left to do,
+with a link to each fix; it goes away once everything is done. **Settings** is
+numbered in the order things need doing:
 
-1. **Your library** — Sonarr + Radarr, Plex or Jellyfin, with a test button.
+1. **Your library** — Sonarr + Radarr, Plex or Jellyfin, with a test button,
+   and a check that each library folder opens from inside the container.
 2. **What gets silenced** — four switchable lists, plus your own always/never
    words.
 3. **Listening** — download the speech model here rather than during your first
    clean.
-4. **Muting** — padding and fade. The defaults are fine.
+4. **Muting** — padding, fade and the new track's name. The defaults are fine.
 5. **Second opinion** — optional, off by default.
 6. **Media server** — optional, for refreshing and pausing during transcodes.
-7. **Who can use this** — set a password if this is reachable from outside your
+7. **Advanced** — bitrates, ffmpeg threads, number format, keeping backups.
+8. **Who can use this** — set a password if this is reachable from outside your
    network.
+
+A value Cleanarr cannot use — an address without `http://`, a padding of 9
+seconds — is refused when you save, with the reason next to the field.
 
 Then clean one episode before turning it loose on a season.
 
@@ -256,6 +285,109 @@ re-cleaning skips the slow part.
 
 ---
 
+## Keeping the right words
+
+When anything is uncertain the word is muted — that is the default, and nothing
+below changes it. What these do is keep innocent words out of the lists in the
+first place, and make the rare wrong call quick to find and fix.
+
+**Before anything is muted**
+
+* **Whole words only.** *class*, *assassin* and *cockpit* are never caught by
+  what is inside them.
+* **Endings are not guessed.** Only plurals and possessives are added
+  automatically. *cocky*, *cocker* (spaniel), *booby* (trap) and *damning*
+  (evidence) were all muted once when endings were guessed, so every wanted
+  form — *fucking*, *shitty*, *pissed* — is listed by hand.
+* **A built-in never list** of words that contain or sound like a listed one
+  (*cucumber*, *Dickens*, *title*, *assess*…), and words deliberately left off
+  the lists because their ordinary sense is far more common: *bloody*,
+  *screwed*, *cracker*, and three slurs that in real use only ever turned up as
+  *a chink in his armour*, a surname or raccoons, and a *Van Dyke* beard.
+* **The Lord's name only as an exclamation.** A phrase such as *oh my god*
+  mutes *god*; *Jesus* or *Christ* on its own is left alone near words like
+  *pray*, *amen* or *gospel*, as long as it is on the check-in-context list
+  (it is by default). Only the profane word of a phrase is muted, so *oh my*
+  stays audible.
+* **Your own lists**: always silence, never silence, and exceptions for one
+  show or film (a character called Dick keeps his name without the insult
+  being left in everywhere else).
+* **The [second opinion](#the-second-opinion)**, optional, for words with a
+  real innocent meaning — *caulk* heard as the other word.
+
+**After a clean: what is worth a listen**
+
+Each detection records two pieces of evidence. Neither changes the muting:
+
+* **How sure Whisper was** of the word. Below 50%, it is flagged. The
+  built-in Whisper always reports this; a remote server only if it adds it to
+  the OpenAI response. Transcripts saved before this version have none, and
+  are reused on a re-clean; deleting `/config/cache` makes files be heard
+  again.
+* **What the subtitles say** at that moment, when the file has English text
+  subtitles (SRT, ASS, MP4 text; picture subtitles cannot be read). If the
+  line on screen has a different, innocent word — *“Pass me the caulk gun”* —
+  it is flagged and the line is quoted. A censored line (*f\*\*\**,
+  *[bleep]*) counts as agreeing. If most lines in a file disagree, the
+  subtitles are taken to belong to another release and set aside for that
+  file rather than flagging everything.
+
+Flagged words are marked **Worth a listen** in the job's details, and the
+Cleaned page can show only the files that have one. **That was wrong** on the
+word fixes it for next time; **Clean again** applies it now, and reuses the
+saved transcript, so the slow listening step is skipped.
+
+---
+
+## Where things are kept
+
+**The cleaned track is inside the media file itself**, as one more audio
+stream next to the original. There is no second copy of the episode and no
+separate audio file: Plex or Jellyfin simply shows one more entry in the
+episode's audio menu. The original audio stream is copied across untouched and
+stays the default.
+
+How a file gets there:
+
+1. The new file is built in a scratch folder **beside the original**, named
+   `cleanarr-` plus a random suffix (e.g. `Show/Season 01/cleanarr-x1y2z3/`).
+   It sits on the same disk so the finished file can be moved into place
+   without copying. That needs free space of about the file's size plus
+   512 MB; a job that does not have it stops before starting.
+2. Once it verifies, the new file **replaces the original at the same path**,
+   keeping its owner, permissions and modification time, so the library does
+   not think the episode is new.
+3. The scratch folder is deleted, whether the job worked or not. One left by a
+   container killed mid-job is swept up the next time a job runs in that
+   folder, once it is six hours old.
+
+The file grows by the size of the cleaned track, about 90 MB for a 25-minute
+episode; the Cleaned page shows the running total. **Remove** rewrites the file
+without that track and gives the space back.
+
+**Keep a copy of each original** (Settings → Advanced, off by default) also
+leaves `<file name>.cleanarr-backup` beside each file, doubling what it takes
+on disk. The copy is refreshed each time the file is changed, so after a second
+clean or a removal it holds the file as it was just before that change.
+
+Everything else lives in `/config`:
+
+| Path | What |
+|---|---|
+| `/config/config.yaml` | Settings, including API keys and the login's password hash |
+| `/config/cleanarr.sqlite` | Job history, every detection, shows set to clean new episodes, second-opinion answers |
+| `/config/cache/models/` | The speech model, about 1.5 GB |
+| `/config/cache/*.json` | Transcripts, so a re-clean after a word-list change skips listening |
+| `/config/cache/posters/` | Artwork, fetched once |
+| `/config/cache/huggingface/` | Hugging Face's own download cache |
+
+Deleting `/config/cache` is safe: the model downloads again and files are
+listened to again. Deleting `cleanarr.sqlite` loses the history and the list
+of shows cleaning new episodes; the tracks in your files stay, and ones written
+by this version are still recognised as Cleanarr's from the file alone.
+
+---
+
 ## The second opinion
 
 **Optional, off by default, and most people should leave it off.**
@@ -264,9 +396,11 @@ Speech recognition writes homophones. A scene about drywall produced nine mutes
 of *“cock”* — the word was *“caulk”*. No word list fixes that, because the
 transcript genuinely contains the rude one.
 
-So a word you list is sent to **your own Ollama**, with the sentence around it,
-and is left in only if the model names the ordinary word it heard instead.
-Nothing leaves your network; a blank address skips the step.
+So a word you list is sent to **your own Ollama** — or any server with an
+OpenAI-compatible chat API — with the sentence around it, and is left in only
+if the model names the ordinary word it heard instead. Nothing leaves your
+network; a blank address skips the step, and the listed words are simply
+muted.
 
 Across 196 checks on a real library it changed the outcome **twice**, at
 30–100 s each — hence the default. Anything unanswered stays muted.
@@ -280,7 +414,9 @@ disk is touched; catching up is a separate button. A show with no files yet can
 be marked, so a new series arrives clean.
 
 Checked every 10 minutes. For instant cleaning, point a Sonarr **Connect →
-Webhook** (*On Import*) at `http://<host>:8477/api/webhook/sonarr`.
+Webhook** (*On Import*) at `http://<host>:8477/api/webhook/sonarr`. If you
+have set a login, put the same username and password in the webhook's
+Username and Password fields.
 
 ---
 
@@ -301,8 +437,9 @@ Webhook** (*On Import*) at `http://<host>:8477/api/webhook/sonarr`.
 
 ```
 server/cleanarr/
-  words.py      word lists and whole-word matching     (tools/test_words.py)
-  judge.py      the second opinion                     (tools/test_judge.py)
+  words.py      word lists and whole-word matching
+  subtitles.py  checks detections against the file's subtitles
+  judge.py      the second opinion
   asr.py        Whisper, local or remote, with caching
   media.py      ffprobe/ffmpeg: probe, mute, remux, verify, swap
   library.py    Sonarr/Radarr, Plex or Jellyfin as the library
@@ -311,15 +448,28 @@ server/cleanarr/
   arr.py        Sonarr, Radarr, Plex and Jellyfin clients
   auth.py       optional login
   main.py       API and static page
+  validate.py   checks a settings save
 web/            the page
+tests/          pytest suite; demo.py is a made-up library for the UI tests
 ```
 
-Tests are plain scripts, no framework:
+Tests need ffmpeg on the PATH. The end-to-end tests also need espeak-ng, and
+download Whisper `tiny.en` (~75 MB) the first time.
 
 ```bash
-python tools/test_words.py
-python tools/test_judge.py
+pip install -r server/requirements.txt -r tests/requirements.txt
+python -m pytest -m "not e2e and not ui"   # words, queue, API, real ffmpeg
+python -m pytest -m e2e                     # speech -> Whisper -> cleaned MKV and MP4
+python -m pytest -m ui                      # the page in Chromium
+python tests/demo.py                        # the demo library on :8477
 ```
+
+The UI tests also need Chromium for Playwright:
+`python -m playwright install chromium`.
+
+Set `CLEANARR_TEST_MODELS` to a folder to keep the model between runs. No
+Sonarr, Plex, Jellyfin or Ollama is needed: the tests start small local
+stand-ins for them.
 
 ---
 
