@@ -67,9 +67,17 @@ async def _require_login(request: Request, call_next):
         return await call_next(request)
 
     token = request.cookies.get(auth.COOKIE, "")
-    if not auth.verify(token, settings.auth_secret, settings.auth_user):
-        return JSONResponse({"error": "not signed in"}, status_code=401)
-    return await call_next(request)
+    if auth.verify(token, settings.auth_secret, settings.auth_user):
+        return await call_next(request)
+    if request.url.path.startswith(auth.WEBHOOK_PATHS):
+        given = auth.basic_credentials(request.headers.get("authorization", ""))
+        if (given and given[0] == settings.auth_user
+                and auth.check_password(given[1], settings.auth_hash, settings.auth_salt)):
+            return await call_next(request)
+        return JSONResponse(
+            {"error": "set the webhook's username and password to the Cleanarr login"},
+            status_code=401, headers={"WWW-Authenticate": 'Basic realm="Cleanarr"'})
+    return JSONResponse({"error": "not signed in"}, status_code=401)
 
 
 @app.get("/api/auth/state")

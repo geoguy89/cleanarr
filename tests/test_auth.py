@@ -114,3 +114,29 @@ def test_disable_needs_the_password(client):
     client.cookies.clear()
     assert client.get("/api/settings").status_code == 200
     assert config.load().auth_secret == ""
+
+
+def test_basic_credentials():
+    import base64
+    good = "Basic " + base64.b64encode(b"amy:pa:ss").decode()
+    assert auth.basic_credentials(good) == ("amy", "pa:ss")
+    assert auth.basic_credentials("Bearer x") is None
+    assert auth.basic_credentials("Basic !!!") is None
+    assert auth.basic_credentials("Basic " + base64.b64encode(b"nocolon").decode()) is None
+    assert auth.basic_credentials("") is None
+
+
+def test_webhook_takes_the_login_as_basic_auth(client):
+    from fastapi.testclient import TestClient
+    from cleanarr import main
+
+    client.post("/api/auth/setup", json={"username": "amy", "password": "long enough"})
+    sonarr = TestClient(main.app)          # no cookie, like Sonarr
+    event = {"eventType": "Test"}
+    r = sonarr.post("/api/webhook/sonarr", json=event)
+    assert r.status_code == 401 and "username and password" in r.json()["error"]
+    assert sonarr.post("/api/webhook/sonarr", json=event, auth=("amy", "wrong")).status_code == 401
+    assert sonarr.post("/api/webhook/sonarr", json=event,
+                       auth=("amy", "long enough")).json()["ok"] is True
+    # Basic auth opens the webhook and nothing else.
+    assert sonarr.get("/api/settings", auth=("amy", "long enough")).status_code == 401

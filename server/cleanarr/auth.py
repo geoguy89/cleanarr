@@ -18,6 +18,7 @@ framework's auth stack.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -120,3 +121,22 @@ OPEN_PATHS = ("/api/auth/", "/static/", "/api/health")
 
 def is_open(path: str) -> bool:
     return path == "/" or path.startswith(OPEN_PATHS)
+
+
+# Webhooks come from another service, which cannot hold a cookie. Sonarr's
+# webhook has a username and password of its own and sends them as HTTP Basic,
+# so the same login is accepted that way on these paths - and only these.
+WEBHOOK_PATHS = ("/api/webhook/",)
+
+
+def basic_credentials(header: str) -> tuple[str, str] | None:
+    """(username, password) from an Authorization: Basic header, or None."""
+    scheme, _, value = (header or "").partition(" ")
+    if scheme.lower() != "basic" or not value:
+        return None
+    try:
+        decoded = base64.b64decode(value.strip(), validate=True).decode("utf8")
+    except (binascii.Error, UnicodeDecodeError):
+        return None
+    user, sep, password = decoded.partition(":")
+    return (user, password) if sep else None
