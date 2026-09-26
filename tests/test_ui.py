@@ -387,7 +387,7 @@ def test_the_login_gate(browser, demo):
         page.fill("#gate-pass", "long enough")
         page.locator("#gate-submit").click()
         page.locator("#gate").wait_for(state="hidden")
-        assert page.locator("#view-home h1").is_visible()
+        page.locator("#view-home h1").wait_for()
     finally:
         p.close()
         demo.configure()

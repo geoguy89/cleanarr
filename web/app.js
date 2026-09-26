@@ -397,12 +397,20 @@ document.addEventListener('change', async (event) => {
   try { await handler(el, event); } catch (err) { fail(err); }
 });
 
-/* A menu near the bottom of its scrolling area opens upwards instead of
-   running off the end of it. */
-document.addEventListener('toggle', (event) => {
-  const menu = event.target;
-  if (!menu.matches?.('details.menu') || !menu.open) return;
+/* Overflow menus are opened here rather than by the browser, so a menu near
+   the bottom of its scrolling area can be turned upwards before it is ever
+   drawn: the browser's own toggle event comes a task later, after a frame of
+   the menu hanging off the end. */
+document.addEventListener('click', (event) => {
+  const summary = event.target.closest('details.menu > summary');
+  if (!summary) return;
+  event.preventDefault();
+  const menu = summary.parentElement;
+  const opening = !menu.open;
+  $$('details.menu[open]').forEach((d) => { if (d !== menu) d.open = false; });
   menu.classList.remove('up');
+  menu.open = opening;
+  if (!opening) return;
   const list = menu.querySelector('.menu-list');
   const area = menu.closest('.sheet-body') || document.documentElement;
   const bottom = Math.min(area.getBoundingClientRect().bottom, window.innerHeight);
@@ -2237,7 +2245,7 @@ $('#gate-form').addEventListener('submit', async (event) => {
   try {
     await api(`/api/auth/${gateMode === 'setup' ? 'setup' : 'login'}`, { method: 'POST', body: { username, password } });
     hideGate();
-    boot();
+    boot({ signedIn: true });
   } catch (err) {
     error.textContent = err.message;
     error.hidden = false;
@@ -2266,13 +2274,14 @@ if ('serviceWorker' in navigator) {
 }
 
 let timers = [];
-async function boot() {
+async function boot({ signedIn = false } = {}) {
   noteSource({ library_source: state.libSource });
-  if (!(await checkAuth())) return;
+  if (!signedIn && !(await checkAuth())) return;
   timers.forEach(clearInterval);
-  await poll();
-  loadSettings({ fill: false }).catch(() => {});
+  // The page first, so it is never blank; the queue's numbers follow.
   route();
+  poll();
+  loadSettings({ fill: false }).catch(() => {});
   timers = [
     setInterval(() => { if ($('#gate').hidden && !document.hidden) poll(); }, 3000),
     // Home asks the library, so it refreshes slowly and only while shown.
