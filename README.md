@@ -264,6 +264,26 @@ into this container either way — NFS or SMB from another machine is fine, it
 just has to be mounted — and once it is being mounted, mounting it at the path
 the library reports costs nothing and leaves one fewer thing to get wrong.
 
+### On a phone
+
+Cleanarr installs as an app — its own icon and window — but browsers only
+install from a **secure address**. Opened as `http://<server>:8477`, Android
+Chrome offers only *Create shortcut* and says *“This app cannot be
+installed”*. Any one of these fixes it:
+
+* **A reverse proxy with a certificate** (Nginx Proxy Manager, SWAG, Caddy,
+  Traefik) pointed at port 8477, and Cleanarr opened at its `https://` address.
+* **Tailscale**: `tailscale serve --bg 8477` on the server gives an
+  `https://…ts.net` address with a real certificate, once HTTPS certificates are
+  switched on in the Tailscale admin console.
+* **Just one phone**: in Chrome open
+  `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, add
+  `http://<server>:8477`, relaunch, and the menu offers *Install app*.
+
+**Settings → Install as an app** says which case you are in, with the exact
+address to use, and has an Install button once the browser allows it.
+
+
 ---
 
 ## How it works
