@@ -1,5 +1,7 @@
 # Cleanarr
 
+<img src="web/logo.svg" alt="" width="112" align="right">
+
 Cleanarr is an \*arr-inspired, *vibe-coded* application that mutes profanity in
 media you already own.
 

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<title>Cleanarr</title>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#232a38"/><stop offset="1" stop-color="#11141b"/></linearGradient>
+  <radialGradient id="glow" cx=".45" cy=".62" r=".5"><stop offset="0" stop-color="#4ec98a" stop-opacity=".22"/><stop offset="1" stop-color="#4ec98a" stop-opacity="0"/></radialGradient>
+  <linearGradient id="lip" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f06f7e"/><stop offset=".55" stop-color="#d2475a"/><stop offset="1" stop-color="#9e2a3d"/></linearGradient>
+  <radialGradient id="cavity" cx=".5" cy=".45" r=".6"><stop offset="0" stop-color="#2a0710"/><stop offset="1" stop-color="#5a1424"/></radialGradient>
+  <linearGradient id="tooth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#dfe5ee"/><stop offset=".35" stop-color="#ffffff"/><stop offset="1" stop-color="#e8edf4"/></linearGradient>
+  <linearGradient id="soapTop" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9f3ff"/><stop offset="1" stop-color="#7fd6f5"/></linearGradient>
+  <linearGradient id="soapSide" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5fc0e6"/><stop offset="1" stop-color="#3a98c6"/></linearGradient>
+  <linearGradient id="speech" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6ee0a4"/><stop offset="1" stop-color="#34b374"/></linearGradient>
+  <radialGradient id="foam" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#ffffff" stop-opacity=".04"/><stop offset=".75" stop-color="#bff0ff" stop-opacity=".16"/><stop offset="1" stop-color="#e8fbff" stop-opacity=".5"/></radialGradient>
+  <clipPath id="inner"><path d="M52,150 C66,132 98,126 118,132 C140,126 172,132 186,150 C172,190 146,204 119,204 C92,204 66,190 52,150 Z"/></clipPath>
+</defs>
+<rect width="256" height="256" rx="56" fill="url(#bg)"/>
+<g transform="translate(0,0) scale(1)">
+  <rect width="256" height="256" fill="url(#glow)"/>
+  <path d="M52,150 C66,132 98,126 118,132 C140,126 172,132 186,150 C172,190 146,204 119,204 C92,204 66,190 52,150 Z" fill="url(#cavity)"/>
+  <g clip-path="url(#inner)">
+    <ellipse cx="120" cy="206" rx="46" ry="22" fill="#c85466"/>
+    <g fill="url(#tooth)"><rect x="50" y="112" width="24" height="38" rx="7"/><rect x="76" y="112" width="21" height="41" rx="7"/><rect x="99" y="112" width="20" height="43" rx="7"/><rect x="121" y="112" width="20" height="43" rx="7"/><rect x="143" y="112" width="21" height="41" rx="7"/><rect x="166" y="112" width="24" height="38" rx="7"/></g>
+  </g>
+  <path fill-rule="evenodd" fill="url(#lip)" d="M30,150 C46,110 86,100 118,114 C150,100 190,110 208,150 C194,206 152,228 119,228 C86,228 44,206 30,150 Z M52,150 C66,132 98,126 118,132 C140,126 172,132 186,150 C172,190 146,204 119,204 C92,204 66,190 52,150 Z"/>
+  <path d="M58,124 C78,112 100,111 114,119" stroke="#ffc2c9" stroke-width="5" stroke-linecap="round" fill="none" opacity=".75"/>
+  <path d="M92,219 C108,224 132,224 148,219" stroke="#ff9aa8" stroke-width="4" stroke-linecap="round" fill="none" opacity=".55"/>
+  <g transform="rotate(-11 136 176)">
+    <rect x="84" y="166" width="136" height="36" rx="12" fill="url(#soapSide)"/>
+    <rect x="84" y="158" width="136" height="27" rx="12" fill="url(#soapTop)"/>
+    <rect x="116" y="164" width="72" height="15" rx="7.5" fill="none" stroke="#ffffff" stroke-opacity=".75" stroke-width="2.4"/>
+    <path d="M96,164 C110,161 160,161 180,163" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" opacity=".85" fill="none"/>
+  </g>
+  <g fill="#ffffff"><circle cx="206" cy="150" r="6" opacity="0.95"/><circle cx="216" cy="142" r="4.5" opacity="0.89"/><circle cx="198" cy="143" r="3.5" opacity="0.83"/><circle cx="214" cy="156" r="3" opacity="0.77"/></g>
+  <circle cx="54" cy="104" r="15" fill="url(#foam)" stroke="#ffffff" stroke-opacity=".9" stroke-width="2.6"/><path d="M45.8,101.8 A8.2,8.2 0 0 1 52.5,95.0" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" fill="none"/><circle cx="33" cy="80" r="8" fill="url(#foam)" stroke="#ffffff" stroke-opacity=".9" stroke-width="1.6"/><path d="M28.6,78.8 A4.4,4.4 0 0 1 32.2,75.2" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" fill="none"/><circle cx="60" cy="66" r="5" fill="url(#foam)" stroke="#ffffff" stroke-opacity=".9" stroke-width="1.6"/><path d="M57.2,65.2 A2.8,2.8 0 0 1 59.5,63.0" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" fill="none"/><circle cx="214" cy="196" r="11" fill="url(#foam)" stroke="#ffffff" stroke-opacity=".9" stroke-width="1.9"/><path d="M207.9,194.3 A6.1,6.1 0 0 1 212.9,189.4" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round" fill="none"/><circle cx="226" cy="170" r="6" fill="url(#foam)" stroke="#ffffff" stroke-opacity=".9" stroke-width="1.6"/><path d="M222.7,169.1 A3.3,3.3 0 0 1 225.4,166.4" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" fill="none"/><circle cx="38" cy="196" r="7" fill="url(#foam)" stroke="#ffffff" stroke-opacity=".9" stroke-width="1.6"/><path d="M34.1,194.9 A3.9,3.9 0 0 1 37.3,191.8" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+  <g transform="rotate(-7 180 58)">
+    <path d="M136,26 H222 A18,18 0 0 1 240,44 V76 A18,18 0 0 1 222,94 H160 L138,114 L144,94 H136 A18,18 0 0 1 118,76 V44 A18,18 0 0 1 136,26 Z" fill="url(#speech)"/>
+    <path d="M148,50 C145,45 131,44 131,53 C131,60 149,59 149,67 C149,76 134,76 131,70 M140,41 L140,79 M162,45 L158,75 M172,45 L168,75 M154,55 L176,55 M153,65 L175,65 M185.0,44 L185.0,64 M195.0,46 L215.0,46 M205.0,46 L205.0,76" stroke="#0e1a14" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="185.0" cy="74" r="4.2" fill="#0e1a14"/>
+  </g>
+</g>
+</svg>

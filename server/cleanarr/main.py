@@ -1554,7 +1554,7 @@ async def _cache_rules(request, call_next):
         # rejected and the app is not installable.
         response.headers["Service-Worker-Allowed"] = "/"
         response.headers["Cache-Control"] = "no-cache"
-    elif path.startswith("/static/") and path.endswith((".png", ".ico")):
+    elif path.startswith("/static/") and path.endswith((".png", ".ico", ".svg")):
         response.headers["Cache-Control"] = "public, max-age=604800"
     elif path.startswith("/static/") or path == "/":
         response.headers["Cache-Control"] = "no-cache"
