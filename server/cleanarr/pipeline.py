@@ -213,7 +213,6 @@ class Pipeline:
     # -- the work ---------------------------------------------------------
     def run(self, job_id: int, path: Path, force: bool = False) -> dict:
         settings = self.settings
-        media.THREADS = settings.ffmpeg_threads
         if not path.exists():
             raise FileNotFoundError(_missing(path))
 
@@ -347,6 +346,8 @@ def run_job(job_id: int, settings: config.Settings, cache_dir: Path,
     # What the added track is called, and what it has been called before, so
     # detection and the name written agree with the settings.
     media.set_clean_title(settings.track_title, settings.known_track_titles)
+    # Removals run ffmpeg too, so the thread cap applies to both.
+    media.THREADS = settings.ffmpeg_threads
     db.update(job_id, status="running", started_at=time.time(), message="",
               stage="probing", progress=0.0)
     try:
