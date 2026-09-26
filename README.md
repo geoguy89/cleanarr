@@ -42,9 +42,11 @@ from one episode to the end. Removing a cleaned track is just as easy.
 
 ![Episodes](docs/images/episodes.jpg)
 
-**Every mute is on the record.** When one is wrong — Whisper heard a name as a
-swear — **That was wrong** puts the word on the never-mute or check-in-context
-list, and a word the second opinion let through can be made always muted.
+**Every mute is on the record**, with what Whisper thought of the word and what
+the file's subtitles say at that moment. When one is wrong — Whisper heard a
+name as a swear — **That was wrong** puts the word on a list: never mute it in
+this show, never mute it anywhere, or check it in context. A word the second
+opinion let through can be made always muted.
 
 ![Job details](docs/images/details.jpg)
 
@@ -283,6 +285,60 @@ re-cleaning skips the slow part.
 
 ---
 
+## Keeping the right words
+
+When anything is uncertain the word is muted — that is the default, and nothing
+below changes it. What these do is keep innocent words out of the lists in the
+first place, and make the rare wrong call quick to find and fix.
+
+**Before anything is muted**
+
+* **Whole words only.** *class*, *assassin* and *cockpit* are never caught by
+  what is inside them.
+* **Endings are not guessed.** Only plurals and possessives are added
+  automatically. *cocky*, *cocker* (spaniel), *booby* (trap) and *damning*
+  (evidence) were all muted once when endings were guessed, so every wanted
+  form — *fucking*, *shitty*, *pissed* — is listed by hand.
+* **A built-in never list** of words that contain or sound like a listed one
+  (*cucumber*, *Dickens*, *title*, *assess*…), and words deliberately left off
+  the lists because their ordinary sense is far more common: *bloody*,
+  *screwed*, *cracker*, and three slurs that in real use only ever turned up as
+  *a chink in his armour*, a surname or raccoons, and a *Van Dyke* beard.
+* **The Lord's name only as an exclamation.** A phrase such as *oh my god*
+  mutes *god*; *Jesus* or *Christ* on its own is left alone near words like
+  *pray*, *amen* or *gospel*, as long as it is on the check-in-context list
+  (it is by default). Only the profane word of a phrase is muted, so *oh my*
+  stays audible.
+* **Your own lists**: always silence, never silence, and exceptions for one
+  show or film (a character called Dick keeps his name without the insult
+  being left in everywhere else).
+* **The [second opinion](#the-second-opinion)**, optional, for words with a
+  real innocent meaning — *caulk* heard as the other word.
+
+**After a clean: what is worth a listen**
+
+Each detection records two pieces of evidence. Neither changes the muting:
+
+* **How sure Whisper was** of the word. Below 50%, it is flagged. The
+  built-in Whisper always reports this; a remote server only if it adds it to
+  the OpenAI response. Transcripts saved before this version have none, and
+  are reused on a re-clean; deleting `/config/cache` makes files be heard
+  again.
+* **What the subtitles say** at that moment, when the file has English text
+  subtitles (SRT, ASS, MP4 text; picture subtitles cannot be read). If the
+  line on screen has a different, innocent word — *“Pass me the caulk gun”* —
+  it is flagged and the line is quoted. A censored line (*f\*\*\**,
+  *[bleep]*) counts as agreeing. If most lines in a file disagree, the
+  subtitles are taken to belong to another release and set aside for that
+  file rather than flagging everything.
+
+Flagged words are marked **Worth a listen** in the job's details, and the
+Cleaned page can show only the files that have one. **That was wrong** on the
+word fixes it for next time; **Clean again** applies it now, and reuses the
+saved transcript, so the slow listening step is skipped.
+
+---
+
 ## Where things are kept
 
 **The cleaned track is inside the media file itself**, as one more audio
@@ -382,6 +438,7 @@ Username and Password fields.
 ```
 server/cleanarr/
   words.py      word lists and whole-word matching
+  subtitles.py  checks detections against the file's subtitles
   judge.py      the second opinion
   asr.py        Whisper, local or remote, with caching
   media.py      ffprobe/ffmpeg: probe, mute, remux, verify, swap
