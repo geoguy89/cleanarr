@@ -209,7 +209,8 @@ numbered in the order things need doing:
 3. **Listening** — download the speech model here rather than during your first
    clean.
 4. **Muting** — padding, fade and the new track's name. The defaults are fine.
-5. **Second opinion** — optional, off by default.
+5. **Second opinion** — optional, off by default: the file's subtitles, your
+   own model, or both.
 6. **Media server** — optional, for refreshing and pausing during transcodes.
 7. **Advanced** — bitrates, ffmpeg threads, number format, keeping backups.
 8. **Who can use this** — set a password if this is reachable from outside your
@@ -264,26 +265,6 @@ into this container either way — NFS or SMB from another machine is fine, it
 just has to be mounted — and once it is being mounted, mounting it at the path
 the library reports costs nothing and leaves one fewer thing to get wrong.
 
-### On a phone
-
-Cleanarr installs as an app — its own icon and window — but browsers only
-install from a **secure address**. Opened as `http://<server>:8477`, Android
-Chrome offers only *Create shortcut* and says *“This app cannot be
-installed”*. Any one of these fixes it:
-
-* **A reverse proxy with a certificate** (Nginx Proxy Manager, SWAG, Caddy,
-  Traefik) pointed at port 8477, and Cleanarr opened at its `https://` address.
-* **Tailscale**: `tailscale serve --bg 8477` on the server gives an
-  `https://…ts.net` address with a real certificate, once HTTPS certificates are
-  switched on in the Tailscale admin console.
-* **Just one phone**: in Chrome open
-  `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, add
-  `http://<server>:8477`, relaunch, and the menu offers *Install app*.
-
-**Settings → Install as an app** says which case you are in, with the exact
-address to use, and has an Install button once the browser allows it.
-
-
 ---
 
 ## How it works
@@ -307,9 +288,10 @@ re-cleaning skips the slow part.
 
 ## Keeping the right words
 
-When anything is uncertain the word is muted — that is the default, and nothing
-below changes it. What these do is keep innocent words out of the lists in the
-first place, and make the rare wrong call quick to find and fix.
+When anything is uncertain the word is muted — that is the default, and only
+a [second opinion](#the-second-opinion) you switch on changes it. What these
+do is keep innocent words out of the lists in the first place, and make the
+rare wrong call quick to find and fix.
 
 **Before anything is muted**
 
@@ -333,11 +315,13 @@ first place, and make the rare wrong call quick to find and fix.
   show or film (a character called Dick keeps his name without the insult
   being left in everywhere else).
 * **The [second opinion](#the-second-opinion)**, optional, for words with a
-  real innocent meaning — *caulk* heard as the other word.
+  real innocent meaning — *caulk* heard as the other word — from the file's
+  subtitles, your own model, or both.
 
 **After a clean: what is worth a listen**
 
-Each detection records two pieces of evidence. Neither changes the muting:
+Each detection records two pieces of evidence. Unless the subtitle second
+opinion is on, neither changes the muting:
 
 * **How sure Whisper was** of the word. Below 50%, it is flagged. The
   built-in Whisper always reports this; a remote server only if it adds it to
@@ -345,7 +329,9 @@ Each detection records two pieces of evidence. Neither changes the muting:
   are reused on a re-clean; deleting `/config/cache` makes files be heard
   again.
 * **What the subtitles say** at that moment, when the file has English text
-  subtitles (SRT, ASS, MP4 text; picture subtitles cannot be read). If the
+  subtitles (SRT, ASS, MP4 text; picture subtitles cannot be read), or else an
+  English `.srt` or `.vtt` file beside it — `Episode.srt`, `Episode.en.srt`,
+  `Episode.en.sdh.srt`, the way Bazarr names them (forced ones are skipped). If the
   line on screen has a different, innocent word — *“Pass me the caulk gun”* —
   it is flagged and the line is quoted. A censored line (*f\*\*\**,
   *[bleep]*) counts as agreeing. If most lines in a file disagree, the
@@ -410,17 +396,41 @@ by this version are still recognised as Cleanarr's from the file alone.
 
 ## The second opinion
 
-**Optional, off by default, and most people should leave it off.**
+**Optional and off by default.** Two can be switched on, alone or together:
+the file's own subtitles, which cost nothing, and your own model.
 
 Speech recognition writes homophones. A scene about drywall produced nine mutes
 of *“cock”* — the word was *“caulk”*. No word list fixes that, because the
 transcript genuinely contains the rude one.
 
-So a word you list is sent to **your own Ollama** — or any server with an
+### The subtitles
+
+**Settings → Second opinion → Let the subtitles decide.** The subtitles were
+written by someone who knew what was said, so for an *uncertain* word — one on
+the check-in-context list, or one Whisper was less than 50% sure of — the line
+on screen at that moment settles it:
+
+* **the line has the word**, or a censored one (*f\*\*\**, *[bleep]*) — muted,
+  and the model is not asked;
+* **the line says something else** (*“Pass me the caulk gun”*) — left in, with
+  the line quoted and the word marked **Worth a listen**;
+* **no line near it** — it goes to the model if one is set, or is muted.
+
+A word Whisper was sure of, and that is not on the check list, is muted whatever
+the subtitles say: subtitles soften swears far more often than Whisper invents
+them. Subtitles that disagree with most detections in a file are taken to be
+from another release, or softened throughout, and set aside for that file —
+everything in it is then treated as if there were no subtitles. The file's own
+English text track is used first, else a `.srt` or `.vtt` beside it (see
+[Keeping the right words](#keeping-the-right-words)).
+
+### A model
+
+A word you list is sent to **your own Ollama** — or any server with an
 OpenAI-compatible chat API — with the sentence around it, and is left in only
 if the model names the ordinary word it heard instead. Nothing leaves your
-network; a blank address skips the step, and the listed words are simply
-muted.
+network; a blank address skips the step, and the listed words the subtitles
+did not settle are simply muted.
 
 Across 196 checks on a real library it changed the outcome **twice**, at
 30–100 s each — hence the default. Anything unanswered stays muted.

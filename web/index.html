@@ -294,7 +294,6 @@
             <li><a href="#/settings/server" data-section="server"><svg class="i"><use href="#i-server"/></svg>Media server</a></li>
             <li><a href="#/settings/advanced" data-section="advanced"><svg class="i"><use href="#i-cpu"/></svg>Advanced</a></li>
             <li><a href="#/settings/security" data-section="security"><svg class="i"><use href="#i-lock"/></svg>Who can use this<span class="state" data-state="login"></span></a></li>
-            <li><a href="#/settings/install" data-section="install"><svg class="i"><use href="#i-download"/></svg>Install as an app</a></li>
           </ul>
         </nav>
 
@@ -524,16 +523,27 @@
                 <h2 id="s-judge-h"><span class="step">5</span>Second opinion <span class="tag-optional">optional</span></h2>
                 <p class="muted">Speech recognition writes homophones: a scene
                   about drywall once produced nine mutes of “cock” where the
-                  word was “caulk”. A word on the list below is sent with its
-                  sentence to your own Ollama (or any OpenAI-compatible server),
-                  and left in only if the model names the ordinary word it
-                  heard. Anything unanswered stays muted.</p>
+                  word was “caulk”. Two things can settle a word on the list
+                  below: the file's own subtitles, and your own Ollama (or any
+                  OpenAI-compatible server), which gets the sentence and leaves
+                  the word in only if it names the ordinary word it heard.
+                  Anything unanswered stays muted.</p>
               </header>
+              <div class="field"><label class="switch">
+                <input type="checkbox" name="subtitle_opinion" role="switch">
+                <span class="track" aria-hidden="true"></span>
+                <span>Let the subtitles decide</span></label>
+                <p class="hint">For a word on the list below, or one Whisper was
+                  less than 50% sure of. If the line on screen has the word (or a
+                  bleep), it is muted; if it says something else, it is left in and
+                  marked worth a listen; with no line, the model below decides, or
+                  it is muted. Uses the file's English subtitles, or an
+                  <code>.srt</code> beside it (<code>Episode.en.srt</code>). Instant.</p></div>
               <div class="callout"><svg class="i"><use href="#i-info"/></svg>
-                <p><strong>Most people can leave this off.</strong> Across 196
+                <p><strong>Most people can leave the model off.</strong> Across 196
                   checks on a real library it changed the outcome twice, at
-                  30–100 seconds each. Without an address, the words below are
-                  simply muted.</p></div>
+                  30–100 seconds each. Without an address, the words below that
+                  the subtitles do not settle are simply muted.</p></div>
               <div class="field">
                 <span class="label" id="l-context">Check these words in context</span>
                 <div class="tags" data-tags="check_in_context" aria-labelledby="l-context"></div>
@@ -675,16 +685,6 @@
               <h2 id="s-security-h"><span class="step">8</span>Who can use this</h2>
             </header>
             <div id="security"></div>
-          </section>
-
-          <!-- ------------------------------------------------------- install -->
-          <section class="panel" id="s-install" aria-labelledby="s-install-h" hidden>
-            <header class="panel-head">
-              <h2 id="s-install-h"><span class="step">9</span>Install as an app <span class="tag-optional">optional</span></h2>
-              <p class="muted">Cleanarr can live on a phone's home screen and open in
-                its own window, like an app from the store.</p>
-            </header>
-            <div id="install"></div>
           </section>
         </div>
       </div>

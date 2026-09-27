@@ -234,7 +234,8 @@ class Match:
     # transcript that does not carry it.
     confidence: float | None = None
     # What the file's own subtitles say at that moment, and whether that
-    # agrees - see subtitles.py. Neither changes whether the word is muted.
+    # agrees - see subtitles.py. Only with the subtitle second opinion on do
+    # they change whether the word is muted.
     subtitle: str = ""
     subtitle_state: str = ""
 

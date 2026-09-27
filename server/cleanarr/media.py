@@ -245,6 +245,40 @@ def pick_subtitles(p: Probe, prefer_language: str = "eng") -> SubtitleStream | N
     return (tagged or untagged or [None])[0]
 
 
+_SIDECAR_SUFFIXES = (".srt", ".vtt")
+_ENGLISH_TAGS = {"en", "eng", "english"}
+# Tags a sidecar name carries that say nothing about its language.
+_NEUTRAL_TAGS = {"sdh", "hi", "cc", "default", "full"}
+
+
+def find_sidecar_subtitles(path: Path) -> Path | None:
+    """An English text subtitle file beside the media, as Bazarr and most
+    downloaders name them: Episode.srt, Episode.en.srt, Episode.eng.sdh.srt.
+
+    Forced files are skipped for the same reason as forced tracks. A file
+    tagged English wins over an untagged one; one tagged another language is
+    never used.
+    """
+    try:
+        siblings = sorted(path.parent.iterdir())
+    except OSError:
+        return None
+    tagged, untagged = [], []
+    for f in siblings:
+        name = f.name
+        if (f.suffix.lower() not in _SIDECAR_SUFFIXES or not name.startswith(path.stem + ".")
+                or not f.is_file()):
+            continue
+        tags = {t.lower() for t in name[len(path.stem) + 1:-len(f.suffix)].split(".") if t}
+        if "forced" in tags:
+            continue
+        if tags & _ENGLISH_TAGS:
+            tagged.append(f)
+        elif not tags - _NEUTRAL_TAGS:
+            untagged.append(f)
+    return (tagged or untagged or [None])[0]
+
+
 def extract_for_asr(path: Path, track: AudioStream, dest: Path,
                     subtitles: SubtitleStream | None = None,
                     subtitle_dest: Path | None = None) -> Path:

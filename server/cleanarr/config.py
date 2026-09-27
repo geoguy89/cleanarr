@@ -100,6 +100,9 @@ class Settings:
     # was the first design and it made clearing the box impossible.)
     check_in_context: list[str] = field(
         default_factory=lambda: sorted(DEFAULT_CHECK_IN_CONTEXT))
+    # Let the file's subtitles (or a .srt beside it) decide the uncertain
+    # words - see subtitles.decide. Off by default: when unsure, mute.
+    subtitle_opinion: bool = False
 
     # Bitrate for the cleaned track, per channel layout. The cleaned track is
     # a re-encode either way; this decides how much the file grows.

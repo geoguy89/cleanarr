@@ -221,8 +221,11 @@ def test_every_setting_saves_and_comes_back(desk, demo, tmp_path):
     page.fill("[name=fade]", "0.05")
     page.fill("[name=track_title]", "Family Friendly")
 
-    # Second opinion.
+    # Second opinion: the subtitles first, then a model.
+    page.locator("[name=subtitle_opinion]").check(force=True)
+    assert "checked against the subtitles" in page.locator("#context-note").inner_text()
     page.fill("[name=judge_url]", "http://ollama.test:11434")
+    assert "then the model below" in page.locator("#context-note").inner_text()
     page.fill("[name=judge_model]", "qwen3.5:4b")
     page.select_option("[name=judge_threads]", "4")
 
@@ -254,7 +257,7 @@ def test_every_setting_saves_and_comes_back(desk, demo, tmp_path):
     assert s.check_in_context == ["cock", "christ", "prick"]
     assert (s.asr_backend, s.asr_url, s.asr_remote_model, s.asr_api_key) == (
         "remote", "http://whisper.test:8000", "Systran/faster-whisper-small.en", "asr-key")
-    assert s.trim_silence is True
+    assert s.trim_silence is True and s.subtitle_opinion is True
     assert (s.pad_start, s.pad_end, s.fade, s.track_title) == (0.2, 0.3, 0.05, "Family Friendly")
     assert "Cleaned - English" in s.known_track_titles
     assert (s.judge_url, s.judge_model, s.judge_threads) == ("http://ollama.test:11434", "qwen3.5:4b", 4)
@@ -271,6 +274,7 @@ def test_every_setting_saves_and_comes_back(desk, demo, tmp_path):
     assert page.locator("[name=track_title]").input_value() == "Family Friendly"
     assert page.locator("[name=hold_policy]").input_value() == "playing"
     assert page.locator("[name=keep_backup]").is_checked()
+    assert page.locator("[name=subtitle_opinion]").is_checked()
     assert page.locator("[data-tags=custom_words] .tag").all_inner_texts() == ["muppet"]
     assert page.locator("#save-bar").is_hidden()
     assert page.locator("#nav-upcoming").is_hidden()      # Jellyfin has no calendar
@@ -538,25 +542,3 @@ def test_a_menu_at_the_bottom_opens_upwards(desk):
     menu = last.locator(".menu-list")
     box, area = menu.bounding_box(), page.locator("#sheet-body").bounding_box()
     assert box["y"] + box["height"] <= area["y"] + area["height"]
-
-
-
-def test_install_panel_on_a_secure_address(desk):
-    page = desk.go("settings/install")
-    panel = page.locator("#install")
-    panel.wait_for()
-    assert "can be installed" in panel.inner_text() or panel.get_by_role("button", name="Install Cleanarr").count()
-
-
-def test_install_panel_explains_a_plain_http_address(browser, demo):
-    p = Page(browser, demo, PHONE)
-    p.page.add_init_script("Object.defineProperty(window, 'isSecureContext', {value: false})")
-    try:
-        page = p.go("settings/install")
-        text = page.locator("#install").inner_text()
-        assert "This app cannot be installed" in text
-        assert "unsafely-treat-insecure-origin-as-secure" in text
-        assert demo.url in text                      # the exact address to add
-        assert "tailscale serve" in text
-    finally:
-        p.close()

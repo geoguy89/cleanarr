@@ -1,4 +1,5 @@
-"""Checking detections against the file's own subtitles. Evidence, never muting."""
+"""Checking detections against the file's own subtitles: evidence, and the
+subtitle second opinion on uncertain words."""
 
 from __future__ import annotations
 
@@ -101,3 +102,44 @@ def test_confidence_is_carried_from_the_transcript():
                                 {"word": "god", "start": 0.2, "end": 0.4, "probability": 0.8}])
     assert got[0].confidence == 0.8
     assert words.Matcher().find([{"word": "shit", "start": 0, "end": 1}])[0].confidence is None
+
+
+def test_webvtt_times_without_hours():
+    vtt = "WEBVTT\n\n01:02.500 --> 01:04.000 align:start\nGet some caulk.\n"
+    assert [(c.start, c.end, c.text) for c in subtitles.parse_srt(vtt)] == [(62.5, 64.0, "Get some caulk.")]
+
+
+def decided(matches, checked=frozenset({"cock"})):
+    marked, note = subtitles.annotate(matches, subtitles.parse_srt(SRT))
+    assert note == ""
+    return subtitles.decide(marked, set(checked))
+
+
+def test_the_subtitles_decide_a_word_on_the_check_list():
+    muted, left, still_open = decided([m("cock", 3.0)])
+    assert (muted, still_open) == ([], [])
+    assert left[0].needs_review and "caulk" in left[0].reason
+
+
+def test_the_subtitles_decide_a_word_whisper_was_unsure_of():
+    muted, left, _ = decided([m("fuck", 1.0, confidence=0.3), m("dick", 3.0, confidence=0.2)])
+    assert [x.text for x in muted] == ["fuck"] and "subtitles agree" in muted[0].reason
+    assert [x.text for x in left] == ["dick"]
+
+
+def test_a_sure_word_is_never_unmuted_by_the_subtitles():
+    # Subtitles soften swears far more often than Whisper invents them.
+    muted, left, still_open = decided([m("dick", 3.0, confidence=0.95)])
+    assert (muted, left) == ([], [])
+    assert [x.text for x in still_open] == ["dick"]
+
+
+def test_no_line_nearby_leaves_the_word_open():
+    muted, left, still_open = decided([m("cock", 40.0)])
+    assert (muted, left) == ([], [])
+    assert [x.text for x in still_open] == ["cock"]
+
+
+def test_a_bleeped_line_agrees():
+    muted, left, _ = decided([m("cock", 20.2)])
+    assert [x.text for x in muted] == ["cock"] and left == []

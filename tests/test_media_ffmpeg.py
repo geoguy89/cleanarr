@@ -253,6 +253,20 @@ def test_audio_still_comes_out_if_the_subtitles_cannot(source, tmp_path):
     assert wav.exists() and not srt.exists()
 
 
+def test_which_subtitle_file_beside_the_media_is_used(tmp_path):
+    video = tmp_path / "Show - S01E01.mkv"
+    video.write_bytes(b"")
+    assert media.find_sidecar_subtitles(video) is None
+    for name in ("Show - S01E01.fr.srt", "Show - S01E01.en.forced.srt", "Show - S01E01.srt",
+                 "Show - S01E02.en.srt", "Show - S01E01.en.sdh.srt", "Show - S01E01.en.ass"):
+        (tmp_path / name).write_text("x")
+    assert media.find_sidecar_subtitles(video).name == "Show - S01E01.en.sdh.srt"
+    (tmp_path / "Show - S01E01.en.sdh.srt").unlink()
+    assert media.find_sidecar_subtitles(video).name == "Show - S01E01.srt"   # untagged
+    (tmp_path / "Show - S01E01.srt").unlink()
+    assert media.find_sidecar_subtitles(video) is None       # French and forced never
+
+
 def test_which_subtitles_are_used():
     def sub(i, codec="subrip", language="eng", forced=False, title=""):
         return media.SubtitleStream(i, codec, language, title, forced)

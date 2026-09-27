@@ -5,9 +5,15 @@ nothing in the transcript says so. The subtitles often do: they were written
 by a person who knew what was said. So each detection is compared with the
 subtitle on screen at that moment.
 
-This never changes what is muted. When unsure, the word is muted; a subtitle
-that disagrees only marks the detection as worth a listen, with the line
-quoted, so a wrong call is quick to find and fix with "That was wrong".
+By default this never changes what is muted. When unsure, the word is muted;
+a subtitle that disagrees only marks the detection as worth a listen, with the
+line quoted, so a wrong call is quick to find and fix with "That was wrong".
+
+With the subtitles switched on as a second opinion (see decide), they also
+rule on the uncertain detections: a word on the check-in-context list, or one
+Whisper itself was unsure of. A line that agrees keeps it muted without asking
+anyone else; a line that says something else leaves it in, marked for a
+listen; no line near it leaves the word to the model, or muted.
 
 Subtitles are imperfect evidence. They are often censored ("f***"), trimmed,
 or timed for a different release. So:
@@ -41,7 +47,8 @@ MISMATCH_SHARE = 0.6
 AGREES = "agrees"
 DIFFERS = "differs"
 
-_TIME = re.compile(r"(\d+):(\d{2}):(\d{2})[,.](\d{1,3})")
+# Hours are optional: WebVTT may write 01:02.500.
+_TIME = re.compile(r"(?:(\d+):)?(\d{2}):(\d{2})[,.](\d{1,3})")
 _TAG = re.compile(r"<[^>]+>|\{[^}]*\}")
 # f***, s**t, sh*t, [bleep], ***: a swear the subtitler hid.
 _CENSORED = re.compile(r"\b\w+[*#@$%]{2,}\w*|\w\*+\w|\[\s*(bleep|beep|censored|expletive)[^\]]*\]"
@@ -57,11 +64,11 @@ class Cue:
 
 def _seconds(match: re.Match) -> float:
     h, m, s, ms = match.groups()
-    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms.ljust(3, "0")) / 1000
+    return int(h or 0) * 3600 + int(m) * 60 + int(s) + int(ms.ljust(3, "0")) / 1000
 
 
 def parse_srt(text: str) -> list[Cue]:
-    """SRT to cues. Markup is dropped; malformed blocks are skipped."""
+    """SRT (or WebVTT) to cues. Markup is dropped; malformed blocks are skipped."""
     cues: list[Cue] = []
     for block in re.split(r"\r?\n\s*\r?\n", (text or "").strip()):
         lines = [ln for ln in block.splitlines() if ln.strip()]
@@ -121,3 +128,33 @@ def worth_checking(match) -> bool:
     state = match["subtitle_state"] if not hasattr(match, "subtitle_state") else match.subtitle_state
     sure = match["confidence"] if not hasattr(match, "confidence") else match.confidence
     return state == DIFFERS or (sure is not None and sure < LOW_CONFIDENCE)
+
+
+def uncertain(match: words.Match, checked: set[str]) -> bool:
+    """Whether a second opinion may rule on this detection: the word is on
+    the check-in-context list, or Whisper was unsure of it."""
+    word = words.normalize(match.text)
+    sure = match.confidence
+    return word in checked or (sure is not None and sure < LOW_CONFIDENCE)
+
+
+def decide(matches: list[words.Match], checked: set[str]
+           ) -> tuple[list[words.Match], list[words.Match], list[words.Match]]:
+    """(muted on the subtitles' word, left in on it, still open).
+
+    Works on matches annotate() has already marked. Only uncertain detections
+    are ruled on: a word Whisper was sure of, and not on the check list, is
+    muted whatever the subtitles say, because subtitles soften swears far more
+    often than Whisper invents them. Everything not ruled on is still open,
+    for the model or for muting.
+    """
+    muted, left, still_open = [], [], []
+    for m in matches:
+        if not uncertain(m, checked) or not m.subtitle_state:
+            still_open.append(m)
+        elif m.subtitle_state == AGREES:
+            muted.append(replace(m, reason=m.reason or "uncertain word, the subtitles agree"))
+        else:
+            left.append(replace(m, needs_review=True,
+                                reason=f"left in: the subtitles say “{m.subtitle}”"))
+    return muted, left, still_open

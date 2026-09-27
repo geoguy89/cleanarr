@@ -1105,7 +1105,7 @@ function renderJob() {
     ${job.status === 'done' && (job.action || 'clean') === 'clean' ? `<button type="button" class="btn ghost sm" data-action="job-remove">Remove the cleaned track</button>` : ''}`;
 
   const left = detections.filter((d) => !d.muted);
-  const judge = !!state.settings?.judge_url;
+  const judge = !!(state.settings?.judge_url || state.settings?.subtitle_opinion);
   const message = job.status === 'failed'
     ? `<div class="alert error" role="alert">${icon('alert')}<div class="grow"><strong>This job failed</strong>${esc(job.message)}</div></div>`
     : (job.message ? `<p class="muted">${esc(job.message)}</p>` : '');
@@ -1642,6 +1642,7 @@ function collect() {
     asr_remote_model: F('asr_remote_model').value.trim(),
     device: F('device').value,
     trim_silence: F('trim_silence').checked,
+    subtitle_opinion: F('subtitle_opinion').checked,
     pad_start: F('pad_start').value, pad_end: F('pad_end').value, fade: F('fade').value,
     track_title: F('track_title').value.trim(),
     check_in_context: tags('check_in_context'),
@@ -1707,8 +1708,6 @@ function fillSettings(s) {
   $('#settings-loading').innerHTML = '';
   form.hidden = false;
   $('#s-security').hidden = false;
-  $('#s-install').hidden = false;
-  renderInstall();
   const set = (name, value) => { if (F(name)) F(name).value = value ?? ''; };
   const check = (name, value) => $$(`input[name="${name}"]`).forEach((r) => { r.checked = r.value === value; });
   check('library_source', s.library_source || 'arr');
@@ -1721,6 +1720,7 @@ function fillSettings(s) {
   set('asr_url', s.asr_url); set('asr_api_key', s.asr_api_key); set('asr_remote_model', s.asr_remote_model);
   set('device', s.device || 'auto');
   F('trim_silence').checked = !!s.trim_silence;
+  F('subtitle_opinion').checked = !!s.subtitle_opinion;
   set('pad_start', s.pad_start); set('pad_end', s.pad_end); set('fade', s.fade);
   set('track_title', s.track_title);
   set('judge_url', s.judge_url); set('judge_model', s.judge_model);
@@ -1788,8 +1788,13 @@ function renderContextNote() {
   const note = $('#context-note');
   if (!note) return;
   if (!words) note.textContent = 'Empty: nothing is checked, and no model is ever asked.';
-  else if (!F('judge_url').value.trim()) note.textContent = `No address below, so ${plural(words, 'word')} here ${words === 1 ? 'is' : 'are'} simply muted.`;
-  else note.textContent = `${plural(words, 'word')} ${words === 1 ? 'is' : 'are'} sent for a second opinion when heard.`;
+  const model = !!F('judge_url').value.trim();
+  const subs = F('subtitle_opinion').checked;
+  const these = `${plural(words, 'word')} here ${words === 1 ? 'is' : 'are'}`;
+  if (!model && !subs) note.textContent = `No second opinion is on, so ${these} simply muted.`;
+  else if (!model) note.textContent = `${these} checked against the subtitles when heard, and muted when there are none.`;
+  else if (!subs) note.textContent = `${these} sent to the model below when heard.`;
+  else note.textContent = `${these} checked against the subtitles when heard, then the model below if there is no line.`;
 }
 
 /* One set of Plex fields and one set of Jellyfin fields, moved to whichever
@@ -2188,70 +2193,6 @@ document.addEventListener('click', async (e) => {
   if ($('#more-sheet').open) $('#more-sheet').close();
   showGate('login');
 });
-
-/* ======================================================================
-   Installing as an app
-
-   Chrome installs a web app only from a secure address: https://, or
-   localhost. Opened as http://<server>:8477 the service worker is refused,
-   and Android offers nothing but "Create shortcut" with "This app cannot be
-   installed". No code in the page can change that, so the panel says which
-   case this is and how to get to a secure address.
-   ====================================================================== */
-
-let installPrompt = null;
-window.addEventListener('beforeinstallprompt', (event) => {
-  event.preventDefault();
-  installPrompt = event;
-  renderInstall();
-});
-window.addEventListener('appinstalled', () => { installPrompt = null; renderInstall(); });
-
-function renderInstall() {
-  const host = $('#install');
-  if (!host) return;
-  const standalone = window.matchMedia('(display-mode: standalone)').matches
-    || window.navigator.standalone === true;
-  const origin = location.origin;
-  if (standalone) {
-    host.innerHTML = `<p class="hint good">${icon('check')} Running as an installed app.</p>`;
-  } else if (!window.isSecureContext) {
-    host.innerHTML = `<div class="alert warn">${icon('alert')}<div class="grow">
-        <strong>This address can only make a shortcut</strong>
-        Browsers install web apps only from a secure (<code>https://</code>) address, and this
-        page was opened as <code>${esc(origin)}</code>. That is why Chrome says
-        “This app cannot be installed”. Any one of these fixes it:</div></div>
-      <ol class="install-steps">
-        <li><strong>A reverse proxy with a certificate</strong>, if you already reach other
-          apps by name: point Nginx Proxy Manager, SWAG, Caddy or Traefik at port 8477 and
-          open Cleanarr at its <code>https://</code> address.</li>
-        <li><strong>Tailscale</strong>: on the server, <code>tailscale serve --bg 8477</code>
-          gives an <code>https://…ts.net</code> address with a real certificate, reachable
-          from your own devices. HTTPS has to be switched on once in the Tailscale admin
-          console (DNS → HTTPS Certificates).</li>
-        <li><strong>Just this phone</strong>: in Chrome open
-          <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>, enable it,
-          add <code>${esc(origin)}</code>, and relaunch Chrome. Then the menu offers
-          <em>Install app</em>. Chrome shows a warning banner on that flags page; the
-          setting applies to this one address only.</li>
-      </ol>`;
-  } else if (installPrompt) {
-    host.innerHTML = `<div class="test-row"><button type="button" class="btn sm" data-action="install-app">
-        ${icon('download')}Install Cleanarr</button>
-      <span class="hint">Adds it to the home screen and opens it in its own window.</span></div>`;
-  } else {
-    host.innerHTML = `<p class="hint">This address can be installed. In Chrome use the
-      menu → <em>Install app</em> (on a computer, the install icon in the address bar);
-      on an iPhone, Share → <em>Add to Home Screen</em>.</p>`;
-  }
-}
-ACTIONS['install-app'] = async () => {
-  if (!installPrompt) return;
-  installPrompt.prompt();
-  await installPrompt.userChoice;
-  installPrompt = null;
-  renderInstall();
-};
 
 /* ======================================================================
    The phone's More menu

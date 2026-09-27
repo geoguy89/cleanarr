@@ -281,17 +281,25 @@ class Pipeline:
             matches = matcher.find(transcript.words)
 
             self._stage(job_id, "judging", "checking the ambiguous ones")
-            matches, kept = self._adjudicate(matches, transcript.words, settings)
             # What the subtitles say at each word: evidence for whoever reviews
-            # the job, never a reason to unmute.
+            # the job, and - only with the subtitle second opinion on - the
+            # deciding word on the uncertain ones. The file's own track first,
+            # else a subtitle file beside it.
             cues = []
-            if subtitle_file.exists():
-                cues = subtitles.parse_srt(subtitle_file.read_text(encoding="utf8",
-                                                                   errors="replace"))
+            source_file = (subtitle_file if subtitle_file.exists()
+                           else media.find_sidecar_subtitles(path))
+            if source_file is not None:
+                cues = subtitles.parse_srt(source_file.read_text(encoding="utf8",
+                                                                 errors="replace"))
             matches, note = subtitles.annotate(matches, cues)
-            kept, _ = subtitles.annotate(kept, cues)
             if note:
                 print(f"[cleanarr] job {job_id}: {note}", flush=True)
+            settled, kept = [], []
+            if settings.subtitle_opinion and not note:
+                settled, kept, matches = subtitles.decide(matches, context_words)
+            matches, judged = self._adjudicate(matches, transcript.words, settings)
+            matches = sorted([*settled, *matches], key=lambda m: m.start)
+            kept = sorted([*kept, *judged], key=lambda m: m.start)
             db.save_detections(job_id, matches, kept)
             spans = words.to_spans(matches, settings.pad_start, settings.pad_end)
 
