@@ -351,3 +351,29 @@ def test_british_spellings_are_the_same_swear():
     matcher = words.Matcher(context_words=frozenset())
     assert subtitles._is_word("arse", "ass", matcher)
     assert subtitles._is_word("arsehole", "asshole", matcher)
+
+
+# ---------------------------------------------------------------- stress-test findings
+
+@pytest.mark.parametrize("raw, word", [
+    ("sh-", "shit"), ("f--", "fuck"), ("Mother—", "motherfucker"), ("b...", "bitch"),
+    ("Christ's", "christ"), ("fucks", "fuck"),
+])
+def test_a_word_cut_short_or_possessive_is_the_word(raw, word):
+    assert subtitles._is_word(raw, word, words.Matcher(context_words=frozenset()))
+
+
+def test_a_dash_inside_a_word_is_not_a_cut():
+    assert not subtitles._is_word("mother-in-law", "motherfucker",
+                                  words.Matcher(context_words=frozenset()))
+
+
+@pytest.mark.parametrize("heard_text, line, word", [
+    ("oh shit they found us", "Oh, sh-, they found us!", "shit"),
+    ("oh christ not again", "Oh, Christ's sake, not again.", "christ"),
+])
+def test_a_cut_short_or_possessive_caption_mutes(heard_text, line, word):
+    heard = said(heard_text)
+    state, _ = subtitles.evidence(detection(heard, word), line_at(heard, line, 9.8, 12.5),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state == "agrees"

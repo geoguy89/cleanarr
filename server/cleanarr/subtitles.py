@@ -108,6 +108,8 @@ def _plain(bare: str) -> str:
         bare = "ass" + bare[4:]
     return bare + "g" if bare.endswith("in") and len(bare) >= 5 else bare
 _BLEEP = re.compile(r"\[\s*(bleep|beep|censored|expletive)[^\]]*\]|\*{3,}", re.I)
+# A word broken off: letters, then a dash or dots, and nothing after.
+_STUB = re.compile(r"[^\w]*([a-z]+)(?:-+|—|–|…|\.\.\.)[^\w]*", re.I)
 
 
 def _is_word(raw: str, word: str, matcher: words.Matcher) -> bool:
@@ -119,10 +121,15 @@ def _is_word(raw: str, word: str, matcher: words.Matcher) -> bool:
         letters = _HIDDEN.split(raw.lower())
         pattern = ".+".join(re.escape(re.sub(r"[^a-z']", "", p)) for p in letters)
         return bool(pattern.strip(".+")) and re.fullmatch(pattern, word) is not None
+    # Cut short with a dash or dots: "sh-", "f--", "mother—", "b...".
+    stub = _STUB.fullmatch(raw)
+    if stub:
+        return word.startswith(stub.group(1).lower())
     bare, word = _plain(words.normalize(raw)), _plain(word)
     if not bare:
         return False
-    if bare == word:
+    # The word itself, possessive or plural: "Christ's", "fucks".
+    if bare in (word, word + "s", word + "es"):
         return True
     if len(bare) >= 3 and len(word) >= 3 and (word in bare or bare in word):
         return bool(matcher.find([{"word": bare, "start": 0.0, "end": 0.0}]))
@@ -134,7 +141,9 @@ def _says_it(text: str, word: str, matcher: words.Matcher) -> bool:
     that could be any word."""
     if _BLEEP.search(text):
         return True
-    return any(_is_word(raw, word, matcher) for raw in _SPLIT.split(text) if raw)
+    # Whole tokens first, so a dash that cuts a word short is still seen.
+    return any(_is_word(raw, word, matcher) for raw in text.split()) or \
+        any(_is_word(raw, word, matcher) for raw in _SPLIT.split(text) if raw)
 
 
 # Lining up borrowed subtitles - another copy's, or ones the media server
