@@ -48,6 +48,10 @@ MISMATCH_SHARE = 0.6
 
 AGREES = "agrees"
 DIFFERS = "differs"
+# The subtitles run straight past where the word was said - "open a ton of"
+# for "open a shit-ton of". Subtitles soften swears all the time, so this is
+# no evidence either way: the word is treated as if no line were near.
+OMITS = "omits"
 
 # Hours are optional: WebVTT may write 01:02.500.
 _TIME = re.compile(r"(?:(\d+):)?(\d{2}):(\d{2})[,.](\d{1,3})")
@@ -276,17 +280,144 @@ def fits(cues: list[Cue], heard: list[dict]) -> bool:
     return _share(ordered, [c.start for c in ordered], vocab, sample, 0.0) >= FIT_MIN
 
 
-def evidence(match: words.Match, cues: list[Cue], matcher: words.Matcher) -> tuple[str, str]:
-    """(state, the subtitle line) for one detection; state is "" when no line is near."""
-    near = [c for c in cues if c.start - WINDOW <= match.end and c.end + WINDOW >= match.start]
+# Reading the script around a word. Asking only "does the line on screen have
+# the word?" cannot tell a subtitle that leaves a swear out from one that says
+# something else in its place, and the two mean opposite things: only the
+# second is evidence Whisper misheard. So the words heard just before and after
+# are found in the subtitles, and what sits between them is the answer. On
+# Trap House (2025) this turned 5 "says something else" into "leaves it out"
+# and 3 into "agrees", and changed none of the 84 that already agreed.
+_ANCHOR_STOP = {"a", "an", "the", "i", "i'm", "im", "my", "me", "you", "your", "it", "its",
+                "it's", "oh", "uh", "um", "and", "or", "but", "to", "of", "in", "on", "at",
+                "is", "was", "be", "we", "he", "she", "they", "so", "no", "yes", "yeah", "ok",
+                "okay", "up", "for", "that", "this", "just", "like", "what", "do", "don't", "not"}
+SCRIPT_CONTEXT = 6.0       # seconds of subtitles either side of the word
+SCRIPT_MAX_GAP = 6         # subtitle words allowed between the two anchors
+WIDE_WINDOW = 2.5          # the nearby-line check, when nothing anchors
+_SPLIT = re.compile(r"[\s\-—–/]+")
+_CUT = re.compile(r"(--|—|…|\.\.\.)$")
+
+
+def _script_tokens(cues: list[Cue], at: float) -> list[tuple[str, str]]:
+    """(bare word, as written) for every subtitle word around `at`, in order."""
+    out = []
+    for c in sorted(cues, key=lambda c: c.start):
+        if c.end >= at - SCRIPT_CONTEXT and c.start <= at + SCRIPT_CONTEXT:
+            for raw in c.text.split():
+                for part in _SPLIT.split(raw):
+                    bare = words.normalize(part)
+                    if bare:
+                        out.append((bare, raw))
+    return out
+
+
+def _anchors(heard: list[str], i: int, step: int) -> list[tuple[tuple[str, ...], int]]:
+    """Words to find on one side of heard[i], nearest first: a distinctive word
+    on its own, or a pair of words for common ones. Each comes with how many
+    heard words lie between it and the detection."""
+    out = []
+    for k in range(1, 4):
+        j = i + step * k
+        if not 0 <= j < len(heard):
+            break
+        w = heard[j]
+        if w and w not in _ANCHOR_STOP and len(w) >= 3:
+            out.append(((w,), k - 1))
+        j2 = j + step
+        if 0 <= j2 < len(heard) and heard[j2] and w:
+            out.append(((heard[j2], w) if step < 0 else (w, heard[j2]), k - 1))
+    return out
+
+
+def _at(tokens: list[tuple[str, str]], seq: tuple[str, ...], start: int = 0, end: int = -1):
+    end = len(tokens) if end < 0 else min(end, len(tokens))
+    for p in range(start, end - len(seq) + 1):
+        if tuple(t for t, _ in tokens[p:p + len(seq)]) == seq:
+            yield p
+
+
+def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[Cue],
+                   matcher: words.Matcher) -> str | None:
+    """AGREES / OMITS / DIFFERS from what the subtitles have between the words
+    heard either side, or None when neither side can be found."""
+    bare = [words.normalize(h.get("word", "")) for h in heard]
+    times = [float(h.get("start") or 0.0) for h in heard]
+    k = bisect.bisect_left(times, match.start - 0.05)
+    near = [j for j in range(max(0, k - 3), min(len(bare), k + 4))
+            if bare[j] == word or (len(word) >= 4 and bare[j].startswith(word[:4]))]
     if not near:
-        return "", ""
-    text = " ".join(c.text for c in near)
+        return None
+    i = min(near, key=lambda j: abs(times[j] - match.start))
+    tokens = _script_tokens(cues, match.start)
+    if not tokens:
+        return None
+
+    def says(slot) -> bool:
+        return any(t == word or _CENSORED.search(raw)
+                   or (len(t) >= 4 and word.startswith(t) and _CUT.search(raw))
+                   for t, raw in slot) or bool(matcher.find(
+                       [{"word": raw, "start": 0.0, "end": 0.0} for _t, raw in slot]))
+
+    for left, lgap in _anchors(bare, i, -1):
+        for right, rgap in _anchors(bare, i, +1):
+            between = set(bare[i - lgap:i] + bare[i + 1:i + 1 + rgap])
+            outcomes = []
+            for p in _at(tokens, left):
+                a = p + len(left)
+                found = False
+                for q in _at(tokens, right, a, a + SCRIPT_MAX_GAP + len(right)):
+                    found = True
+                    slot = tokens[a:q]
+                    rest = [t for t, _raw in slot if t not in between]
+                    outcomes.append(AGREES if says(slot) else (OMITS if not rest else DIFFERS))
+                    break
+                # Nothing lines up after it, and the subtitles break off right
+                # where the word was: "on your period or..."
+                if not found and _CUT.search(tokens[a - 1][1]):
+                    outcomes.append(OMITS)
+            if outcomes:
+                # Either reading will do when a phrase repeats: agreeing keeps
+                # the word muted, which is where every doubt should land.
+                return AGREES if AGREES in outcomes else (OMITS if OMITS in outcomes else DIFFERS)
+    # A line cut off right on the word: "Kill this mother--".
+    for left, _gap in _anchors(bare, i, -1):
+        for p in _at(tokens, left):
+            a = p + len(left)
+            if a < len(tokens) and _CUT.search(tokens[a][1]) and len(tokens[a][0]) >= 4 \
+                    and word.startswith(tokens[a][0]):
+                return AGREES
+    return None
+
+
+def evidence(match: words.Match, cues: list[Cue], matcher: words.Matcher,
+             heard: list[dict] | None = None) -> tuple[str, str]:
+    """(state, the subtitle line) for one detection; state is "" when no line is near.
+
+    A line on screen at that moment that has the word settles it. Otherwise
+    the script around it is read (see _in_the_script), when the transcript is
+    given; failing that, the lines a little either side are checked.
+    """
     word = words.normalize(match.text)
-    return (AGREES if _says_it(text, word, matcher) else DIFFERS), text[:200]
+    near = [c for c in cues if c.start - WINDOW <= match.end and c.end + WINDOW >= match.start]
+    if near and _says_it(" ".join(c.text for c in near), word, matcher):
+        return AGREES, " ".join(c.text for c in near)[:200]
+    wide = [c for c in cues
+            if c.start - WIDE_WINDOW <= match.end and c.end + WIDE_WINDOW >= match.start]
+    shown = " ".join(c.text for c in (near or wide))[:200]
+    if heard:
+        state = _in_the_script(match, word, heard, cues, matcher)
+        if state is not None:
+            return state, shown
+    if not wide:
+        return "", ""
+    # From a line a little further off only the word itself counts: the next
+    # line's own swear ("What the fuck is that?") says nothing about this one.
+    own = {words.normalize(t) for c in wide for t in _SPLIT.split(c.text)}
+    return (AGREES if word in own else DIFFERS), shown
 
 
-def annotate(matches: list[words.Match], cues: list[Cue]) -> tuple[list[words.Match], str]:
+def annotate(matches: list[words.Match], cues: list[Cue],
+             heard: list[dict] | None = None) -> tuple[list[words.Match], str]:
     """Each match with its subtitle evidence, and a note if the subtitles were set aside.
 
     The comparison uses every built-in list whatever the household switched
@@ -296,7 +427,7 @@ def annotate(matches: list[words.Match], cues: list[Cue]) -> tuple[list[words.Ma
     if not cues or not matches:
         return matches, ""
     matcher = words.Matcher(context_words=frozenset())
-    judged = [(m, *evidence(m, cues, matcher)) for m in matches]
+    judged = [(m, *evidence(m, cues, matcher, heard)) for m in matches]
     checked = [state for _m, state, _t in judged if state]
     differing = sum(1 for state in checked if state == DIFFERS)
     if len(checked) >= MISMATCH_MIN and differing / len(checked) > MISMATCH_SHARE:
@@ -333,7 +464,7 @@ def decide(matches: list[words.Match], checked: set[str]
     """
     muted, left, still_open = [], [], []
     for m in matches:
-        if not uncertain(m, checked) or not m.subtitle_state:
+        if not uncertain(m, checked) or m.subtitle_state in ("", OMITS):
             still_open.append(m)
         elif m.subtitle_state == AGREES:
             muted.append(replace(m, reason=m.reason or "uncertain word, the subtitles agree"))

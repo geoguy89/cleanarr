@@ -444,7 +444,12 @@ on screen at that moment settles it:
 * **the line has the word**, or a censored one (*f\*\*\**, *[bleep]*) — muted,
   and the model is not asked;
 * **the line says something else** (*“Pass me the caulk gun”*) — left in, with
-  the line quoted and the word marked **Worth a listen**;
+  the line quoted and the word marked **Worth a listen**. This is read from the
+  script: the words heard just before and after are found in the subtitles, and
+  only a *different* word between them counts;
+* **the line leaves it out** (*“open a ton of”* for *“open a shit-ton of”*, or a
+  line that trails off *“or...”* where the word was) — subtitles soften swears
+  all the time, so this is treated as no line at all;
 * **no line near it** — it goes to the model if one is set, or is muted.
 
 A word Whisper was sure of, and that is not on the check list, is muted whatever

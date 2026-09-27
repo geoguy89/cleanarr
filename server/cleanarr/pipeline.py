@@ -329,7 +329,7 @@ class Pipeline:
             unrelated = bool(cues) and not subtitles.fits(cues, transcript.words)
             if unrelated:
                 cues = []
-            matches, note = subtitles.annotate(matches, cues)
+            matches, note = subtitles.annotate(matches, cues, transcript.words)
             if note:
                 print(f"[cleanarr] job {job_id}: {note}", flush=True)
             settled, kept = [], []

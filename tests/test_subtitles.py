@@ -207,3 +207,51 @@ def test_subtitles_that_do_not_follow_the_dialogue_are_rejected():
     # Too little heard to tell: no verdict, so the old per-detection check decides.
     assert subtitles.fits(other, heard[:30])
     assert subtitles.fits([], heard)
+
+
+
+# ---------------------------------------------------------------- reading the script
+
+def said(text: str, start: float = 10.0, gap: float = 0.35) -> list[dict]:
+    return [{"word": " " + w, "start": start + n * gap, "end": start + n * gap + 0.3}
+            for n, w in enumerate(text.split())]
+
+
+def line_at(heard, text, start, end):
+    return [subtitles.Cue(start, end, text)]
+
+
+def detection(heard, word):
+    w = next(h for h in heard if words.normalize(h["word"]) == word)
+    return words.Match(start=w["start"], end=w["end"], text=w["word"].strip(),
+                       category="strong", confidence=0.4)
+
+
+SCRIPT_CASES = [
+    # heard, subtitle line, detected word, expected
+    ("you have to open a shit ton of bank accounts", "and open a ton of bank accounts", "shit", "omits"),
+    ("it was no way in hell this is random", "No way this is random.", "hell", "omits"),
+    ("pass me the cock gun right now please", "Pass me the caulk gun right now, please.", "cock", "differs"),
+    ("we are here kill this motherfucker right away", "-We are here! -Kill this mother--", "motherfucker", "agrees"),
+    ("you know on your period or some shit but anyway", "You know, on your period or...", "shit", "omits"),
+    ("look at that holy shit it is huge", "Look at that. Holy shit, it is huge!", "shit", "agrees"),
+]
+
+
+@pytest.mark.parametrize("heard_text, line, word, want", SCRIPT_CASES)
+def test_the_script_around_a_word_decides(heard_text, line, word, want):
+    heard = said(heard_text)
+    # The line is on screen well before the word, beyond the quick check.
+    cues = line_at(heard, line, 8.0, 9.0) if want != "agrees" else line_at(heard, line, 9.5, 14.0)
+    m = detection(heard, word)
+    state, _shown = subtitles.evidence(m, cues, words.Matcher(context_words=frozenset()), heard)
+    assert state == want
+
+
+def test_a_line_that_leaves_the_word_out_is_no_reason_to_unmute():
+    heard = said("you have to open a shit ton of bank accounts")
+    m = detection(heard, "shit")
+    marked, note = subtitles.annotate([m], line_at(heard, "and open a ton of bank accounts", 10.0, 14.0), heard)
+    assert marked[0].subtitle_state == "omits" and note == ""
+    muted, left, still_open = subtitles.decide(marked, set())
+    assert (muted, left) == ([], []) and still_open == marked       # the model or muting decides

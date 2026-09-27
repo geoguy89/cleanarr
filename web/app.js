@@ -1145,6 +1145,8 @@ function renderJob() {
       evidence.push(`<span class="flag">Subtitles say: “${esc(d.subtitle)}”</span>`);
     } else if (d.subtitle_state === 'agrees') {
       evidence.push('Subtitles agree');
+    } else if (d.subtitle_state === 'omits') {
+      evidence.push('Subtitles leave it out');
     }
     const check = worthChecking(d);
     return `<div class="detection${d.fixed ? ' fixed' : ''}${check ? ' check' : ''}">
