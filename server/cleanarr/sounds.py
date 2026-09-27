@@ -48,6 +48,8 @@ MINCED = frozenset("""
     mothertrucker motherfudger
     sucker suckers flipper flippers flipped fudged fudger fudgers freaked frigged
     effed frakked trucker truckers trucking truckin monkey dipstick dipsticks
+    doggone feck fecking feckin bish pee peed peeing balls bother blast blasted
+    heaven heavens
 """.split())
 
 # The small words that hold a sentence together. They sound close to swears -
