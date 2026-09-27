@@ -22,6 +22,12 @@ def test_a_fresh_install_has_everything_to_do(client, settings):
     assert client.get("/api/setup").json()["done"] is False
 
 
+def test_the_subtitle_opinion_counts_as_a_second_opinion(client, settings):
+    settings.subtitle_opinion = True
+    config.save(settings)
+    assert "judge" not in states(client)
+
+
 def test_a_finished_install(client, settings, stub, tmp_path, monkeypatch):
     media_dir = tmp_path / "tv"
     media_dir.mkdir()

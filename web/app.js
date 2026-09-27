@@ -1105,7 +1105,7 @@ function renderJob() {
     ${job.status === 'done' && (job.action || 'clean') === 'clean' ? `<button type="button" class="btn ghost sm" data-action="job-remove">Remove the cleaned track</button>` : ''}`;
 
   const left = detections.filter((d) => !d.muted);
-  const judge = !!state.settings?.judge_url;
+  const judge = !!(state.settings?.judge_url || state.settings?.subtitle_opinion);
   const message = job.status === 'failed'
     ? `<div class="alert error" role="alert">${icon('alert')}<div class="grow"><strong>This job failed</strong>${esc(job.message)}</div></div>`
     : (job.message ? `<p class="muted">${esc(job.message)}</p>` : '');
@@ -1642,6 +1642,7 @@ function collect() {
     asr_remote_model: F('asr_remote_model').value.trim(),
     device: F('device').value,
     trim_silence: F('trim_silence').checked,
+    subtitle_opinion: F('subtitle_opinion').checked,
     pad_start: F('pad_start').value, pad_end: F('pad_end').value, fade: F('fade').value,
     track_title: F('track_title').value.trim(),
     check_in_context: tags('check_in_context'),
@@ -1721,6 +1722,7 @@ function fillSettings(s) {
   set('asr_url', s.asr_url); set('asr_api_key', s.asr_api_key); set('asr_remote_model', s.asr_remote_model);
   set('device', s.device || 'auto');
   F('trim_silence').checked = !!s.trim_silence;
+  F('subtitle_opinion').checked = !!s.subtitle_opinion;
   set('pad_start', s.pad_start); set('pad_end', s.pad_end); set('fade', s.fade);
   set('track_title', s.track_title);
   set('judge_url', s.judge_url); set('judge_model', s.judge_model);
@@ -1788,8 +1790,13 @@ function renderContextNote() {
   const note = $('#context-note');
   if (!note) return;
   if (!words) note.textContent = 'Empty: nothing is checked, and no model is ever asked.';
-  else if (!F('judge_url').value.trim()) note.textContent = `No address below, so ${plural(words, 'word')} here ${words === 1 ? 'is' : 'are'} simply muted.`;
-  else note.textContent = `${plural(words, 'word')} ${words === 1 ? 'is' : 'are'} sent for a second opinion when heard.`;
+  const model = !!F('judge_url').value.trim();
+  const subs = F('subtitle_opinion').checked;
+  const these = `${plural(words, 'word')} here ${words === 1 ? 'is' : 'are'}`;
+  if (!model && !subs) note.textContent = `No second opinion is on, so ${these} simply muted.`;
+  else if (!model) note.textContent = `${these} checked against the subtitles when heard, and muted when there are none.`;
+  else if (!subs) note.textContent = `${these} sent to the model below when heard.`;
+  else note.textContent = `${these} checked against the subtitles when heard, then the model below if there is no line.`;
 }
 
 /* One set of Plex fields and one set of Jellyfin fields, moved to whichever

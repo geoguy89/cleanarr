@@ -588,7 +588,7 @@ def put_settings(payload: dict):
                 "media_server", "jellyfin_url", "library_source",
                 "judge_threads", "judge_keep_alive", "bitrate_surround",
                 "bitrate_stereo", "ffmpeg_threads", "hold_policy",
-                "check_in_context", "allow_words_by_title"):
+                "check_in_context", "allow_words_by_title", "subtitle_opinion"):
         if key in payload:
             setattr(settings, key, payload[key])
     # Same masking rule for every secret: all-stars means "leave it".
@@ -1240,12 +1240,12 @@ def setup_status():
                    "Anyone who can reach this address can use it."),
     }]
     checked = [w for w in settings.check_in_context if w.strip()]
-    if checked and not settings.judge_url:
+    if checked and not settings.judge_url and not settings.subtitle_opinion:
         optional.append({
             "key": "judge", "title": "Second opinion", "section": "judge",
             "state": "info",
             "detail": f"{len(checked)} words are on the check-in-context list, but no "
-                      f"second opinion is set, so they are muted outright.",
+                      f"second opinion is on, so they are muted outright.",
         })
     return {"required": required, "optional": optional,
             "done": all(i["state"] == "ok" for i in required)}
@@ -1518,7 +1518,7 @@ def correct_detection(detection_id: int, payload: dict):
             settings.custom_words = _without(settings.custom_words, word)
     config.save(settings)
     return {"word": word, "list": target, "added": added, "job_id": row["job_id"],
-            "title": title, "judge_configured": bool(settings.judge_url)}
+            "title": title, "judge_configured": bool(settings.judge_url or settings.subtitle_opinion)}
 
 
 @app.delete("/api/words/{list_name}/{word}")

@@ -259,6 +259,65 @@ def test_subtitles_and_confidence_are_recorded_but_never_unmute(home, settings, 
     assert history[job["id"]] == 1
 
 
+def unsure_cock(monkeypatch):
+    heard = [dict(w) for w in WORDS]
+    heard[2]["probability"] = 0.97          # "fuck," - sure
+    heard[4]["probability"] = 0.31          # "cock" - unsure
+    monkeypatch.setattr(asr, "transcribe", lambda audio, **kw: asr.Transcript(
+        words=heard, language="en", duration=6.0, model="fake"))
+
+
+def test_the_subtitle_opinion_leaves_in_what_the_subtitles_contradict(home, settings,
+                                                                      monkeypatch, subtitled):
+    unsure_cock(monkeypatch)
+    settings.subtitle_opinion = True
+    job = run(subtitled, settings, home / "cache")
+    assert job["status"] == "done", job["message"]
+    assert job["muted"] == 1
+    rows = {r["text"]: dict(r) for r in db.detections(job["id"])}
+    assert rows["fuck,"]["muted"] == 1
+    assert rows["cock"]["muted"] == 0 and "caulk" in rows["cock"]["reason"]
+    pcm, loud = samples(subtitled, 1), rms(samples(subtitled, 0), 0.1, 0.4)
+    assert rms(pcm, 1.0, 1.4) < loud * 0.01          # "fuck" muted
+    assert rms(pcm, 3.0, 3.4) > loud * 0.5           # "caulk" left in
+
+
+def test_the_subtitles_settle_a_word_before_the_model_is_asked(home, settings,
+                                                               monkeypatch, subtitled):
+    unsure_cock(monkeypatch)
+    settings.subtitle_opinion = True
+    settings.judge_url = "http://judge"
+    asked = []
+    monkeypatch.setattr(judge, "adjudicate", lambda lines, *a, **kw: asked.append(lines) or {})
+    monkeypatch.setattr(asr, "unload_model", lambda: None)
+    job = run(subtitled, settings, home / "cache")
+    assert job["status"] == "done", job["message"]
+    assert asked == []                              # the subtitles answered
+
+
+def test_a_subtitle_file_beside_the_media_is_used(home, settings, monkeypatch, tmp_path):
+    unsure_cock(monkeypatch)
+    settings.subtitle_opinion = True
+    folder = tmp_path / "tv"
+    folder.mkdir()
+    plain = make_media(folder / "e1.mkv", seconds=6.0, subtitles=False)
+    (folder / "e1.en.srt").write_text(
+        "1\n00:00:00,800 --> 00:00:01,600\nWhat the fuck?\n\n"
+        "2\n00:00:02,800 --> 00:00:03,800\nGet some caulk on it.\n")
+    job = run(plain, settings, home / "cache")
+    assert job["status"] == "done", job["message"]
+    rows = {r["text"]: dict(r) for r in db.detections(job["id"])}
+    assert rows["cock"]["muted"] == 0 and rows["fuck,"]["muted"] == 1
+
+
+def test_with_the_subtitle_opinion_on_no_subtitles_means_muted(home, settings, monkeypatch, tmp_path):
+    unsure_cock(monkeypatch)
+    settings.subtitle_opinion = True
+    plain = make_media(tmp_path / "plain.mkv", seconds=6.0, subtitles=False)
+    job = run(plain, settings, home / "cache")
+    assert job["status"] == "done" and job["muted"] == 2
+
+
 def test_a_file_without_subtitles_still_cleans(home, settings, fake_asr, tmp_path):
     src = make_media(tmp_path / "plain.mkv", seconds=6.0, subtitles=False)
     job = run(src, settings, home / "cache")

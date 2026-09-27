@@ -43,6 +43,13 @@ def test_check_in_context(client, settings, detection):
     assert config.load().check_in_context == ["dick"]
 
 
+def test_the_subtitle_opinion_counts_for_check_in_context(client, settings, detection):
+    settings.subtitle_opinion = True
+    config.save(settings)
+    r = client.post(f"/api/detections/{detection['Dick,']}/correct", json={"list": "context"})
+    assert r.json()["judge_configured"] is True
+
+
 def test_always_takes_it_off_the_other_lists(client, settings, detection):
     settings.check_in_context = ["prick", "cock"]
     settings.allow_words = ["Prick"]
