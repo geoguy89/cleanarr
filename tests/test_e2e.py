@@ -116,7 +116,7 @@ def test_a_late_audio_track_is_muted_where_the_words_are(home, settings, speech,
     episode = make_media(folder / "S01E01.mkv", seconds=13.0, audio=speech, audio_delay=delay,
                          cues=[(a + delay, b + delay, t) for a, b, t in CUES])
     original = samples(episode, 0, file_clock=True)
-    job = _clean(home, settings, models, episode, subtitle_opinion=True)
+    job = _clean(home, settings, models, episode)
     row = db.get(job)
     assert row["status"] == "done", row["message"]
     found = db.detections(job)
@@ -183,7 +183,7 @@ def test_a_subtitle_file_for_another_release_is_lined_up(home, settings, models,
     episode = make_media(folder / "S01E01.mkv", seconds=cues[-1][1] + delay + 1.5,
                          audio=wav, audio_delay=delay, subtitles=False)
     srt(folder / "S01E01.en.srt", 0, [(a + delay + late, b + delay + late, t) for a, b, t in cues])
-    job = _clean(home, settings, models, episode, subtitle_opinion=True)
+    job = _clean(home, settings, models, episode)
     row = db.get(job)
     assert row["status"] == "done", row["message"]
     assert "subtitles moved" in row["message"]

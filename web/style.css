@@ -458,6 +458,7 @@ p.alert { display: block; }
   color: var(--muted); border: 1px solid var(--line-strong); border-radius: 20px; padding: 2px 8px; }
 .service { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 16px; }
 .service h3 { font-size: .98rem; }
+.sub-head { font-size: .98rem; margin: 18px 0 8px; }
 .paths { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 18px; }
 .paths h3 { font-size: .98rem; margin-bottom: 4px; }
 .paths > .btn { margin-top: 10px; }

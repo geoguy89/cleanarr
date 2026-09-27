@@ -1,5 +1,5 @@
-"""Checking detections against the file's own subtitles: evidence, and the
-subtitle second opinion on uncertain words."""
+"""The subtitles as the first check on what Whisper heard: evidence, the
+decision, and swears only the subtitles have."""
 
 from __future__ import annotations
 
@@ -109,40 +109,48 @@ def test_webvtt_times_without_hours():
     assert [(c.start, c.end, c.text) for c in subtitles.parse_srt(vtt)] == [(62.5, 64.0, "Get some caulk.")]
 
 
-def decided(matches, checked=frozenset({"cock"})):
-    marked, note = subtitles.annotate(matches, subtitles.parse_srt(SRT))
+# Heard, as Whisper wrote it: "caulk" came out as a swear.
+HEARD = [{"word": " what", "start": 0.6, "end": 0.8}, {"word": " the", "start": 0.8, "end": 0.9},
+         {"word": " fuck", "start": 1.0, "end": 1.3}, {"word": " is", "start": 1.35, "end": 1.45},
+         {"word": " that", "start": 1.5, "end": 1.7},
+         {"word": " get", "start": 3.0, "end": 3.2}, {"word": " some", "start": 3.25, "end": 3.45},
+         {"word": " cock", "start": 3.5, "end": 3.8, "probability": 0.97},
+         {"word": " on", "start": 3.85, "end": 3.95}, {"word": " that", "start": 4.0, "end": 4.2},
+         {"word": " oh", "start": 10.1, "end": 10.2}, {"word": " shit", "start": 10.3, "end": 10.6},
+         {"word": " aw", "start": 20.1, "end": 20.2}, {"word": " damn", "start": 20.3, "end": 20.6},
+         {"word": " it", "start": 20.65, "end": 20.8}]
+
+
+def decided(texts):
+    cues = subtitles.parse_srt(SRT)
+    found = words.Matcher().find(HEARD)
+    marked, note = subtitles.annotate([x for x in found if x.text.strip(" ,.") in texts],
+                                      cues, HEARD)
     assert note == ""
-    return subtitles.decide(marked, set(checked))
+    return subtitles.decide(marked)
 
 
-def test_the_subtitles_decide_a_word_on_the_check_list():
-    muted, left, still_open = decided([m("cock", 3.0)])
-    assert (muted, still_open) == ([], [])
-    assert left[0].needs_review and "caulk" in left[0].reason
+def test_a_word_the_subtitles_have_is_muted():
+    muted, alike, still_open = decided({"fuck"})
+    assert [x.text for x in muted] == ["fuck"] and "subtitles have it" in muted[0].reason
 
 
-def test_the_subtitles_decide_a_word_whisper_was_unsure_of():
-    muted, left, _ = decided([m("fuck", 1.0, confidence=0.3), m("dick", 3.0, confidence=0.2)])
-    assert [x.text for x in muted] == ["fuck"] and "subtitles agree" in muted[0].reason
-    assert [x.text for x in left] == ["dick"]
+def test_a_sound_alike_is_left_in_however_sure_whisper_was():
+    muted, alike, _ = decided({"cock"})
+    assert muted == [] and [x.text for x in alike] == ["cock"]
+    assert alike[0].confidence == 0.97 and "caulk" in alike[0].reason
 
 
-def test_a_sure_word_is_never_unmuted_by_the_subtitles():
-    # Subtitles soften swears far more often than Whisper invents them.
-    muted, left, still_open = decided([m("dick", 3.0, confidence=0.95)])
-    assert (muted, left) == ([], [])
-    assert [x.text for x in still_open] == ["dick"]
+def test_hidden_and_bleeped_words_count_as_the_word():
+    muted, alike, _ = decided({"shit", "damn"})
+    assert sorted(x.text for x in muted) == ["damn", "shit"] and alike == []
 
 
 def test_no_line_nearby_leaves_the_word_open():
-    muted, left, still_open = decided([m("cock", 40.0)])
-    assert (muted, left) == ([], [])
-    assert [x.text for x in still_open] == ["cock"]
-
-
-def test_a_bleeped_line_agrees():
-    muted, left, _ = decided([m("cock", 20.2)])
-    assert [x.text for x in muted] == ["cock"] and left == []
+    heard = [{"word": " shit", "start": 40.0, "end": 40.3}]
+    marked, _ = subtitles.annotate(words.Matcher().find(heard), subtitles.parse_srt(SRT), heard)
+    muted, alike, still_open = subtitles.decide(marked)
+    assert (muted, alike) == ([], []) and [x.text for x in still_open] == ["shit"]
 
 
 # ---------------------------------------------------------------- lining up another copy
@@ -250,7 +258,11 @@ SCRIPT_CASES = [
     # heard, subtitle line, detected word, expected
     ("you have to open a shit ton of bank accounts", "and open a ton of bank accounts", "shit", "omits"),
     ("it was no way in hell this is random", "No way this is random.", "hell", "omits"),
-    ("pass me the cock gun right now please", "Pass me the caulk gun right now, please.", "cock", "differs"),
+    ("pass me the cock gun right now please", "Pass me the caulk gun right now, please.", "cock", "soundalike"),
+    ("he got out oh shit here he comes", "He got out. Whoa! Here he comes.", "shit", "replaced"),
+    ("let me oh shit oh no it is fine", "Let me get that. Oh! No, it's fine.", "shit", "replaced"),
+    ("what the fucking hell is that", "What the fuckin' hell is that?", "fucking", "agrees"),
+    ("stop being such a fucking idiot", "Stop being such a freaking idiot.", "fucking", "replaced"),
     ("we are here kill this motherfucker right away", "-We are here! -Kill this mother--", "motherfucker", "agrees"),
     ("you know on your period or some shit but anyway", "You know, on your period or...", "shit", "omits"),
     ("look at that holy shit it is huge", "Look at that. Holy shit, it is huge!", "shit", "agrees"),
@@ -272,5 +284,41 @@ def test_a_line_that_leaves_the_word_out_is_no_reason_to_unmute():
     m = detection(heard, "shit")
     marked, note = subtitles.annotate([m], line_at(heard, "and open a ton of bank accounts", 10.0, 14.0), heard)
     assert marked[0].subtitle_state == "omits" and note == ""
-    muted, left, still_open = subtitles.decide(marked, set())
-    assert (muted, left) == ([], []) and still_open == marked       # the model or muting decides
+    muted, alike, still_open = subtitles.decide(marked)
+    assert [x.text for x in muted] == ["shit"] and alike == []      # captions soften: muted
+
+
+
+# ---------------------------------------------------------------- swears only the subtitles have
+
+def placed(heard_text, line, start=10.0):
+    heard = said(heard_text, start)
+    cues = [subtitles.Cue(start - 0.2, start + len(heard_text.split()) * 0.35 + 0.5, line)]
+    matcher = words.Matcher()
+    return subtitles.from_subtitles(cues, heard, matcher.find(heard), matcher), heard
+
+
+def test_a_swear_whisper_heard_as_something_else_is_muted_there():
+    got, heard = placed("dont turn your back on me you posse right now", "Don't turn your back on me, you pussy, right now.")
+    posse = next(h for h in heard if h["word"].strip() == "posse")
+    assert [(g.text, g.subtitle_state) for g in got] == [("pussy,", "subtitle_only")]
+    # From the end of the word before to the start of the word after.
+    assert got[0].start <= posse["start"] and got[0].end >= posse["end"]
+    assert got[0].end - got[0].start <= subtitles.PLACE_MAX
+    assert "posse" in got[0].reason and got[0].needs_review
+
+
+def test_a_swear_whisper_already_caught_is_not_added_again():
+    got, _ = placed("oh shit oh shit oh shit", "Oh shit. Oh shit. Oh shit.")
+    assert got == []
+
+
+def test_numbers_are_not_hidden_swears():
+    got, _ = placed("it was over ten thousand dollars of damage", "It was over $10,000 of damage, 95% of it.")
+    assert got == []
+
+
+def test_a_swear_with_nowhere_to_go_is_not_placed():
+    """The words either side were said back to back: the captions added it."""
+    got, _ = placed("i dont know right i mean", "I don't know shit, right? I mean...", start=10.0)
+    assert got == []

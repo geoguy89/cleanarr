@@ -205,7 +205,7 @@ function posterUrl(item, kind) {
 
 /* The same rule as subtitles.worth_checking on the server. */
 const LOW_CONFIDENCE = 0.5;
-const worthChecking = (d) => d.subtitle_state === 'differs'
+const worthChecking = (d) => ['soundalike', 'subtitle_only', 'differs'].includes(d.subtitle_state)
   || (d.confidence !== null && d.confidence !== undefined && d.confidence < LOW_CONFIDENCE);
 
 const DONE = ['done', 'skipped'];
@@ -1109,7 +1109,7 @@ function renderJob() {
     ${job.status === 'done' && (job.action || 'clean') === 'clean' ? `<button type="button" class="btn ghost sm" data-action="job-remove">Remove the cleaned track</button>` : ''}`;
 
   const left = detections.filter((d) => !d.muted);
-  const judge = !!(state.settings?.judge_url || state.settings?.subtitle_opinion);
+  const judge = true;   // every word is read against the subtitles
   const message = job.status === 'failed'
     ? `<div class="alert error" role="alert">${icon('alert')}<div class="grow"><strong>This job failed</strong>${esc(job.message)}</div></div>`
     : (job.message ? `<p class="muted">${esc(job.message)}</p>` : '');
@@ -1141,8 +1141,14 @@ function renderJob() {
         ? `<span class="flag">Whisper was only ${pct}% sure of this word</span>`
         : `Whisper ${pct}% sure`);
     }
-    if (d.subtitle_state === 'differs') {
+    if (d.subtitle_state === 'soundalike') {
+      evidence.push(`<span class="flag">Subtitles have a word that sounds like it: “${esc(d.subtitle)}”</span>`);
+    } else if (d.subtitle_state === 'subtitle_only') {
+      evidence.push(`<span class="flag">Only the subtitles have it: “${esc(d.subtitle)}”</span>`);
+    } else if (d.subtitle_state === 'differs') {
       evidence.push(`<span class="flag">Subtitles say: “${esc(d.subtitle)}”</span>`);
+    } else if (d.subtitle_state === 'replaced') {
+      evidence.push(`Subtitles soften it: “${esc(d.subtitle)}”`);
     } else if (d.subtitle_state === 'agrees') {
       evidence.push('Subtitles agree');
     } else if (d.subtitle_state === 'omits') {
@@ -1647,8 +1653,8 @@ function collect() {
     asr_remote_model: F('asr_remote_model').value.trim(),
     device: F('device').value,
     trim_silence: F('trim_silence').checked,
-    subtitle_opinion: F('subtitle_opinion').checked,
-    subtitle_search: F('subtitle_search').checked,
+    recheck_url: F('recheck_url').value.trim(), recheck_model: F('recheck_model').value.trim(),
+    recheck_api_key: F('recheck_api_key').value.trim(),
     pad_start: F('pad_start').value, pad_end: F('pad_end').value, fade: F('fade').value,
     track_title: F('track_title').value.trim(),
     check_in_context: tags('check_in_context'),
@@ -1725,8 +1731,8 @@ function fillSettings(s) {
   set('asr_url', s.asr_url); set('asr_api_key', s.asr_api_key); set('asr_remote_model', s.asr_remote_model);
   set('device', s.device || 'auto');
   F('trim_silence').checked = !!s.trim_silence;
-  F('subtitle_opinion').checked = !!s.subtitle_opinion;
-  F('subtitle_search').checked = !!s.subtitle_search;
+  set('recheck_url', s.recheck_url); set('recheck_model', s.recheck_model);
+  set('recheck_api_key', s.recheck_api_key);
   set('pad_start', s.pad_start); set('pad_end', s.pad_end); set('fade', s.fade);
   set('track_title', s.track_title);
   set('judge_url', s.judge_url); set('judge_model', s.judge_model);
@@ -1789,26 +1795,15 @@ $('#title-exceptions').addEventListener('click', (e) => {
   markDirty();
 });
 
-function renderSearchNote() {
-  const note = $('#search-note');
-  if (!note) return;
-  const server = $$('input[name="media_server"]').find((r) => r.checked)?.value || 'none';
-  note.hidden = !(F('subtitle_opinion').checked && F('subtitle_search').checked && server === 'none');
-}
-
 function renderContextNote() {
-  renderSearchNote();
   const words = tags('check_in_context').length;
   const note = $('#context-note');
   if (!note) return;
-  if (!words) note.textContent = 'Empty: nothing is checked, and no model is ever asked.';
   const model = !!F('judge_url').value.trim();
-  const subs = F('subtitle_opinion').checked;
   const these = `${plural(words, 'word')} here ${words === 1 ? 'is' : 'are'}`;
-  if (!model && !subs) note.textContent = `No second opinion is on, so ${these} simply muted.`;
-  else if (!model) note.textContent = `${these} checked against the subtitles when heard, and muted when there are none.`;
-  else if (!subs) note.textContent = `${these} sent to the model below when heard.`;
-  else note.textContent = `${these} checked against the subtitles when heard, then the model below if there is no line.`;
+  if (!words) note.textContent = 'Empty: in a file with no subtitles, every word is simply muted.';
+  else if (!model) note.textContent = `${these} checked against the subtitles like every word, and muted in a file with none.`;
+  else note.textContent = `${these} checked against the subtitles like every word, and sent to the model below in a file with none.`;
 }
 
 /* One set of Plex fields and one set of Jellyfin fields, moved to whichever
@@ -1972,6 +1967,19 @@ $('#asr-test').addEventListener('click', async (e) => {
   try {
     const r = await api('/api/asr/test', { method: 'POST', body: {
       url: F('asr_url').value.trim(), model: F('asr_remote_model').value.trim(), api_key: F('asr_api_key').value.trim() } });
+    showResult(out, r.ok, r.ok ? `Works: ${r.note}` : r.error);
+  } catch (err) { showResult(out, false, err.message); } finally { setBusy(e.currentTarget, false); }
+});
+
+$('#recheck-test').addEventListener('click', async (e) => {
+  const out = $('#recheck-result');
+  if (!F('recheck_url').value.trim()) { showResult(out, false, 'Put the server address in first.'); return; }
+  out.className = 'test-result';
+  out.textContent = 'Sending a second of silence…';
+  setBusy(e.currentTarget, true);
+  try {
+    const r = await api('/api/asr/test', { method: 'POST', body: { which: 'recheck',
+      url: F('recheck_url').value.trim(), model: F('recheck_model').value.trim(), api_key: F('recheck_api_key').value.trim() } });
     showResult(out, r.ok, r.ok ? `Works: ${r.note}` : r.error);
   } catch (err) { showResult(out, false, err.message); } finally { setBusy(e.currentTarget, false); }
 });

@@ -21,11 +21,12 @@ uncertain the word gets muted.
 
 * **Word-accurate muting** — Whisper gives each word's time to ~50 ms, so only
   the swear goes silent, not the line around it.
-* **Subtitles as a second opinion** (on by default) — for a word Whisper was
-  unsure of, the subtitle line on screen settles it: *“Pass me the caulk gun”*
-  leaves *caulk* in. Subtitles come from the file, a `.srt` beside it, or
-  Plex or Jellyfin, which can search for them online, and are lined up with
-  the speech first.
+* **Subtitles and Whisper check each other** — every swear either one finds is
+  read against the other. A harmless word Whisper heard as a swear stays in
+  when the subtitles have a word that *sounds like it* (*“Pass me the caulk
+  gun”*); a swear Whisper missed is muted from the subtitles. Subtitles come
+  from the file, a `.srt` beside it, or Plex or Jellyfin, which search for them
+  online, and are lined up with the speech first.
 * **One click to fix a wrong call**, per show or everywhere, and every mute is
   listed with its evidence.
 * **Shows that clean themselves** as new episodes arrive, from Sonarr, Plex or
@@ -95,7 +96,7 @@ until you press Save. Each Test button tries what is typed, before it is saved.
 | **Subtitles** | Optional, and used when there: in the file, a `.srt` beside it, or found by Plex or Jellyfin. |
 | **GPU** | Optional. NVIDIA is much faster; CPU works. See [Hardware](#hardware). |
 | **Disk** | ~1.5 GB for the speech model, plus ~90 MB per cleaned 25-minute episode. |
-| **Ollama** | Optional, off by default. See [The second opinion](#the-second-opinion). |
+| **Ollama** | Optional, off by default. See [Subtitles and Whisper](#subtitles-and-whisper). |
 
 ---
 
@@ -223,9 +224,9 @@ numbered in the order things need doing:
 3. **Listening** — download the speech model here rather than during your first
    clean.
 4. **Muting** — padding, fade and the new track's name. The defaults are fine.
-5. **Second opinion** — the subtitles settle uncertain words (on by default,
-   with an online search through Plex or Jellyfin for files that have none);
-   your own model is optional.
+5. **Second opinion** — optional: another Whisper server, or your own model,
+   to check a sound-alike before it is left in. The subtitles themselves are
+   always used.
 6. **Media server** — where films come from, and extra subtitles; also
    refreshes the library and pauses during transcodes.
 7. **Advanced** — bitrates, ffmpeg threads, number format, keeping backups.
@@ -302,9 +303,9 @@ the library reports costs nothing and leaves one fewer thing to get wrong.
    line says a swear happened somewhere in four seconds; words give ~50 ms.
 4. **Match** — whole words only, so *class* and *cockpit* are never caught. A
    phrase mutes only the profane word: *“oh my god”* silences *god*.
-5. **Check** — the subtitles are lined up with what was heard, and settle the
-   uncertain words; your own model, if set, gets the rest. See
-   [The second opinion](#the-second-opinion).
+5. **Check** — the subtitles are lined up with what was heard, and every
+   detection is read against them; swears only the subtitles have are added.
+   See [Subtitles and Whisper](#subtitles-and-whisper).
 6. **Mute** — each match silenced with a 20 ms fade at each edge.
 7. **Verify, then swap** — the new file replaces the original **only** after
    ffprobe confirms every original stream is present plus one, at the same
@@ -317,11 +318,10 @@ re-cleaning skips the slow part.
 
 ## Keeping the right words
 
-When nothing settles an uncertain word, it is muted. The subtitle
-[second opinion](#the-second-opinion), on by default, leaves one in only when
-the line on screen clearly says something else. What these do is keep innocent
-words out of the lists in the first place, and make the rare wrong call quick
-to find and fix.
+When nothing settles a word, it is muted. The
+[subtitles](#subtitles-and-whisper) leave one in only when they have a word in
+its place that sounds like it. What these do is keep innocent words out of the
+lists in the first place, and make the rare wrong call quick to find and fix.
 
 **Before anything is muted**
 
@@ -344,7 +344,7 @@ to find and fix.
 * **Your own lists**: always silence, never silence, and exceptions for one
   show or film (a character called Dick keeps his name without the insult
   being left in everywhere else).
-* **The [second opinion](#the-second-opinion)**, optional, for words with a
+* **The [second opinion](#subtitles-and-whisper)**, optional, for words with a
   real innocent meaning — *caulk* heard as the other word — from the file's
   subtitles, your own model, or both.
 
@@ -425,38 +425,40 @@ by this version are still recognised as Cleanarr's from the file alone.
 
 ---
 
-## The second opinion
-
-Two, alone or together: the subtitles, **on by default** and free, and your
-own model, optional and off.
+## Subtitles and Whisper
 
 Speech recognition writes homophones. A scene about drywall produced nine mutes
 of *“cock”* — the word was *“caulk”*. No word list fixes that, because the
-transcript genuinely contains the rude one.
+transcript genuinely contains the rude one. The subtitles were written by
+someone who knew what was said, so every clean reads them against what Whisper
+heard, word by word, both ways:
 
-### The subtitles
+| The subtitles, at that spot | Whisper heard | Result |
+|---|---|---|
+| the word, or *f\*\*\**, *[bleep]* | a swear | **muted** |
+| nothing — they run past it (*“open a ton of”*) | a swear | **muted** — captions soften |
+| a word that does not sound like it (*“Whoa!”*), or *freaking*, *heck*, *darn* | a swear | **muted** — captions soften |
+| a word that **sounds like it** (*“caulk”*) | a swear | **left in**, worth a listen |
+| no line near it, or no subtitles at all | a swear | **muted** |
+| a swear | something else, or nothing | **muted** from the subtitles, worth a listen |
 
-**Settings → Second opinion → Let the subtitles decide.** The subtitles were
-written by someone who knew what was said, so for an *uncertain* word — one on
-the check-in-context list, or one Whisper was less than 50% sure of — the line
-on screen at that moment settles it:
+“At that spot” is read from the script: the words heard just before and after
+are found in the subtitles, and what sits between them is the answer. “Sounds
+like” compares pronunciations from the CMU Pronouncing Dictionary: *caulk* and
+*cock* are pronounced identically; *whoa* and *shit* share nothing. A sound-alike
+also has to start with the same sound, so a caption's *“get that”* for *“Oh,
+shit!”* is a softening, not a mishearing. How sure Whisper was makes no
+difference: a word it was sure of is left in when the subtitles have a
+sound-alike there, and muted otherwise.
 
-* **the line has the word**, or a censored one (*f\*\*\**, *[bleep]*) — muted,
-  and the model is not asked;
-* **the line says something else** (*“Pass me the caulk gun”*) — left in, with
-  the line quoted and the word marked **Worth a listen**. This is read from the
-  script: the words heard just before and after are found in the subtitles, and
-  only a *different* word between them counts;
-* **the line leaves it out** (*“open a ton of”* for *“open a shit-ton of”*, or a
-  line that trails off *“or...”* where the word was) — subtitles soften swears
-  all the time, so this is treated as no line at all;
-* **no line near it** — it goes to the model if one is set, or is muted.
+A swear only the subtitles have — mumbled, talked over, or heard as *“posse”* —
+is muted between the words heard either side of it. It is not placed when
+Whisper already caught it nearby, when only one side is found by a single
+common word, or when the words either side were said back to back: then the
+captions added it.
 
-A word Whisper was sure of, and that is not on the check list, is muted whatever
-the subtitles say: subtitles soften swears far more often than Whisper invents
-them. Subtitles that disagree with most detections in a file are taken to be
-from another release, or softened throughout, and set aside for that file —
-everything in it is then treated as if there were no subtitles.
+On 9 episodes of 4 shows (471 detections), this left in 12 words — ten
+*caulk*, a *slob* and a *purses* — and muted 3 swears Whisper had missed.
 
 Where the subtitles come from, first found wins:
 
@@ -468,15 +470,13 @@ Where the subtitles come from, first found wins:
 4. for a film, **another copy of it** that the media server knows about: a
    WEB-DL beside a WEBRip often has the subtitles the other lacks. The other
    copy is only read, never changed.
-5. with **If none are found, ask the media server to search online** (on by
-   default), a search by Plex or Jellyfin, which attaches the best English
-   match to the item exactly as its own *Search subtitles* does. Those
-   subtitles stay on the item in your media server. Jellyfin needs its
-   OpenSubtitles plugin.
+5. a search by Plex or Jellyfin, which attaches the best English match to the
+   item exactly as its own *Search subtitles* does. Those subtitles stay on the
+   item in your media server. Jellyfin needs its Open Subtitles plugin; without
+   one, the job says so, Home points to it, and the file is cleaned by
+   listening alone.
 
-3 to 5 need a media server chosen under **Media server**, and are only looked
-for with this switch on, since 4 means reading a second file and 5 goes
-online. The file is found in the media server by its
+3 to 5 need a media server chosen under **Media server**. The file is found in the media server by its
 path, and a show by its name, so they work when the media server has the
 library mounted somewhere else (`/data/tv` in Plex, `/tv` here) and when
 Sonarr's name carries a year Plex leaves off (*Doctor Who (2005)*).
@@ -499,16 +499,21 @@ says which it used — *subtitles from another copy (Film WEBDL-1080p.mkv)*,
 *subtitles from a Plex search (…)* — or *no subtitles found to check against*,
 and a copy of borrowed subtitles is kept in `/config/cache/subtitles/`.
 
-### A model
+### A second opinion on a sound-alike
 
-A word you list is sent to **your own Ollama** — or any server with an
-OpenAI-compatible chat API — with the sentence around it, and is left in only
-if the model names the ordinary word it heard instead. Nothing leaves your
-network; a blank address skips the step, and the listed words the subtitles
-did not settle are simply muted.
+Optional. Before a sound-alike is left in, **Settings → Second opinion** can
+check it:
 
-Across 196 checks on a real library it changed the outcome **twice**, at
-30–100 s each — hence the default. Anything unanswered stays muted.
+* **Another Whisper server** — any OpenAI-compatible one (speaches,
+  faster-whisper-server) — listens to those few seconds again, ideally with a
+  bigger model. If it hears the swear again, it is muted.
+* **Your own model** — Ollama, or any OpenAI-compatible chat server — reads the
+  sentence with the subtitle line beside it and says whether it was profanity.
+
+With neither, the sound-alike is left in and marked **Worth a listen**. The
+model is also asked about the words on the check-in-context list in a file that
+has no subtitles at all; there, without an address, they are muted. Across 196
+checks on a real library it changed the outcome **twice**, at 30–100 s each.
 
 ---
 
@@ -543,8 +548,9 @@ Username and Password fields.
 ```
 server/cleanarr/
   words.py      word lists and whole-word matching
-  subtitles.py  checks detections against the file's subtitles
-  judge.py      the second opinion
+  subtitles.py  reads Whisper against the subtitles, both ways; lines them up
+  sounds.py     whether two words sound alike (CMU Pronouncing Dictionary)
+  judge.py      the model's second opinion
   asr.py        Whisper, local or remote, with caching
   media.py      ffprobe/ffmpeg: probe, mute, remux, verify, swap
   library.py    Sonarr, Plex or Jellyfin as the library; versions and subtitles

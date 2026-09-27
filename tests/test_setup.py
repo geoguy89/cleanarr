@@ -18,14 +18,10 @@ def test_a_fresh_install_has_everything_to_do(client, settings):
     assert got["listening"][0] == "todo"
     assert got["first_clean"][0] == "todo"
     assert got["login"][0] == "info"
-    assert "judge" not in got               # the subtitles are the second opinion
+    assert "judge" not in got               # the subtitles are always the first check
     assert client.get("/api/setup").json()["done"] is False
 
 
-def test_with_no_second_opinion_the_checklist_says_so(client, settings):
-    settings.subtitle_opinion = False
-    config.save(settings)
-    assert "judge" in states(client)        # default words listed, nothing to ask
 
 
 def test_a_finished_install(client, settings, stub, tmp_path, monkeypatch):
@@ -106,3 +102,14 @@ def test_sonarr_and_plex_both_answer(client, settings, stub, tmp_path):
     settings.plex_url, settings.plex_token = stub.url, "t"
     config.save(settings)
     assert states(client)["library"] == ("ok", "Sonarr and Plex answered.")
+
+
+def test_jellyfin_without_a_subtitle_plugin_is_pointed_at_one(client, settings, stub):
+    stub.route("GET", "/Plugins", [{"Name": "Trakt"}, {"Name": "TMDb"}])
+    settings.media_server = "jellyfin"
+    settings.jellyfin_url, settings.jellyfin_api_key = stub.url, "k"
+    config.save(settings)
+    state, detail = states(client)["subtitle_plugin"]
+    assert state == "todo" and "Open Subtitles" in detail
+    stub.route("GET", "/Plugins", [{"Name": "Open Subtitles"}])
+    assert "subtitle_plugin" not in states(client)

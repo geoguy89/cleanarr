@@ -100,15 +100,14 @@ class Settings:
     # was the first design and it made clearing the box impossible.)
     check_in_context: list[str] = field(
         default_factory=lambda: sorted(DEFAULT_CHECK_IN_CONTEXT))
-    # Let the subtitles decide the uncertain words - see subtitles.decide.
-    # On by default: a word Whisper was sure of is still muted whatever the
-    # subtitles say, and with no subtitles every word is muted as before.
-    subtitle_opinion: bool = True
-    # With the above on, and no subtitles found anywhere else, ask Plex or
-    # Jellyfin to search online and attach the best match - as their own
-    # "Search subtitles" does. On by default; it does nothing until a media
-    # server is chosen, and the subtitles it adds stay on the item there.
-    subtitle_search: bool = True
+    # The subtitles are always the first check (see subtitles.py), and the
+    # media server is always asked to search for them when a file has none.
+    # What is optional is a second opinion on a word the subtitles would leave
+    # in because it sounds like the swear: another Whisper server listening to
+    # that moment again, or the model above.
+    recheck_url: str = ""
+    recheck_model: str = "Systran/faster-whisper-large-v3"
+    recheck_api_key: str = ""
 
     # Bitrate for the cleaned track, per channel layout. The cleaned track is
     # a re-encode either way; this decides how much the file grows.
@@ -169,6 +168,8 @@ class Settings:
             data["plex_token"] = "********"
         if data.get("asr_api_key"):
             data["asr_api_key"] = "********"
+        if data.get("recheck_api_key"):
+            data["recheck_api_key"] = "********"
         if data.get("jellyfin_api_key"):
             data["jellyfin_api_key"] = "********"
         # The hash, its salt and the cookie key never leave the server. The

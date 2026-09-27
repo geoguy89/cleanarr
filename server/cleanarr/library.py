@@ -578,6 +578,15 @@ class JellyfinLibrary:
                     return found
         return ""
 
+    def subtitle_provider(self) -> bool | None:
+        """Whether a subtitle plugin is installed, so a search can find
+        anything; None when the key may not list plugins."""
+        try:
+            plugins = self._get("/Plugins") or []
+        except LibraryError:
+            return None
+        return any("subtitle" in str(p.get("Name", "")).lower() for p in plugins)
+
     def search_subtitles(self, item_id: str) -> str:
         """As PlexLibrary.search_subtitles. Needs a subtitle provider plugin
         (OpenSubtitles) installed in Jellyfin; without one the search is empty."""

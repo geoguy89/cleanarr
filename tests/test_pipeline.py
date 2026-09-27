@@ -40,6 +40,13 @@ def episode(request, tmp_path):
     return make_media(folder / f"e1.{request.param}", seconds=6.0)
 
 
+def bare(episode):
+    """The same episode with no subtitles: the model alone decides."""
+    out = episode.with_name("bare-" + episode.name)
+    make_media(out, seconds=6.0, subtitles=False)
+    return out
+
+
 def run(path, settings, cache, **kw) -> dict:
     job = db.enqueue(kind="episode", title="Show", path=str(path), **kw)
     pipeline.run_job(job, settings, cache)
@@ -47,7 +54,6 @@ def run(path, settings, cache, **kw) -> dict:
 
 
 def test_cleans_marks_and_records(home, settings, fake_asr, episode):
-    settings.subtitle_opinion = False       # the filler subtitles would decide "cock"
     job = run(episode, settings, home / "cache")
     assert job["status"] == "done", job["message"]
     assert job["muted"] == 2
@@ -112,7 +118,7 @@ def test_the_judge_can_leave_a_word_in(home, settings, fake_asr, stub, episode):
     stub.route("POST", "/api/generate", generate)
     stub.route("GET", "/api/ps", {"models": []})
     settings.judge_url = stub.url
-    settings.subtitle_opinion = False       # the model alone decides here
+    episode = bare(episode)
     job = run(episode, settings, home / "cache")
     assert job["status"] == "done", job["message"]
     assert job["muted"] == 1
@@ -125,8 +131,7 @@ def test_the_judge_can_leave_a_word_in(home, settings, fake_asr, stub, episode):
 
 def test_an_unanswered_judge_leaves_the_word_muted(home, settings, fake_asr, episode):
     settings.judge_url = "http://127.0.0.1:9"
-    settings.subtitle_opinion = False       # the model alone decides here
-    job = run(episode, settings, home / "cache")
+    job = run(bare(episode), settings, home / "cache")
     assert job["muted"] == 2
 
 
@@ -242,8 +247,7 @@ def subtitled(request, tmp_path):
     return make_media(folder / f"e1.{request.param}", seconds=6.0, cues=CUES)
 
 
-def test_with_the_subtitle_opinion_off_subtitles_never_unmute(home, settings, monkeypatch, subtitled):
-    settings.subtitle_opinion = False
+def test_the_subtitles_are_recorded_on_every_detection(home, settings, monkeypatch, subtitled):
     heard = [dict(w) for w in WORDS]
     heard[2]["probability"] = 0.97          # "fuck," - sure
     heard[4]["probability"] = 0.31          # "cock" - unsure
@@ -251,16 +255,21 @@ def test_with_the_subtitle_opinion_off_subtitles_never_unmute(home, settings, mo
         words=heard, language="en", duration=6.0, model="fake"))
     job = run(subtitled, settings, home / "cache")
     assert job["status"] == "done", job["message"]
-    assert job["muted"] == 2                 # both still muted
     rows = {r["text"]: dict(r) for r in db.detections(job["id"])}
     assert rows["fuck,"]["subtitle_state"] == "agrees" and rows["fuck,"]["confidence"] == 0.97
-    assert rows["cock"]["subtitle_state"] == "differs"
+    assert rows["cock"]["subtitle_state"] == "soundalike" and rows["cock"]["confidence"] == 0.31
     assert "caulk" in rows["cock"]["subtitle"]
-    assert rows["cock"]["confidence"] == 0.31
-    pcm, loud = samples(subtitled, 1), rms(samples(subtitled, 0), 0.1, 0.4)
-    assert rms(pcm, 3.0, 3.4) < loud * 0.01
     history = {r["id"]: r["to_check"] for r in db.history()}
     assert history[job["id"]] == 1
+
+
+def test_a_sound_alike_is_left_in_even_when_whisper_was_sure(home, settings, monkeypatch, subtitled):
+    heard = [dict(w) for w in WORDS]
+    heard[4]["probability"] = 0.98
+    monkeypatch.setattr(asr, "transcribe", lambda audio, **kw: asr.Transcript(
+        words=heard, language="en", duration=6.0, model="fake"))
+    job = run(subtitled, settings, home / "cache")
+    assert job["muted"] == 1 and "1 sound-alike left in" in job["message"]
 
 
 def unsure_cock(monkeypatch):
@@ -271,10 +280,9 @@ def unsure_cock(monkeypatch):
         words=heard, language="en", duration=6.0, model="fake"))
 
 
-def test_the_subtitle_opinion_leaves_in_what_the_subtitles_contradict(home, settings,
+def test_the_subtitles_leave_in_what_only_sounds_like_the_word(home, settings,
                                                                       monkeypatch, subtitled):
     unsure_cock(monkeypatch)
-    settings.subtitle_opinion = True
     job = run(subtitled, settings, home / "cache")
     assert job["status"] == "done", job["message"]
     assert job["muted"] == 1
@@ -286,22 +294,44 @@ def test_the_subtitle_opinion_leaves_in_what_the_subtitles_contradict(home, sett
     assert rms(pcm, 3.0, 3.4) > loud * 0.5           # "caulk" left in
 
 
-def test_the_subtitles_settle_a_word_before_the_model_is_asked(home, settings,
-                                                               monkeypatch, subtitled):
+@pytest.mark.parametrize("answer, muted", [("PROFANE", 2), ("CLEAN", 1), (None, 1)])
+def test_the_model_rules_on_a_sound_alike_before_it_is_left_in(home, settings, monkeypatch,
+                                                                subtitled, answer, muted):
     unsure_cock(monkeypatch)
-    settings.subtitle_opinion = True
     settings.judge_url = "http://judge"
     asked = []
-    monkeypatch.setattr(judge, "adjudicate", lambda lines, *a, **kw: asked.append(lines) or {})
+
+    def adjudicate(items, *a, **kw):
+        asked.extend(items)
+        return {items[0]["n"]: (answer, "caulk")} if answer else {}
+    monkeypatch.setattr(judge, "adjudicate", adjudicate)
     monkeypatch.setattr(asr, "unload_model", lambda: None)
     job = run(subtitled, settings, home / "cache")
     assert job["status"] == "done", job["message"]
-    assert asked == []                              # the subtitles answered
+    assert len(asked) == 1 and "the subtitles show" in asked[0]["line"]
+    assert job["muted"] == muted
+
+
+def test_a_second_whisper_server_can_hear_it_again(home, settings, monkeypatch, subtitled):
+    unsure_cock(monkeypatch)
+    settings.recheck_url = "http://whisper"
+    heard_again = []
+
+    def again(clip, url, model, key="", timeout=0):
+        heard_again.append((url, model))
+        return asr.Transcript(words=[{"word": " some", "start": 0.1, "end": 0.3},
+                                     {"word": " cock", "start": 1.0, "end": 1.3}],
+                              language="en", duration=4.0, model=model)
+    monkeypatch.setattr(asr, "transcribe_remote", again)
+    job = run(subtitled, settings, home / "cache")
+    assert job["status"] == "done", job["message"]
+    assert heard_again == [("http://whisper", settings.recheck_model)]
+    rows = {r["text"]: dict(r) for r in db.detections(job["id"])}
+    assert rows["cock"]["muted"] == 1 and "second listen" in rows["cock"]["reason"]
 
 
 def test_a_subtitle_file_beside_the_media_is_used(home, settings, monkeypatch, tmp_path):
     unsure_cock(monkeypatch)
-    settings.subtitle_opinion = True
     folder = tmp_path / "tv"
     folder.mkdir()
     plain = make_media(folder / "e1.mkv", seconds=6.0, subtitles=False)
@@ -314,9 +344,8 @@ def test_a_subtitle_file_beside_the_media_is_used(home, settings, monkeypatch, t
     assert rows["cock"]["muted"] == 0 and rows["fuck,"]["muted"] == 1
 
 
-def test_with_the_subtitle_opinion_on_no_subtitles_means_muted(home, settings, monkeypatch, tmp_path):
+def test_no_subtitles_means_muted(home, settings, monkeypatch, tmp_path):
     unsure_cock(monkeypatch)
-    settings.subtitle_opinion = True
     plain = make_media(tmp_path / "plain.mkv", seconds=6.0, subtitles=False)
     job = run(plain, settings, home / "cache")
     assert job["status"] == "done" and job["muted"] == 2
@@ -333,9 +362,13 @@ class FakeServer:
     `on_search` is what the item's versions become once it is asked to search
     online; None means the search finds nothing."""
 
-    def __init__(self, versions, films=(), on_search=None):
+    def __init__(self, versions, films=(), on_search=None, provider=True):
         self._versions, self._films, self.asked = versions, list(films), []
         self.on_search, self.searched, self.found_for = on_search, [], []
+        self.provider = provider
+
+    def subtitle_provider(self):
+        return self.provider
 
     def versions(self, item_id):
         self.asked.append(item_id)
@@ -364,7 +397,7 @@ def run_film(path, settings, cache, **kw) -> dict:
 
 def test_another_copy_of_the_film_lends_its_subtitles(home, settings, monkeypatch, tmp_path):
     unsure_cock(monkeypatch)
-    settings.subtitle_opinion, settings.media_server = True, "plex"
+    settings.media_server = "plex"
     folder = tmp_path / "movies" / "Film"
     folder.mkdir(parents=True)
     plain = make_media(folder / "Film WEBRip.mkv", seconds=6.0, subtitles=False)
@@ -385,7 +418,7 @@ def test_another_copy_of_the_film_lends_its_subtitles(home, settings, monkeypatc
 def test_another_copy_is_found_when_the_server_mounts_films_elsewhere(
         home, settings, monkeypatch, tmp_path):
     unsure_cock(monkeypatch)
-    settings.subtitle_opinion, settings.media_server = True, "plex"
+    settings.media_server = "plex"
     folder = tmp_path / "movies" / "Film"
     folder.mkdir(parents=True)
     plain = make_media(folder / "Film WEBRip.mkv", seconds=6.0, subtitles=False)
@@ -404,7 +437,6 @@ def test_another_copy_is_found_when_the_server_mounts_films_elsewhere(
 def test_a_search_is_read_back_when_the_server_mounts_shows_elsewhere(
         home, settings, monkeypatch, tmp_path):
     unsure_cock(monkeypatch)
-    settings.subtitle_opinion = settings.subtitle_search = True
     monkeypatch.setattr(pipeline, "SEARCH_WAIT", 0)
     folder = tmp_path / "Season 01"
     folder.mkdir()
@@ -420,7 +452,6 @@ def test_a_search_is_read_back_when_the_server_mounts_shows_elsewhere(
 
 def test_subtitles_the_media_server_holds_are_used(home, settings, monkeypatch, tmp_path):
     unsure_cock(monkeypatch)
-    settings.subtitle_opinion = True
     plain = make_media(tmp_path / "e1.mkv", seconds=6.0, subtitles=False)
     server = FakeServer([{"path": str(plain), "subtitles": [("English (SRT)", "http://plex/s/1")]}])
     monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
@@ -432,7 +463,6 @@ def test_subtitles_the_media_server_holds_are_used(home, settings, monkeypatch, 
 
 def test_an_episode_never_borrows_another_files_subtitles(home, settings, monkeypatch, tmp_path):
     unsure_cock(monkeypatch)
-    settings.subtitle_opinion = True
     plain = make_media(tmp_path / "e1.mkv", seconds=6.0, subtitles=False)
     other = make_media(tmp_path / "e2.mkv", seconds=6.0, cues=CUES)
     server = FakeServer([{"path": str(plain), "subtitles": []},
@@ -442,20 +472,9 @@ def test_an_episode_never_borrows_another_files_subtitles(home, settings, monkey
     assert job["muted"] == 2 and "no subtitles found" in job["message"]
 
 
-def test_without_the_subtitle_opinion_nothing_else_is_read(home, settings, monkeypatch, tmp_path):
-    unsure_cock(monkeypatch)
-    settings.subtitle_opinion = False
-    plain = make_media(tmp_path / "e1.mkv", seconds=6.0, subtitles=False)
-    server = FakeServer([])
-    monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
-    job = run(plain, settings, home / "cache", source="plex", source_id="7")
-    assert job["muted"] == 2 and server.asked == []
-
-
 def test_the_media_server_is_asked_to_search_when_nothing_else_has_them(
         home, settings, monkeypatch, tmp_path):
     unsure_cock(monkeypatch)
-    settings.subtitle_opinion = settings.subtitle_search = True
     settings.media_server = "plex"
     monkeypatch.setattr(pipeline, "SEARCH_WAIT", 0)
     plain = make_media(tmp_path / "e1.mkv", seconds=6.0, subtitles=False)
@@ -471,21 +490,8 @@ def test_the_media_server_is_asked_to_search_when_nothing_else_has_them(
     assert server.found_for == [("episode", "Show")] and server.searched == ["41"]
 
 
-def test_no_search_unless_it_is_switched_on(home, settings, monkeypatch, tmp_path):
-    unsure_cock(monkeypatch)
-    settings.subtitle_opinion, settings.media_server = True, "plex"
-    settings.subtitle_search = False
-    plain = make_media(tmp_path / "e1.mkv", seconds=6.0, subtitles=False)
-    server = FakeServer([{"path": str(plain), "subtitles": []}],
-                        films=[{"id": "41", "path": str(plain)}], on_search=[])
-    monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
-    job = run(plain, settings, home / "cache", source="plex", source_id="41")
-    assert job["muted"] == 2 and server.searched == []
-
-
 def test_a_search_that_finds_nothing_leaves_everything_muted(home, settings, monkeypatch, tmp_path):
     unsure_cock(monkeypatch)
-    settings.subtitle_opinion = settings.subtitle_search = True
     plain = make_media(tmp_path / "e1.mkv", seconds=6.0, subtitles=False)
     server = FakeServer([{"path": str(plain), "subtitles": []}])
     monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
@@ -494,9 +500,21 @@ def test_a_search_that_finds_nothing_leaves_everything_muted(home, settings, mon
     assert "no subtitles found" in job["message"]
 
 
-def test_the_subtitle_opinion_and_search_are_on_by_default():
-    fresh = config.Settings()
-    assert fresh.subtitle_opinion and fresh.subtitle_search
+def test_the_old_subtitle_switches_are_forgotten(home):
+    config.CONFIG_FILE.write_text("subtitle_opinion: false\nsubtitle_search: false\n",
+                                  encoding="utf8")
+    s = config.load()
+    assert not hasattr(s, "subtitle_opinion") and not hasattr(s, "subtitle_search")
+
+
+def test_jellyfin_without_a_subtitle_plugin_cleans_by_listening(home, settings, monkeypatch, tmp_path):
+    unsure_cock(monkeypatch)
+    plain = make_media(tmp_path / "e1.mkv", seconds=6.0, subtitles=False)
+    server = FakeServer([{"path": str(plain), "subtitles": []}], provider=False)
+    monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
+    job = run(plain, settings, home / "cache", source="jellyfin", source_id="41")
+    assert job["status"] == "done" and job["muted"] == 2
+    assert "no subtitle plugin" in job["message"] and server.searched == []
 
 
 def test_subtitles_that_do_not_follow_the_dialogue_decide_nothing(home, settings, monkeypatch, tmp_path):
@@ -522,12 +540,11 @@ def test_subtitles_that_do_not_follow_the_dialogue_decide_nothing(home, settings
 
 
 def test_a_file_without_subtitles_still_cleans(home, settings, fake_asr, tmp_path):
-    settings.subtitle_opinion = False
     src = make_media(tmp_path / "plain.mkv", seconds=6.0, subtitles=False)
     job = run(src, settings, home / "cache")
     assert job["status"] == "done"
     assert {r["subtitle_state"] for r in db.detections(job["id"])} == {""}
-    assert "subtitles" not in job["message"]       # the opinion is off: say nothing
+    assert "no subtitles found to check against" in job["message"]
 
 
 def test_a_per_show_exception_applies_to_that_show_only(home, settings, fake_asr, tmp_path):

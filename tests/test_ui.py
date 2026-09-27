@@ -221,11 +221,13 @@ def test_every_setting_saves_and_comes_back(desk, demo, tmp_path):
     page.fill("[name=fade]", "0.05")
     page.fill("[name=track_title]", "Family Friendly")
 
-    # Second opinion: the subtitles first, then a model.
-    page.locator("[name=subtitle_opinion]").check(force=True)
-    assert "checked against the subtitles" in page.locator("#context-note").inner_text()
+    # Second opinion: another Whisper server, and a model.
+    page.fill("[name=recheck_url]", "http://speaches.test:8000")
+    page.fill("[name=recheck_model]", "Systran/faster-whisper-large-v3")
+    page.fill("[name=recheck_api_key]", "again-key")
+    assert "muted in a file with none" in page.locator("#context-note").inner_text()
     page.fill("[name=judge_url]", "http://ollama.test:11434")
-    assert "then the model below" in page.locator("#context-note").inner_text()
+    assert "sent to the model below" in page.locator("#context-note").inner_text()
     page.fill("[name=judge_model]", "qwen3.5:4b")
     page.select_option("[name=judge_threads]", "4")
 
@@ -256,7 +258,9 @@ def test_every_setting_saves_and_comes_back(desk, demo, tmp_path):
     assert s.check_in_context == ["cock", "christ", "prick"]
     assert (s.asr_backend, s.asr_url, s.asr_remote_model, s.asr_api_key) == (
         "remote", "http://whisper.test:8000", "Systran/faster-whisper-small.en", "asr-key")
-    assert s.trim_silence is True and s.subtitle_opinion is True
+    assert s.trim_silence is True
+    assert (s.recheck_url, s.recheck_model, s.recheck_api_key) == (
+        "http://speaches.test:8000", "Systran/faster-whisper-large-v3", "again-key")
     assert (s.pad_start, s.pad_end, s.fade, s.track_title) == (0.2, 0.3, 0.05, "Family Friendly")
     assert "Cleaned - English" in s.known_track_titles
     assert (s.judge_url, s.judge_model, s.judge_threads) == ("http://ollama.test:11434", "qwen3.5:4b", 4)
@@ -273,7 +277,7 @@ def test_every_setting_saves_and_comes_back(desk, demo, tmp_path):
     assert page.locator("[name=track_title]").input_value() == "Family Friendly"
     assert page.locator("[name=hold_policy]").input_value() == "playing"
     assert page.locator("[name=keep_backup]").is_checked()
-    assert page.locator("[name=subtitle_opinion]").is_checked()
+    assert page.locator("[name=recheck_url]").input_value() == "http://speaches.test:8000"
     assert page.locator("[data-tags=custom_words] .tag").all_inner_texts() == ["muppet"]
     assert page.locator("#save-bar").is_hidden()
     assert page.locator("#nav-upcoming").is_hidden()      # Jellyfin has no calendar
@@ -543,13 +547,10 @@ def test_a_menu_at_the_bottom_opens_upwards(desk):
     assert box["y"] + box["height"] <= area["y"] + area["height"]
 
 
-def test_the_search_says_when_there_is_no_media_server_to_ask(desk):
+def test_the_subtitles_are_not_a_switch_any_more(desk):
     page = desk.go("settings/judge")
     page.locator("#settings-form").wait_for()
-    assert page.locator("[name=subtitle_opinion]").is_checked()
-    assert page.locator("[name=subtitle_search]").is_checked()
-    page.locator("input[name=media_server][value=none]").check(force=True)
-    assert page.locator("#search-note").is_visible()
-    page.locator("input[name=media_server][value=plex]").check(force=True)
-    assert page.locator("#search-note").is_hidden()
+    assert page.locator("[name=subtitle_opinion]").count() == 0
+    assert page.locator("[name=subtitle_search]").count() == 0
+    assert "sounds like" in page.locator("#s-judge").inner_text()
     assert desk.errors == []

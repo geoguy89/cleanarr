@@ -1,29 +1,25 @@
-"""Checking what Whisper heard against the file's own subtitles.
+"""The subtitles as the primary check on what Whisper heard.
 
 Speech recognition writes homophones - "caulk" comes back as a swear - and
-nothing in the transcript says so. The subtitles often do: they were written
-by a person who knew what was said. So each detection is compared with the
-subtitle on screen at that moment.
+nothing in the transcript says so. The subtitles were written by a person who
+knew what was said, so every detection is read against them, and so is every
+swear the subtitles have that Whisper did not catch:
 
-With the subtitle second opinion switched off, this never changes what is
-muted: a subtitle that disagrees only marks the detection as worth a listen,
-with the line quoted, so a wrong call is quick to find and fix with "That was
-wrong".
+  the subtitles have the word (or f***, [bleep])        muted
+  they run straight past it ("open a ton of")          muted - captions soften
+  a word that does not sound like it ("Whoa!")         muted - captions soften
+  a word that sounds like it ("caulk")                 left in, worth a listen
+  no line near it, or no subtitles                     muted, as Whisper heard
+  a swear only the subtitles have                      muted, worth a listen
 
-With it on - the default - the subtitles also rule on the uncertain
-detections (see decide): a word on the check-in-context list, or one
-Whisper itself was unsure of. A line that agrees keeps it muted without asking
-anyone else; a line that says something else leaves it in, marked for a
-listen; no line near it leaves the word to the model, or muted.
+"Sounds like" is sounds.py. A sound-alike can be sent to a second opinion -
+Ollama, or another Whisper server listening to that moment again - before it
+is left in.
 
-Subtitles are imperfect evidence. They are often censored ("f***"), trimmed,
-or timed for a different release. So:
-
-* a censored word, or any listed word in the line, counts as agreeing;
-* a line close in time counts, not only one exactly on the word;
-* if most detections in a file disagree, the subtitles probably belong to
-  another cut, and they are set aside for that file rather than flagging
-  everything.
+Subtitles are often censored, trimmed, or timed for another release. They are
+lined up with what was heard first (align), set aside when they do not follow
+the dialogue at all (fits), and set aside when most detections disagree
+(annotate).
 """
 
 from __future__ import annotations
@@ -32,7 +28,7 @@ import bisect
 import re
 from dataclasses import dataclass, replace
 
-from . import words
+from . import sounds, words
 
 # How far either side of a word a subtitle line may start or end and still
 # count as the line it was said in. Subtitles lead and trail speech.
@@ -47,7 +43,17 @@ MISMATCH_MIN = 5
 MISMATCH_SHARE = 0.6
 
 AGREES = "agrees"
+# A line near the word says something else, but it could not be read against
+# the script to say what stands in its place. Muted.
 DIFFERS = "differs"
+# A different word in exactly that place that sounds like the swear - "caulk".
+# Whisper misheard; left in, unless a second opinion says otherwise.
+SOUNDALIKE = "soundalike"
+# A different word in that place that does not sound like it - "Whoa!" for
+# "Oh, shit!" - or a minced oath, or another swear. The captioner softened it.
+REPLACED = "replaced"
+# A swear in the subtitles where Whisper heard something else, or nothing.
+SUBTITLE_ONLY = "subtitle_only"
 # The subtitles run straight past where the word was said - "open a ton of"
 # for "open a shit-ton of". Subtitles soften swears all the time, so this is
 # no evidence either way: the word is treated as if no line were near.
@@ -89,14 +95,44 @@ def parse_srt(text: str) -> list[Cue]:
     return cues
 
 
+_HIDDEN = re.compile(r"[*#@$%]+")
+# A swear with letters hidden: f***, sh*t, a**hole. Letters and symbols only -
+# "95%" and "$5,000" are not swears.
+_HIDDEN_WORD = re.compile(r"[^\w*#@$%]*[a-z]+[*#@$%]+[a-z]*[^\w*#@$%]*", re.I)
+
+
+def _plain(bare: str) -> str:
+    """One spelling for comparing: "fuckin'" and "fucking", "goddamn'" alike."""
+    bare = bare.replace("'", "").replace("’", "")
+    return bare + "g" if bare.endswith("in") and len(bare) >= 5 else bare
+_BLEEP = re.compile(r"\[\s*(bleep|beep|censored|expletive)[^\]]*\]|\*{3,}", re.I)
+
+
+def _is_word(raw: str, word: str, matcher: words.Matcher) -> bool:
+    """Whether one subtitle token is this word: itself, a spelling of it
+    ("fuckin'", "bullshit" for "shit"), or a hidden form of it ("f***",
+    "sh*t"). Another swear is not: in "gonna caulk that shit" the "shit"
+    says nothing about the word before it."""
+    if _HIDDEN_WORD.fullmatch(raw):
+        letters = _HIDDEN.split(raw.lower())
+        pattern = ".+".join(re.escape(re.sub(r"[^a-z']", "", p)) for p in letters)
+        return bool(pattern.strip(".+")) and re.fullmatch(pattern, word) is not None
+    bare, word = _plain(words.normalize(raw)), _plain(word)
+    if not bare:
+        return False
+    if bare == word:
+        return True
+    if len(bare) >= 3 and len(word) >= 3 and (word in bare or bare in word):
+        return bool(matcher.find([{"word": bare, "start": 0.0, "end": 0.0}]))
+    return False
+
+
 def _says_it(text: str, word: str, matcher: words.Matcher) -> bool:
-    """Whether a subtitle line carries this word, a hidden swear, or any listed word."""
-    if _CENSORED.search(text):
+    """Whether a subtitle line carries this word - see _is_word - or a bleep
+    that could be any word."""
+    if _BLEEP.search(text):
         return True
-    tokens = [{"word": t, "start": 0.0, "end": 0.0} for t in re.split(r"[\s\-—–/]+", text)]
-    if any(words.normalize(t["word"]) == word for t in tokens):
-        return True
-    return bool(matcher.find(tokens))
+    return any(_is_word(raw, word, matcher) for raw in _SPLIT.split(text) if raw)
 
 
 # Lining up borrowed subtitles - another copy's, or ones the media server
@@ -357,7 +393,7 @@ def _script_tokens(cues: list[Cue], at: float) -> list[tuple[str, str]]:
     out = []
     for c in sorted(cues, key=lambda c: c.start):
         if c.end >= at - SCRIPT_CONTEXT and c.start <= at + SCRIPT_CONTEXT:
-            for raw in c.text.split():
+            for raw in _ASIDE.sub(" ", c.text).split():
                 for part in _SPLIT.split(raw):
                     bare = words.normalize(part)
                     if bare:
@@ -391,9 +427,9 @@ def _at(tokens: list[tuple[str, str]], seq: tuple[str, ...], start: int = 0, end
 
 
 def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[Cue],
-                   matcher: words.Matcher) -> str | None:
-    """AGREES / OMITS / DIFFERS from what the subtitles have between the words
-    heard either side, or None when neither side can be found."""
+                   matcher: words.Matcher) -> tuple[str, str] | None:
+    """AGREES / OMITS / REPLACED / SOUNDALIKE from what the subtitles have
+    between the words heard either side, or None when neither side is found."""
     bare = [words.normalize(h.get("word", "")) for h in heard]
     times = [float(h.get("start") or 0.0) for h in heard]
     k = bisect.bisect_left(times, match.start - 0.05)
@@ -407,10 +443,22 @@ def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[
         return None
 
     def says(slot) -> bool:
-        return any(t == word or _CENSORED.search(raw)
+        return any(_is_word(raw, word, matcher) or _BLEEP.search(raw)
                    or (len(t) >= 4 and word.startswith(t) and _CUT.search(raw))
-                   for t, raw in slot) or bool(matcher.find(
-                       [{"word": raw, "start": 0.0, "end": 0.0} for _t, raw in slot]))
+                   for t, raw in slot)
+
+    def instead(slot, rest, lgap, rgap) -> tuple[str, str]:
+        """(REPLACED or SOUNDALIKE, the words in its place) for a slot holding other words."""
+        shown = [raw for t, raw in slot if t in rest]
+        said = " ".join(shown).strip(" ,.!?;:-")
+        if any(sounds.softened(t) for t in rest) or matcher.find(
+                [{"word": raw, "start": 0.0, "end": 0.0} for raw in shown]):
+            return REPLACED, said
+        spoken = " ".join(bare[i - lgap:i + 1 + rgap])
+        if sounds.sounds_alike(spoken, " ".join(shown)) or any(
+                sounds.sounds_alike(word, raw) for raw in shown):
+            return SOUNDALIKE, said
+        return REPLACED, said
 
     for left, lgap in _anchors(bare, i, -1):
         for right, rgap in _anchors(bare, i, +1):
@@ -423,29 +471,59 @@ def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[
                     found = True
                     slot = tokens[a:q]
                     rest = [t for t, _raw in slot if t not in between]
-                    outcomes.append(AGREES if says(slot) else (OMITS if not rest else DIFFERS))
+                    outcomes.append((AGREES, "") if says(slot) else (OMITS, "") if not rest
+                                    else instead(slot, rest, lgap, rgap))
                     break
                 # Nothing lines up after it, and the subtitles break off right
                 # where the word was: "on your period or..."
                 if not found and _CUT.search(tokens[a - 1][1]):
-                    outcomes.append(OMITS)
+                    outcomes.append((OMITS, ""))
             if outcomes:
-                # Either reading will do when a phrase repeats: agreeing keeps
-                # the word muted, which is where every doubt should land.
-                return AGREES if AGREES in outcomes else (OMITS if OMITS in outcomes else DIFFERS)
+                # Any reading will do when a phrase repeats, and every doubt
+                # lands on muting: a sound-alike only when it is the only one.
+                for state in (AGREES, OMITS, REPLACED):
+                    for got in outcomes:
+                        if got[0] == state:
+                            return got
+                return outcomes[0]
     # A line cut off right on the word: "Kill this mother--".
     for left, _gap in _anchors(bare, i, -1):
         for p in _at(tokens, left):
             a = p + len(left)
             if a < len(tokens) and _CUT.search(tokens[a][1]) and len(tokens[a][0]) >= 4 \
                     and word.startswith(tokens[a][0]):
-                return AGREES
+                return AGREES, ""
+    # Only one side found - the line ends on the word, or starts with it: the
+    # subtitle word right next to that side. Enough to see the word itself, or
+    # one that sounds like it ("Get some caulk."); not enough to call anything
+    # else a softening, since it may simply be the next word said.
+    for side, step in ((-1, 0), (+1, -1)):
+        for anchor, gap in _anchors(bare, i, side):
+            if gap:
+                continue
+            for p in _at(tokens, anchor):
+                k = p + len(anchor) if side < 0 else p - 1
+                if not 0 <= k < len(tokens):
+                    continue
+                t, raw = tokens[k]
+                if _is_word(raw, word, matcher) or _BLEEP.search(raw):
+                    return AGREES, ""
+                if not matcher.find([{"word": raw, "start": 0.0, "end": 0.0}]) \
+                        and not sounds.softened(t) and sounds.sounds_alike(word, raw):
+                    return SOUNDALIKE, raw.strip(" ,.!?;:-")
     return None
 
 
 def evidence(match: words.Match, cues: list[Cue], matcher: words.Matcher,
              heard: list[dict] | None = None) -> tuple[str, str]:
-    """(state, the subtitle line) for one detection; state is "" when no line is near.
+    """(state, the subtitle line) - see _evidence."""
+    return _evidence(match, cues, matcher, heard)[:2]
+
+
+def _evidence(match: words.Match, cues: list[Cue], matcher: words.Matcher,
+              heard: list[dict] | None = None) -> tuple[str, str, str]:
+    """(state, the subtitle line, the words in the swear's place) for one
+    detection; state is "" when no line is near.
 
     A line on screen at that moment that has the word settles it. Otherwise
     the script around it is read (see _in_the_script), when the transcript is
@@ -454,20 +532,21 @@ def evidence(match: words.Match, cues: list[Cue], matcher: words.Matcher,
     word = words.normalize(match.text)
     near = [c for c in cues if c.start - WINDOW <= match.end and c.end + WINDOW >= match.start]
     if near and _says_it(" ".join(c.text for c in near), word, matcher):
-        return AGREES, " ".join(c.text for c in near)[:200]
+        return AGREES, " ".join(c.text for c in near)[:200], ""
     wide = [c for c in cues
             if c.start - WIDE_WINDOW <= match.end and c.end + WIDE_WINDOW >= match.start]
     shown = " ".join(c.text for c in (near or wide))[:200]
     if heard:
-        state = _in_the_script(match, word, heard, cues, matcher)
-        if state is not None:
-            return state, shown
+        found = _in_the_script(match, word, heard, cues, matcher)
+        if found is not None:
+            return found[0], shown, found[1]
     if not wide:
-        return "", ""
+        return "", "", ""
     # From a line a little further off only the word itself counts: the next
     # line's own swear ("What the fuck is that?") says nothing about this one.
-    own = {words.normalize(t) for c in wide for t in _SPLIT.split(c.text)}
-    return (AGREES if word in own else DIFFERS), shown
+    if any(_says_it(c.text, word, matcher) for c in wide):
+        return AGREES, shown, ""
+    return DIFFERS, shown, ""
 
 
 def annotate(matches: list[words.Match], cues: list[Cue],
@@ -481,48 +560,185 @@ def annotate(matches: list[words.Match], cues: list[Cue],
     if not cues or not matches:
         return matches, ""
     matcher = words.Matcher(context_words=frozenset())
-    judged = [(m, *evidence(m, cues, matcher, heard)) for m in matches]
-    checked = [state for _m, state, _t in judged if state]
-    differing = sum(1 for state in checked if state == DIFFERS)
+    judged = [(m, *_evidence(m, cues, matcher, heard)) for m in matches]
+    checked = [state for _m, state, _t, _i in judged if state]
+    differing = sum(1 for state in checked if state in (DIFFERS, REPLACED, SOUNDALIKE))
     if len(checked) >= MISMATCH_MIN and differing / len(checked) > MISMATCH_SHARE:
         return matches, (f"subtitles set aside: {differing} of {len(checked)} lines "
                          f"disagreed, so they probably belong to another release")
-    return [replace(m, subtitle=text, subtitle_state=state) for m, state, text in judged], ""
+    reasons = {SOUNDALIKE: "left in: the subtitles have “{}” here, which sounds like it",
+               REPLACED: "the subtitles soften it to “{}”"}
+    return [replace(m, subtitle=text, subtitle_state=state,
+                    reason=reasons[state].format(said) if state in reasons and said else m.reason)
+            for m, state, text, said in judged], ""
 
 
 def worth_checking(match) -> bool:
-    """Whether a detection is worth a listen: the subtitles say otherwise, or
+    """Whether a detection is worth a listen: left in as a sound-alike, muted
+    only on the subtitles' word, a line near it that says something else, or
     Whisper was unsure of the word. Works on a Match or a detection row."""
     state = match["subtitle_state"] if not hasattr(match, "subtitle_state") else match.subtitle_state
     sure = match["confidence"] if not hasattr(match, "confidence") else match.confidence
-    return state == DIFFERS or (sure is not None and sure < LOW_CONFIDENCE)
+    return (state in (SOUNDALIKE, SUBTITLE_ONLY, DIFFERS)
+            or (sure is not None and sure < LOW_CONFIDENCE))
 
 
-def uncertain(match: words.Match, checked: set[str]) -> bool:
-    """Whether a second opinion may rule on this detection: the word is on
-    the check-in-context list, or Whisper was unsure of it."""
-    word = words.normalize(match.text)
-    sure = match.confidence
-    return word in checked or (sure is not None and sure < LOW_CONFIDENCE)
-
-
-def decide(matches: list[words.Match], checked: set[str]
+def decide(matches: list[words.Match]
            ) -> tuple[list[words.Match], list[words.Match], list[words.Match]]:
-    """(muted on the subtitles' word, left in on it, still open).
+    """(muted on the subtitles' word, sound-alikes, still open).
 
-    Works on matches annotate() has already marked. Only uncertain detections
-    are ruled on: a word Whisper was sure of, and not on the check list, is
-    muted whatever the subtitles say, because subtitles soften swears far more
-    often than Whisper invents them. Everything not ruled on is still open,
-    for the model or for muting.
+    Works on matches annotate() has already marked. A sound-alike is the one
+    case the subtitles leave in; the caller may ask a second opinion first.
+    Still open means no line was near: the model, when there is one and the
+    word is on its list, or muting, decides.
     """
-    muted, left, still_open = [], [], []
+    reasons = {AGREES: "the subtitles have it",
+               OMITS: "the subtitles leave it out - captions soften",
+               REPLACED: "the subtitles soften it",
+               DIFFERS: "a line nearby says something else"}
+    muted, alike, still_open = [], [], []
     for m in matches:
-        if not uncertain(m, checked) or m.subtitle_state in ("", OMITS):
-            still_open.append(m)
-        elif m.subtitle_state == AGREES:
-            muted.append(replace(m, reason=m.reason or "uncertain word, the subtitles agree"))
+        if m.subtitle_state == SOUNDALIKE:
+            alike.append(m)
+        elif m.subtitle_state in reasons:
+            muted.append(replace(m, reason=m.reason or reasons[m.subtitle_state],
+                                 needs_review=m.needs_review or m.subtitle_state == DIFFERS))
         else:
-            left.append(replace(m, needs_review=True,
-                                reason=f"left in: the subtitles say “{m.subtitle}”"))
-    return muted, left, still_open
+            still_open.append(m)
+    return muted, alike, still_open
+
+
+# Swears the subtitles have that Whisper did not catch - mumbled, talked over,
+# or heard as something else. Placed between the words heard either side.
+PLACE_MAX = 1.5            # seconds: longer than this is not one word
+PLACE_MIN = 0.2            # shorter: there was no room for it in the audio
+PLACE_ONE_SIDE = 0.7       # with only one side found, this long at most
+_ASIDE = re.compile(r"\([^)]*\)|\[[^\]]*\]|(?:^|(?<=\s)|(?<=-))[A-Z][A-Z .'’-]+:")
+
+
+def from_subtitles(cues: list[Cue], heard: list[dict], matches: list[words.Match],
+                   matcher: words.Matcher) -> list[words.Match]:
+    """Detections for the swears in the (lined-up) subtitles that no detection
+    covers, placed in the audio by the words heard either side of them.
+
+    `matcher` is the household's own, so its lists and exceptions apply; words
+    it checks in context are left alone here. A swear with no room for it in
+    the audio - the words either side were said back to back - is not placed:
+    the captions added it.
+    """
+    spoken = [(float(h.get("start") or 0.0), float(h.get("end") or 0.0),
+               words.normalize(h.get("word", "")), str(h.get("word", "")).strip())
+              for h in heard]
+    starts = [w[0] for w in spoken]
+    taken = [(m.start, m.end) for m in matches]
+    everyone = words.Matcher(context_words=frozenset())
+    out: list[words.Match] = []
+
+    def same(raw: str, detected: str) -> bool:
+        word = words.normalize(detected)
+        return bool(word) and (_is_word(raw, word, everyone)
+                               or _is_word(detected, words.normalize(raw), everyone))
+
+    for cue in sorted(cues, key=lambda c: c.start):
+        text = _ASIDE.sub(" ", cue.text)
+        raw_tokens = [r for r in text.split() if words.normalize(r) or _HIDDEN_WORD.fullmatch(r)]
+        tokens = [(words.normalize(r), r) for r in raw_tokens]
+        # What Whisper already caught around this line, used up one by one: a
+        # line saying "Oh shit" three times needs three detections, not one
+        # each for every "shit" in it.
+        caught = [m for m in matches
+                  if cue.start - WIDE_WINDOW <= m.start <= cue.end + WIDE_WINDOW]
+        for n, (bare, raw) in enumerate(tokens):
+            found = matcher.find([{"word": raw, "start": 0.0, "end": 0.0}])
+            hidden = bool(_HIDDEN_WORD.fullmatch(raw)) and "strong" in matcher.categories
+            if not (found or hidden):
+                continue
+            if found and bare in matcher.context_words:
+                continue
+            mine = next((m for m in caught if same(raw, m.text)), None)
+            if mine is not None:
+                caught.remove(mine)
+                continue
+            lo = bisect.bisect_left(starts, cue.start - 3.0)
+            hi = bisect.bisect_right(starts, cue.end + 3.0)
+            window = spoken[lo:hi]
+            place = _place(tokens, n, window)
+            if place is None:
+                continue
+            start, end, instead_of = place
+            if any(s < end + 0.3 and e > start - 0.3 for s, e in taken):
+                continue
+            taken.append((start, end))
+            out.append(words.Match(
+                start=start, end=end, text=raw,
+                category=found[0].category if found else "strong",
+                needs_review=True, confidence=None, subtitle=cue.text[:200],
+                subtitle_state=SUBTITLE_ONLY,
+                reason=("muted from the subtitles: Whisper heard “" + instead_of + "”"
+                        if instead_of else "muted from the subtitles: Whisper heard nothing")))
+    return out
+
+
+def _place(tokens, n, window) -> tuple[float, float, str] | None:
+    curse = tokens[n][0]
+    """(start, end, what Whisper heard there) for subtitle token n, from the
+    subtitle words either side found among the heard ones; None if neither
+    side is found, or the gap cannot hold a word."""
+    bare = [w[2] for w in window]
+
+    def find(seq, forward: bool):
+        hits = [p for p in range(len(bare) - len(seq) + 1)
+                if tuple(bare[p:p + len(seq)]) == seq]
+        return hits
+
+    left = right = None
+    paired = False
+    for k in (1, 2):                              # one distinctive word, or a pair
+        if left is None and n - k >= 0:
+            seq = tuple(t for t, _r in tokens[n - k:n])
+            if all(seq) and (k == 2 or (seq[0] not in _ANCHOR_STOP and len(seq[0]) >= 3)):
+                hits = find(seq, True)
+                if hits:
+                    left = hits[-1] + len(seq) - 1          # index of the word before
+                    paired = paired or k == 2
+        if right is None and n + k < len(tokens) + 1:
+            seq = tuple(t for t, _r in tokens[n + 1:n + 1 + k])
+            if len(seq) == k and all(seq) and (k == 2 or (seq[0] not in _ANCHOR_STOP
+                                                          and len(seq[0]) >= 3)):
+                hits = find(seq, False)
+                if hits:
+                    right = hits[0]
+                    paired = paired or k == 2
+    if left is not None and right is not None and right <= left:
+        # The first match after the left side, if there is one close by.
+        later = [p for p in range(left + 1, min(len(bare), left + 6))
+                 if right is not None and bare[p] == bare[right]]
+        right = later[0] if later else None
+    if left is not None and right is not None:
+        if right - left - 1 > 3:
+            return None
+        start, end = window[left][1], window[right][0]
+        between = " ".join(w[3] for w in window[left + 1:right])
+    elif not paired:
+        # One side, found by a single word: too easily some other "know".
+        return None
+    elif left is not None:
+        # The word heard just after may be the swear, misheard: "Dan" for "Damn".
+        if left + 1 < len(window) and sounds.sounds_alike(window[left + 1][2], curse):
+            return window[left + 1][0], window[left + 1][1], window[left + 1][3]
+        start = window[left][1]
+        nxt = window[left + 1][0] if left + 1 < len(window) else start + PLACE_ONE_SIDE
+        end = min(start + PLACE_ONE_SIDE, nxt)
+        between = ""
+    elif right is not None:
+        if right > 0 and sounds.sounds_alike(window[right - 1][2], curse):
+            return window[right - 1][0], window[right - 1][1], window[right - 1][3]
+        end = window[right][0]
+        prv = window[right - 1][1] if right > 0 else end - PLACE_ONE_SIDE
+        start = max(end - PLACE_ONE_SIDE, prv)
+        between = ""
+    else:
+        return None
+    if not PLACE_MIN <= end - start <= PLACE_MAX:
+        return None
+    return start, end, between

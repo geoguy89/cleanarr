@@ -28,6 +28,7 @@ URLS = {
     "jellyfin_url": "Jellyfin address",
     "asr_url": "Whisper server address",
     "judge_url": "Second-opinion address",
+    "recheck_url": "Second Whisper server address",
 }
 
 # (lowest, highest) in seconds.
@@ -43,7 +44,7 @@ INTEGERS = {
 }
 
 WORD_LISTS = ("custom_words", "allow_words", "check_in_context")
-BOOLEANS = ("keep_backup", "trim_silence", "subtitle_opinion", "subtitle_search")
+BOOLEANS = ("keep_backup", "trim_silence")
 
 _BITRATE = re.compile(r"^\d+(\.\d+)?[km]?$", re.I)
 _KEEP_ALIVE = re.compile(r"^-?\d+(\.\d+)?(ms|s|m|h)?$")

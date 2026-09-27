@@ -307,6 +307,15 @@ def find_sidecar_subtitles(path: Path) -> Path | None:
     return (tagged or untagged or [None])[0]
 
 
+def cut_audio(wav: Path, start: float, length: float, dest: Path) -> Path:
+    """A few seconds of the extracted speech, for a second listen."""
+    out = _run([FFMPEG, "-nostdin", "-v", "error", "-y", "-ss", f"{max(0.0, start):.3f}",
+                "-t", f"{length:.3f}", "-i", str(wav), "-c:a", "pcm_s16le", str(dest)])
+    if out.returncode != 0 or not dest.exists():
+        raise MediaError(f"could not cut the audio: {out.stderr.strip()[:200]}")
+    return dest
+
+
 def extract_subtitles(path: Path, stream: SubtitleStream, dest: Path) -> bool:
     """One text subtitle track as SRT. For another copy of a film, whose
     subtitles are wanted but whose audio is not - so it is its own pass."""

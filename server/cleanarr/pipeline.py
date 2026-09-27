@@ -153,6 +153,81 @@ class Pipeline:
                 mute.append(match)
         return mute, leave
 
+    # -- a second opinion on a sound-alike ---------------------------------
+    def _second_listen(self, alike: list, wav: Path, transcript_words: list[dict],
+                       settings: config.Settings) -> tuple[list, list]:
+        """(muted, left in) for the words the subtitles would leave in because
+        their word only sounds like the swear.
+
+        With a second Whisper server, that moment is heard again; with the
+        model, it is asked with the subtitle line in front of it. Either can
+        overrule the subtitles and mute. Without one - or when it cannot
+        answer - the subtitles' verdict stands, and the word is left in,
+        marked worth a listen.
+        """
+        if not alike:
+            return [], []
+        if settings.recheck_url:
+            return self._listen_again(alike, wav, settings)
+        if settings.judge_url:
+            return self._ask_about(alike, transcript_words, settings)
+        return [], [replace(m, needs_review=True) for m in alike]
+
+    def _listen_again(self, alike: list, wav: Path, settings) -> tuple[list, list]:
+        muted, kept = [], []
+        for n, m in enumerate(alike):
+            if self.should_cancel():
+                raise Cancelled()
+            db.update(self.job_id, message=f"second listen {n + 1} of {len(alike)}: "
+                                           f"“{m.text}” or “{m.subtitle[:40]}”?")
+            try:
+                clip = media.cut_audio(wav, m.start - RELISTEN_PAD,
+                                       (m.end - m.start) + 2 * RELISTEN_PAD,
+                                       wav.parent / f"again-{n}.wav")
+                again = asr.transcribe_remote(clip, settings.recheck_url, settings.recheck_model,
+                                              settings.recheck_api_key, timeout=120.0)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[cleanarr] second listen failed: {exc}", flush=True)
+                kept.append(replace(m, needs_review=True))
+                continue
+            said = " ".join(str(w.get("word", "")).strip() for w in again.words)
+            word = words.normalize(m.text)
+            if any(words.normalize(w.get("word", "")).startswith(word[:4])
+                   for w in again.words if len(word) >= 3):
+                muted.append(replace(m, needs_review=True,
+                                     reason=f"a second listen heard “{m.text}” again: “{said}”"))
+            else:
+                kept.append(replace(m, needs_review=True,
+                                    reason=f"{m.reason}; a second listen heard “{said}”"))
+        return muted, kept
+
+    def _ask_about(self, alike: list, transcript_words: list[dict],
+                   settings) -> tuple[list, list]:
+        groups = judge.group(list(enumerate(alike)), transcript_words)
+        items = []
+        for g in groups:
+            shown = alike[g.indexes[0]].subtitle
+            items.append({"n": g.n, "line": g.line
+                          + f'\n   (the subtitles show: "{shown[:160]}")'})
+        asr.unload_model()
+        try:
+            verdicts = judge.adjudicate(items, settings.judge_url, settings.judge_model,
+                                        threads=settings.judge_threads,
+                                        keep_alive=settings.judge_keep_alive)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[cleanarr] second opinion failed: {exc}", flush=True)
+            verdicts = {}
+        muted, kept = [], []
+        profane = {i for g in groups if verdicts.get(g.n, ("",))[0] == "PROFANE"
+                   for i in g.indexes}
+        for i, m in enumerate(alike):
+            if i in profane:
+                muted.append(replace(m, needs_review=True,
+                                     reason="the second opinion heard profanity, not the subtitles' word"))
+            else:
+                kept.append(replace(m, needs_review=True))
+        return muted, kept
+
     # -- whose track is that? ---------------------------------------------
     def _ours(self, original, path: Path, job_id: int) -> tuple[int, ...]:
         """The audio streams this service can show it wrote.
@@ -302,18 +377,18 @@ class Pipeline:
             if source_file is not None:
                 cues = subtitles.parse_srt(source_file.read_text(encoding="utf8",
                                                                  errors="replace"))
-            # Only when they would decide something: reading another copy of a
-            # film means reading that whole file.
-            if not cues and settings.subtitle_opinion and more_subtitles is not None:
+            # None of its own: the media server's, another copy's, or a search.
+            search_note = ""
+            if not cues and more_subtitles is not None:
                 self._stage(job_id, "judging", "looking for subtitles elsewhere")
-                text, found_where = more_subtitles(work)
+                text, found_where, search_note = more_subtitles(work)
                 cues = subtitles.parse_srt(text) if text else []
                 if text:
                     # Kept for review: the file has none of its own, so this is
                     # the only copy of what its words were checked against.
-                    kept = self.cache_dir / "subtitles"
-                    kept.mkdir(parents=True, exist_ok=True)
-                    (kept / f"job-{job_id}.srt").write_text(text, encoding="utf8")
+                    kept_dir = self.cache_dir / "subtitles"
+                    kept_dir.mkdir(parents=True, exist_ok=True)
+                    (kept_dir / f"job-{job_id}.srt").write_text(text, encoding="utf8")
             # Any of them may be timed for another cut - borrowed ones often,
             # a .srt downloaded for the file now and then, the file's own
             # track rarely. align() leaves subtitles that already fit alone.
@@ -332,27 +407,36 @@ class Pipeline:
             matches, note = subtitles.annotate(matches, cues, transcript.words)
             if note:
                 print(f"[cleanarr] job {job_id}: {note}", flush=True)
-            settled, kept = [], []
-            if settings.subtitle_opinion and not note:
-                settled, kept, matches = subtitles.decide(matches, context_words)
-            # With the subtitle opinion on, say so when it had nothing to go
-            # on - otherwise a job with no subtitles reads as though they were
-            # used and simply agreed with everything.
+                cues = []
+            # The subtitles first: muted where they have the word, soften it or
+            # leave it out; left in where their word only sounds like it.
+            settled, alike, matches = subtitles.decide(matches)
+            # ...and the swears they have that Whisper did not catch.
+            extra = subtitles.from_subtitles(cues, transcript.words,
+                                             [*settled, *alike, *matches], matcher)
+            alike_muted, alike_kept = self._second_listen(alike, wav, transcript.words,
+                                                          settings)
             sub_note = ""
-            if settings.subtitle_opinion:
-                if unrelated:
-                    sub_note = " · subtitles set aside (they do not follow the dialogue)"
-                elif not cues:
-                    sub_note = " · no subtitles found to check against"
-                elif note:
-                    sub_note = " · subtitles set aside (another release?)"
-                elif found_where:
-                    sub_note = f" · subtitles from {found_where}"
-                elif moved:
-                    sub_note = f" · subtitles {moved}"
+            if unrelated:
+                sub_note = " · subtitles set aside (they do not follow the dialogue)"
+            elif note:
+                sub_note = " · subtitles set aside (another release?)"
+            elif not cues:
+                sub_note = " · no subtitles found to check against"
+                if search_note:
+                    sub_note += f" ({search_note})"
+            elif found_where:
+                sub_note = f" · subtitles from {found_where}"
+            elif moved:
+                sub_note = f" · subtitles {moved}"
+            if extra:
+                sub_note += f" · {len(extra)} from the subtitles"
+            if alike_kept:
+                sub_note += (f" · {len(alike_kept)} sound-alike"
+                             f"{'s' if len(alike_kept) != 1 else ''} left in")
             matches, judged = self._adjudicate(matches, transcript.words, settings)
-            matches = sorted([*settled, *matches], key=lambda m: m.start)
-            kept = sorted([*kept, *judged], key=lambda m: m.start)
+            matches = sorted([*settled, *extra, *alike_muted, *matches], key=lambda m: m.start)
+            kept = sorted([*alike_kept, *judged], key=lambda m: m.start)
             db.save_detections(job_id, matches, kept)
             spans = words.to_spans(matches, settings.pad_start, settings.pad_end)
 
@@ -407,21 +491,22 @@ def _sweep_stale_work(folder: Path, older_than: float = 6 * 3600) -> None:
 
 
 def more_subtitles(settings, kind: str, source: str, source_id: str, path: Path,
-                   work: Path, title: str = "") -> tuple[str, str]:
-    """(SRT text, where it came from) for a file with no subtitles of its own,
-    or ("", "").
+                   work: Path, title: str = "") -> tuple[str, str, str]:
+    """(SRT text, where it came from, a note) for a file with no subtitles of
+    its own; ("", "", note) when none were found. The note says why a search
+    could not run - Jellyfin without a subtitle plugin.
 
     In order: what the media server holds for this very file (subtitles it
     downloaded, say); for a film, another copy of it that the server knows
     about - a WEB-DL beside a WEBRip often carries the subtitles the other
-    lacks; and, with subtitle_search on, a search the server makes online.
+    lacks; and a search the server makes online.
     Any of these may be timed for a different cut: the caller lines them up,
     and sets them aside if they still disagree.
     """
     name = source if source in ("plex", "jellyfin") else getattr(settings, "media_server", "")
     client = library.server(settings, name) if name in ("plex", "jellyfin") else None
     if client is None:
-        return "", ""
+        return "", "", ""
     here = str(path)
     try:
         item_id = (str(source_id) if source == name and source_id
@@ -429,7 +514,7 @@ def more_subtitles(settings, kind: str, source: str, source_id: str, path: Path,
         versions = client.versions(item_id) if item_id else []
     except Exception as exc:  # noqa: BLE001
         print(f"[cleanarr] subtitles from {name}: {exc}", flush=True)
-        return "", ""
+        return "", "", ""
 
     def fetch(v) -> tuple[str, str]:
         for label, url in v["subtitles"]:
@@ -439,14 +524,14 @@ def more_subtitles(settings, kind: str, source: str, source_id: str, path: Path,
                 continue
             if subtitles.parse_srt(text):
                 return text, f"{name.title()} ({label})"
-        return "", ""
+        return "", "", ""
 
     # The server may see the library under another path than this container.
     mine = [v for v in versions if library.same_file(v["path"], here)]
     for v in mine:
         found = fetch(v)
         if found[0]:
-            return found
+            return (*found, "")
     if kind == "movie":
         theirs_here = mine[0]["path"] if mine else here
         for v in (v for v in versions if not library.same_file(v["path"], here)):
@@ -462,25 +547,27 @@ def more_subtitles(settings, kind: str, source: str, source_id: str, path: Path,
             if stream is not None and media.extract_subtitles(other, stream, dest):
                 text = dest.read_text(encoding="utf8", errors="replace")
                 if subtitles.parse_srt(text):
-                    return text, where
+                    return text, where, ""
             side = media.find_sidecar_subtitles(other)
             if side is not None:
                 text = side.read_text(encoding="utf8", errors="replace")
                 if subtitles.parse_srt(text):
-                    return text, where
+                    return text, where, ""
             text, _label = fetch(v)
             if text:
-                return text, where
+                return text, where, ""
 
-    if not getattr(settings, "subtitle_search", False) or not item_id:
-        return "", ""
+    if not item_id:
+        return "", "", ""
+    if name == "jellyfin" and client.subtitle_provider() is False:
+        return "", "", JELLYFIN_NO_PLUGIN
     try:
         attached = client.search_subtitles(item_id)
     except Exception as exc:  # noqa: BLE001
         print(f"[cleanarr] {name} subtitle search: {exc}", flush=True)
-        return "", ""
+        return "", "", ""
     if not attached:
-        return "", ""
+        return "", "", ""
     # The server fetches the file after answering, so it can take a moment to
     # appear on the item.
     for attempt in range(SEARCH_POLLS):
@@ -492,13 +579,18 @@ def more_subtitles(settings, kind: str, source: str, source_id: str, path: Path,
         for v in mine:
             text, _label = fetch(v)
             if text:
-                return text, f"a {name.title()} search ({attached})"
+                return text, f"a {name.title()} search ({attached})", ""
         if attempt + 1 < SEARCH_POLLS:
             time.sleep(SEARCH_WAIT)
     print(f"[cleanarr] {name} attached {attached!r} but it never appeared on the file",
           flush=True)
-    return "", ""
+    return "", "", ""
 
+
+JELLYFIN_NO_PLUGIN = ("Jellyfin has no subtitle plugin, so it cannot search for subtitles - install Open Subtitles from Dashboard > Plugins > Catalog")
+
+# Seconds either side of a sound-alike played to the second Whisper server.
+RELISTEN_PAD = 2.0
 
 # How long to wait for subtitles the media server was asked to fetch.
 SEARCH_POLLS = 6

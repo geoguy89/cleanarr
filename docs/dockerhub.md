@@ -89,7 +89,7 @@ Home lists what is left to set up.
 2. **Extract** — ffmpeg pulls the English audio out as 16 kHz mono.
 3. **Listen** — Whisper transcribes it with **word-level timestamps**. A subtitle line says a swear happened somewhere in four seconds; words give ~50 ms.
 4. **Match** — whole-word matching, so *class* and *cockpit* are never caught by what is inside them. A phrase mutes only the profane word: *“oh my god”* silences *god* and leaves *oh my* audible.
-5. **Check** — for a word Whisper was unsure of, the subtitle line on screen settles it (on by default): *“Pass me the caulk gun”* leaves *caulk* in. Subtitles come from the file, a `.srt` beside it, or Plex or Jellyfin, which can search for them online, and are lined up with the speech first.
+5. **Check** — every swear Whisper heard is read against the subtitles, and every swear in the subtitles against what Whisper heard. A harmless word that sounds like a swear stays in when the subtitles have it there (*“Pass me the caulk gun”* leaves *caulk* in); a swear Whisper missed is muted from the subtitles. Subtitles come from the file, a `.srt` beside it, or Plex or Jellyfin, which search for them online, and are lined up with the speech first.
 6. **Mute** — each match silenced with a 20 ms fade at each edge.
 7. **Verify, then swap** — the new file replaces the original **only** after ffprobe confirms it has every stream the original had plus one, at the same duration, correctly interleaved.
 
@@ -114,7 +114,7 @@ About **2.5 minutes** for a 25-minute episode on an RTX 2070 Super, never above 
 
 - **Shows can clean themselves** — mark one and episodes downloaded from then on are cleaned as they arrive.
 - **The cleaned track lives inside the media file**, as an extra audio stream, not as a copy of the episode. The file is built in a scratch folder beside the original and swapped in only after it verifies; a failed job leaves the file exactly as it was. Settings, history, the speech model and transcripts live in `/config`.
-- **Your library is only asked what exists.** The one exception is the subtitle search, on by default: for a file with no subtitles anywhere, Plex or Jellyfin is asked to find English ones, as its own *Search subtitles* does, and they stay attached there.
+- **Your library is only asked what exists.** The one exception is the subtitle search: for a file with no subtitles anywhere, Plex or Jellyfin is asked to find English ones, as its own *Search subtitles* does, and they stay attached there.
 - **A wrong call is one click to fix.** Each job lists every word it muted; "That was wrong" puts the word on a list for next time.
 - **Optional login**, off until you set one.
 

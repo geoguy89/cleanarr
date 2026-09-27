@@ -420,14 +420,19 @@ def test_remote_asr(payload: dict | None = None):
     from . import asr as _asr
     settings = config.load()
     payload = payload or {}
-    url, problem = validate.url(payload.get("url") or settings.asr_url,
-                                "Whisper server address")
+    # The same test serves the second Whisper server, which listens again to
+    # the words the subtitles would leave in.
+    second = payload.get("which") == "recheck"
+    saved_url, saved_model, saved_key = (
+        (settings.recheck_url, settings.recheck_model, settings.recheck_api_key) if second
+        else (settings.asr_url, settings.asr_remote_model, settings.asr_api_key))
+    url, problem = validate.url(payload.get("url") or saved_url, "Whisper server address")
     if not url:
         raise HTTPException(400, "no Whisper server address set")
     if problem:
         return {"ok": False, "error": problem}
-    model = str(payload.get("model") or settings.asr_remote_model)
-    key = _typed_secret(payload.get("api_key"), settings.asr_api_key)
+    model = str(payload.get("model") or saved_model)
+    key = _typed_secret(payload.get("api_key"), saved_key)
     return _asr.probe_remote(url, model, key)
 
 
@@ -589,12 +594,12 @@ def put_settings(payload: dict):
                 "media_server", "jellyfin_url", "library_source",
                 "judge_threads", "judge_keep_alive", "bitrate_surround",
                 "bitrate_stereo", "ffmpeg_threads", "hold_policy",
-                "check_in_context", "allow_words_by_title", "subtitle_opinion",
-                "subtitle_search"):
+                "check_in_context", "allow_words_by_title",
+                "recheck_url", "recheck_model"):
         if key in payload:
             setattr(settings, key, payload[key])
     # Same masking rule for every secret: all-stars means "leave it".
-    for key in ("plex_token", "asr_api_key", "jellyfin_api_key"):
+    for key in ("plex_token", "asr_api_key", "jellyfin_api_key", "recheck_api_key"):
         if key in payload and not _masked(payload[key]):
             setattr(settings, key, payload[key])
     # An empty box means the default, not a nameless track. The old name is
@@ -1253,14 +1258,19 @@ def setup_status():
         "detail": ("Login is on." if settings.auth_user else
                    "Anyone who can reach this address can use it."),
     }]
-    checked = [w for w in settings.check_in_context if w.strip()]
-    if checked and not settings.judge_url and not settings.subtitle_opinion:
-        optional.append({
-            "key": "judge", "title": "Second opinion", "section": "judge",
-            "state": "info",
-            "detail": f"{len(checked)} words are on the check-in-context list, but no "
-                      f"second opinion is on, so they are muted outright.",
-        })
+    if settings.media_server == "jellyfin" and settings.jellyfin_url and settings.jellyfin_api_key:
+        try:
+            provider = library.server(settings, "jellyfin").subtitle_provider()
+        except Exception:  # noqa: BLE001
+            provider = None
+        if provider is False:
+            optional.append({
+                "key": "subtitle_plugin", "title": "Let Jellyfin find subtitles",
+                "section": "server", "state": "todo",
+                "detail": "Jellyfin has no subtitle plugin, so files without subtitles are "
+                          "cleaned by listening alone. In Jellyfin: Dashboard > Plugins > "
+                          "Catalog > Open Subtitles, then add your OpenSubtitles account.",
+            })
     return {"required": required, "optional": optional,
             "done": all(i["state"] == "ok" for i in required)}
 
@@ -1532,7 +1542,7 @@ def correct_detection(detection_id: int, payload: dict):
             settings.custom_words = _without(settings.custom_words, word)
     config.save(settings)
     return {"word": word, "list": target, "added": added, "job_id": row["job_id"],
-            "title": title, "judge_configured": bool(settings.judge_url or settings.subtitle_opinion)}
+            "title": title, "judge_configured": True}
 
 
 @app.delete("/api/words/{list_name}/{word}")
