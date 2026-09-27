@@ -505,3 +505,15 @@ def test_a_missed_swear_between_repeated_words_is_still_placed(heard_text, line,
     got, heard = placed(heard_text, line)
     w = next(h for h in heard if h["word"].strip() == misheard)
     assert len(got) == 1 and got[0].start <= w["start"] and got[0].end >= w["end"]
+
+
+@pytest.mark.parametrize("name", ["Ke$ha", "A$AP", "C#", "F#", "E*Trade", "Q*bert", "M*A*S*H",
+                                  "B*Witched"])
+def test_a_name_written_with_a_symbol_is_not_a_hidden_swear(name):
+    got, _ = placed("we were listening to something all night", f"We were listening to {name} all night.")
+    assert got == []
+
+
+@pytest.mark.parametrize("hidden", ["f***", "sh*t", "a**hole", "b*tch", "f***ing"])
+def test_a_hidden_swear_still_is(hidden):
+    assert subtitles._hides_a_swear(hidden)

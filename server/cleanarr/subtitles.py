@@ -825,7 +825,7 @@ def from_subtitles(cues: list[Cue], heard: list[dict], matches: list[words.Match
                   if cue.start - WIDE_WINDOW <= m.start <= cue.end + WIDE_WINDOW]
         for n, (bare, raw) in enumerate(tokens):
             found = matcher.find([{"word": raw, "start": 0.0, "end": 0.0}])
-            hidden = bool(_HIDDEN_WORD.fullmatch(raw)) and "strong" in matcher.categories
+            hidden = _hides_a_swear(raw) and "strong" in matcher.categories
             if not (found or hidden):
                 continue
             if found and bare in matcher.context_words:
@@ -852,6 +852,26 @@ def from_subtitles(cues: list[Cue], heard: list[dict], matches: list[words.Match
                 reason=("muted from the subtitles: Whisper heard “" + instead_of + "”"
                         if instead_of else "muted from the subtitles: Whisper heard nothing")))
     return out
+
+
+@lru_cache(maxsize=1)
+def _all_listed() -> tuple[str, ...]:
+    out = set(words.BLASPHEMY_SOLO)
+    for group in words.WORDLISTS.values():
+        out |= set(group)
+    return tuple(sorted(out))
+
+
+def _hides_a_swear(raw: str) -> bool:
+    """A word with letters hidden that fits a listed swear: "f***", "sh*t",
+    "a**hole". Names written with a symbol - "Ke$ha", "A$AP", "C#",
+    "E*Trade", "M*A*S*H" - fit none, and a lone $ or # is a name or a note,
+    not a bleep: each was muted as a swear before."""
+    if not _HIDDEN_WORD.fullmatch(raw):
+        return False
+    if "*" not in raw and sum(len(x) for x in _HIDDEN.findall(raw)) < 2:
+        return False
+    return any(_is_word(raw, w, _everyone()) for w in _all_listed())
 
 
 def _place(tokens, n, window) -> tuple[float, float, str] | None:
