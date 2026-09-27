@@ -468,3 +468,11 @@ def test_tits_out_lads():
     state, _ = subtitles.evidence(detection(heard, "tits"), line_at(heard, "It's out, lads.", 9.8, 11.5),
                                   words.Matcher(context_words=frozenset()), heard)
     assert state != "soundalike"
+
+
+def test_a_dropped_small_word_is_no_part_of_a_misheard_phrase():
+    heard = said("what up with to hell can")
+    cues = [subtitles.Cue(9.8, 10.9, "What up"), subtitles.Cue(10.95, 12.4, "- with TABLE can!")]
+    state, _ = subtitles.evidence(detection(heard, "hell"), cues,
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state != "soundalike"

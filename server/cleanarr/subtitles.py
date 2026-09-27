@@ -475,8 +475,14 @@ def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[
         # What was heard there that the line does not have - the swear, and
         # any words misheard with it: "road to hell" against "Roosevelt".
         in_line = {t for t, _raw in slot}
-        spoken = " ".join(w for w in bare[i - lgap:i + 1 + rgap]
-                          if w == bare[i] or w not in in_line)
+        span = [w for w in bare[i - lgap:i + 1 + rgap] if w == bare[i] or w not in in_line]
+        # From its first content word to its last: a "to" the line dropped is
+        # no part of the mishearing ("to hell" scored 0.65+ against "table").
+        while len(span) > 1 and span[0] != bare[i] and sounds.function_word(span[0]):
+            span.pop(0)
+        while len(span) > 1 and span[-1] != bare[i] and sounds.function_word(span[-1]):
+            span.pop()
+        spoken = " ".join(span)
         new = [raw for raw in shown if not _stems(words.normalize(raw)) & heard_here]
         if new and (_alike(spoken, " ".join(new)) or any(_alike(word, raw) for raw in new)):
             return SOUNDALIKE, said
