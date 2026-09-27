@@ -112,10 +112,22 @@ def _says_it(text: str, word: str, matcher: words.Matcher) -> bool:
 ALIGN_LIMIT = 180.0        # seconds either way, for the whole file
 ALIGN_MIN_SHARE = 0.4      # of sampled words found in the line at the new time
 ALIGN_MIN_GAIN = 0.15      # over leaving them where they are
+# ...or this little, once the result fits well: a file's own track that is a
+# touch loose. The Bear S01E02's put lines up to 0.8 s off the speech; lining
+# it up took words in the right line from 81% to 86% and fixed a verdict.
+ALIGN_GOOD_FIT = 0.6
+ALIGN_SMALL_GAIN = 0.03
 ALIGN_SPAN = 180.0         # seconds of speech per window
 ALIGN_STEP = 60.0          # between window centres
 ALIGN_REACH = 20.0         # how far a window may move from the whole-file shift
 ALIGN_MIN_WORDS = 25       # fewer than this in a window: use the whole-file shift
+# Subtitles timed for another frame rate run fast or slow throughout: a PAL
+# release (25 fps) against a 23.976 fps file is 4% out, three and a half
+# minutes over a film. No shift can fix that, so each common ratio is tried.
+# In an audit of 8 episodes, every such case was set aside until this was
+# added. 1.0 is kept unless another ratio does clearly better.
+ALIGN_SPEEDS = (1.0, 23.976 / 25, 25 / 23.976, 24 / 25, 25 / 24, 23.976 / 24, 24 / 23.976)
+ALIGN_SPEED_MARGIN = 0.05
 _WORD = re.compile(r"[a-z']+")
 
 
@@ -152,31 +164,74 @@ def align(cues: list[Cue], heard: list[dict]) -> tuple[list[Cue], float, float]:
     """(the cues moved to line up with what was heard; smallest and largest
     shift applied, in seconds - both 0 when they were left alone).
 
-    Kept only when the whole-file shift clearly helps - otherwise the cues come
-    back unmoved, and if they belong to another cut entirely the mismatch check
-    in annotate() sets them aside as before. A window with too few words, or no
-    clear fit of its own, uses the whole-file shift.
+    Each common frame-rate ratio is tried (ALIGN_SPEEDS), then a shift for the
+    whole file, then a shift per window. The result is kept only when, in the
+    end, it clearly fits better than leaving the cues alone - otherwise they
+    come back unmoved, and if they belong to another cut entirely fits() sets
+    them aside. Judged on the end result rather than the whole-file shift
+    alone: subtitles that drift at every advert break fit no single shift well,
+    and an audit found two of four such episodes given up on that way.
     """
+    if not cues:
+        return cues, 0.0, 0.0
+    here = _fit_share(cues, heard)
+    here_tight = _fit_share(cues, heard, 0.3)
+    best = None
+    for speed in ALIGN_SPEEDS:
+        timed = cues if speed == 1.0 else [Cue(c.start / speed, c.end / speed, c.text)
+                                            for c in cues]
+        moved = _align_at_speed(timed, heard)
+        if moved is None:
+            continue
+        score = _fit_share(moved, heard)
+        # A clear gain, or - once it fits well - a small one measured tightly,
+        # where a line a fraction of a second off shows.
+        clear = score >= ALIGN_MIN_SHARE and score - here >= ALIGN_MIN_GAIN
+        tighter = (score >= ALIGN_GOOD_FIT
+                   and _fit_share(moved, heard, 0.3) - here_tight >= ALIGN_SMALL_GAIN)
+        if not (clear or tighter):
+            continue
+        if best is None or score > best[0] + (ALIGN_SPEED_MARGIN if best[2] == 1.0 else 0.0):
+            best = (score, moved, speed)
+    if best is None:
+        return cues, 0.0, 0.0
+    moved = best[1]
+    shifts = [round(c.start - m.start, 2) for c, m in zip(cues, moved)]
+    return moved, min(shifts), max(shifts)
+
+
+def _fit_share(cues: list[Cue], heard: list[dict], slack: float = 1.0) -> float:
+    """Share of sampled heard words inside a line that contains them, as they
+    stand, give or take `slack` seconds."""
+    ordered = sorted(cues, key=lambda c: c.start)
+    sample = [(float(w.get("start") or 0.0), words.normalize(w.get("word", ""))) for w in heard]
+    sample = [(t, w) for t, w in sample if len(w) >= 4][::2][:3000]
+    if not ordered or not sample:
+        return 0.0
+    vocab = [set(_WORD.findall(c.text.lower())) for c in ordered]
+    return _share(ordered, [c.start for c in ordered], vocab, sample, 0.0, slack)
+
+
+def _align_at_speed(cues: list[Cue], heard: list[dict]) -> list[Cue] | None:
+    """The cues moved by a whole-file shift and then window by window, in the
+    same order as given; None when there is nothing to line up with."""
     ordered = sorted(cues, key=lambda c: c.start)
     words_heard = [(float(w.get("start") or 0.0), words.normalize(w.get("word", "")))
                    for w in heard]
     words_heard = [(t, w) for t, w in words_heard if len(w) >= 4]
     sample = words_heard[::2][:3000]
     if not ordered or not sample:
-        return cues, 0.0, 0.0
+        return None
     starts = [c.start for c in ordered]
     vocab = [set(_WORD.findall(c.text.lower())) for c in ordered]
 
     def share(words_, off, slack=1.0):
         return _share(ordered, starts, vocab, words_, off, slack)
 
-    here = share(sample, 0.0)
     _best, rough = max((share(sample, float(k)), float(k))
                        for k in range(-int(ALIGN_LIMIT), int(ALIGN_LIMIT) + 1))
-    offset, best = _middle([(rough + d / 4, share(sample, rough + d / 4))
-                            for d in range(-12, 13)])
-    if best < ALIGN_MIN_SHARE or best - here < ALIGN_MIN_GAIN:
-        return cues, 0.0, 0.0
+    offset, _best = _middle([(rough + d / 4, share(sample, rough + d / 4))
+                             for d in range(-12, 13)])
 
     # Every word heard, short ones included, for finding where a line starts.
     spoken = sorted((float(w.get("start") or 0.0), words.normalize(w.get("word", "")))
@@ -243,7 +298,7 @@ def align(cues: list[Cue], heard: list[dict]) -> tuple[list[Cue], float, float]:
         mine = set(_WORD.findall(cue.text.lower()))
         return sum(1 for _t, w in words_heard[lo:hi] if w in mine)
 
-    moved, used = [], []
+    moved = []
     for cue in cues:
         heard_at = cue.start - offset
         k = bisect.bisect_left(centres, heard_at)
@@ -254,9 +309,8 @@ def align(cues: list[Cue], heard: list[dict]) -> tuple[list[Cue], float, float]:
         for other in {windows[j][1] for j in (k - 1, k + 1) if 0 <= j < len(windows)} - {shift}:
             if fits(cue, other) > fits(cue, shift):
                 shift = other
-        used.append(shift)
         moved.append(Cue(cue.start - shift, cue.end - shift, cue.text))
-    return moved, min(used), max(used)
+    return moved
 
 
 # Whether a set of subtitles is of this dialogue at all. Measured after lining

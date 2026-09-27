@@ -186,6 +186,25 @@ def test_subtitles_that_drift_are_moved_window_by_window():
     assert max(abs(m.start - c.start) for m, c in zip(moved, cues)) <= 0.75
 
 
+@pytest.mark.parametrize("speed", [23.976 / 25, 25 / 23.976])
+def test_subtitles_timed_for_another_frame_rate_are_lined_up(speed):
+    """A PAL release against a 23.976 fps file: 4% out, growing all the way."""
+    heard, cues = heard_and_cues(0.0)
+    stretched = [subtitles.Cue(c.start * speed + 3.0, c.end * speed + 3.0, c.text) for c in cues]
+    moved, _low, _high = subtitles.align(stretched, heard)
+    assert max(abs(m.start - c.start) for m, c in zip(moved, cues)) <= 0.75
+
+
+def test_subtitles_that_drift_at_every_break_are_not_given_up_on():
+    """Three different offsets: no single shift fits the whole file."""
+    heard, cues = heard_and_cues(0.0)
+    third = cues[-1].end / 3
+    late = [subtitles.Cue(c.start + d, c.end + d, c.text) for c in cues
+            for d in [2.0 if c.start < third else 6.0 if c.start < 2 * third else 11.0]]
+    moved, low, high = subtitles.align(late, heard)
+    assert max(abs(m.start - c.start) for m, c in zip(moved, cues)) <= 0.75
+
+
 def test_subtitles_already_in_line_are_left_alone():
     heard, cues = heard_and_cues(0.0)
     moved, low, high = subtitles.align(cues, heard)
