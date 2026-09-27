@@ -418,13 +418,16 @@ def more_subtitles(settings, kind: str, source: str, source_id: str, path: Path,
                 return text, f"{name.title()} ({label})"
         return "", ""
 
-    for v in (v for v in versions if v["path"] == here):
+    # The server may see the library under another path than this container.
+    mine = [v for v in versions if library.same_file(v["path"], here)]
+    for v in mine:
         found = fetch(v)
         if found[0]:
             return found
     if kind == "movie":
-        for v in (v for v in versions if v["path"] != here):
-            other = Path(v["path"])
+        theirs_here = mine[0]["path"] if mine else here
+        for v in (v for v in versions if not library.same_file(v["path"], here)):
+            other = Path(library.local_path(v["path"], theirs_here, here))
             if not other.is_file():
                 continue
             where = f"another copy ({other.name})"
@@ -459,7 +462,8 @@ def more_subtitles(settings, kind: str, source: str, source_id: str, path: Path,
     # appear on the item.
     for attempt in range(SEARCH_POLLS):
         try:
-            mine = [v for v in client.versions(item_id) if v["path"] == here]
+            mine = [v for v in client.versions(item_id)
+                    if library.same_file(v["path"], here)]
         except Exception:  # noqa: BLE001
             mine = []
         for v in mine:

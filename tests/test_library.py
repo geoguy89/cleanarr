@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from cleanarr import arr, config, library
@@ -286,3 +287,53 @@ def test_jellyfin_search_downloads_the_best_match(stub):
     stub.route("POST", "/Items/5/RemoteSearch/Subtitles/y", {})
     assert library.JellyfinLibrary(stub.url, "k").search_subtitles("5") == "hash match"
     assert stub.seen("/Items/5/RemoteSearch/Subtitles/y")[0].method == "POST"
+
+
+def test_the_same_file_under_another_mount():
+    assert library.same_file("/data/tv/Show/Season 01/a.mkv", "/tv/Show/Season 01/a.mkv")
+    assert library.same_file("D:\\TV\\Show\\Season 01\\a.mkv", "/tv/Show/Season 01/a.mkv")
+    assert not library.same_file("/tv/Show/Season 01/a.mkv", "/tv/Show/Season 02/a.mkv")
+    assert not library.same_file("/a.mkv", "/b/a.mkv")
+
+
+def test_another_copys_path_is_translated_to_this_container():
+    assert library.local_path("/data/movies/Film/b.mkv", "/data/movies/Film/a.mkv",
+                              "/movies/Film/a.mkv") == "/movies/Film/b.mkv"
+    assert library.local_path("D:\\Movies\\Film\\b.mkv", "D:\\Movies\\Film\\a.mkv",
+                              "/movies/Film/a.mkv") == "/movies/Film/b.mkv"
+    assert library.local_path("/elsewhere/b.mkv", "/data/movies/Film/a.mkv",
+                              "/movies/Film/a.mkv") == "/elsewhere/b.mkv"      # left alone
+
+
+def test_show_names_are_tried_without_a_year():
+    assert library.title_variants("Doctor Who (2005)") == ["Doctor Who (2005)", "Doctor Who"]
+    assert library.title_variants("The Office (US)") == ["The Office (US)", "The Office"]
+    assert library.title_variants("Chance") == ["Chance"]
+    assert library.title_variants("") == []
+
+
+def test_plex_finds_an_episode_mounted_elsewhere(stub):
+    stub.route("GET", "/library/sections", {"MediaContainer": {"Directory": [
+        {"key": "1", "type": "show", "title": "TV"}]}})
+    stub.route("GET", "/library/sections/1/all", {"MediaContainer": {"totalSize": 1, "Metadata": [
+        {"ratingKey": "70", "title": "Chance"}]}})
+    stub.route("GET", "/library/metadata/70/allLeaves", {"MediaContainer": {"Metadata": [
+        {"ratingKey": "71", "Media": [{"Part": [{"file": "/data/tv/Chance/Season 02/1.mkv"}]}]},
+        {"ratingKey": "72", "Media": [{"Part": [{"file": "/data/tv/Chance/Season 02/2.mkv"}]}]}]}})
+    plex = library.PlexLibrary(stub.url, "t")
+    assert plex.find("episode", "/tv/Chance/Season 02/2.mkv", "Chance (2016)") == "72"
+    asked = [r.query["title"] for r in stub.seen("/library/sections/1/all")]
+    assert asked[0] == ["Chance (2016)"]
+
+
+def test_jellyfin_search_waits_longer_than_a_listing(stub, monkeypatch):
+    seen = []
+    real = httpx.get
+
+    def get(url, **kw):
+        seen.append((url, kw.get("timeout")))
+        return real(url, **kw)
+    monkeypatch.setattr(library.httpx, "get", get)
+    stub.route("GET", "/Items/5/RemoteSearch/Subtitles/eng", [])
+    assert library.JellyfinLibrary(stub.url, "k").search_subtitles("5") == ""
+    assert seen[0][1] == library.SEARCH_TIMEOUT
