@@ -87,11 +87,18 @@ def test_no_subtitles_changes_nothing():
 
 
 def test_worth_checking():
-    assert subtitles.worth_checking(words.Match(0, 1, "x", "c", subtitle_state="differs"))
+    # Could be wrong: left in on a sound-alike, muted on the subtitles alone,
+    # or unsure with nothing to check it.
+    assert subtitles.worth_checking(words.Match(0, 1, "x", "c", subtitle_state="soundalike"))
+    assert subtitles.worth_checking(words.Match(0, 1, "x", "c", subtitle_state="subtitle_only"))
     assert subtitles.worth_checking(m("x", 0, confidence=0.3))
+    assert subtitles.worth_checking({"subtitle_state": "", "confidence": 0.2})
+    # Settled: the subtitles have it, soften it, or leave it out.
+    for state in ("agrees", "omits", "replaced", "differs"):
+        assert not subtitles.worth_checking(
+            words.Match(0, 1, "x", "c", confidence=0.3, subtitle_state=state))
     assert not subtitles.worth_checking(m("x", 0, confidence=0.9))
     assert not subtitles.worth_checking(m("x", 0))
-    assert subtitles.worth_checking({"subtitle_state": "", "confidence": 0.2})
 
 
 def test_confidence_is_carried_from_the_transcript():

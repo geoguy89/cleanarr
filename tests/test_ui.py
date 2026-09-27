@@ -510,10 +510,11 @@ def test_words_worth_a_listen_are_pointed_out(desk):
     page.locator(".detection.check").first.wait_for()
     body = page.locator("#sheet-body").inner_text()
     assert "worth a listen" in body
-    assert "Subtitles say: “Pass me the caulk gun.”" in body
-    assert "Whisper was only 34% sure" in body
-    # Still muted: the evidence never changes that.
-    assert "Muted" in page.locator(".detection.check", has_text="cock").first.inner_text()
+    assert "Only the subtitles have it: “Don't turn your back on me, you pussy.”" in body
+    # Muted on the subtitles' word: flagged, and still muted.
+    assert "Muted" in page.locator(".detection.check", has_text="pussy").first.inner_text()
+    # Unsure, but the subtitles had it: settled, so not flagged.
+    assert page.locator(".detection.check", has_text="damn").count() == 0
 
 
 def test_per_show_exceptions_can_be_edited_in_settings(desk):

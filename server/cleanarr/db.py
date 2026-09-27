@@ -414,15 +414,29 @@ def cleaned_paths(paths: list[str]) -> dict[str, dict]:
             # added_bytes is read below, so it has to be selected here. Leaving
             # it out failed only when a path actually had a job - which meant
             # every page looked fine until you opened a show you had cleaned.
-            f"SELECT id, path, status, muted, finished_at, added_bytes FROM job "
+            f"SELECT id, path, status, muted, finished_at, added_bytes, action FROM job "
             f"WHERE path IN ({marks}) "
             "AND status IN ('done','skipped','running','queued','failed') "
             "ORDER BY id", chunk).fetchall()
         for row in rows:
+            if _removal(row):
+                if row["status"] in ("done", "skipped"):
+                    out.pop(row["path"], None)
+                continue
             out[row["path"]] = {"job_id": row["id"], "status": row["status"],
                                 "muted": row["muted"], "finished_at": row["finished_at"],
                                 "added_bytes": row["added_bytes"]}
     return out
+
+
+def _removal(row) -> bool:
+    """A job that takes the cleaned track back out. Once it has finished the
+    file is not cleaned, whatever came before: the removal job itself is not
+    a clean, and must not read as one - it did, and a file whose track had
+    been removed was offered "Clean again", and a second Remove found nothing
+    to take out. Until it finishes, or if it failed, the track is still there,
+    so the clean before it still stands."""
+    return (row["action"] or "clean") == "remove"
 
 
 # The newest finished clean of each file. Cleaning again replaces the track in
@@ -442,7 +456,8 @@ def history(query: str = "", limit: int = 500) -> list[sqlite3.Row]:
     # How many of each file's detections are worth a listen - the same rule
     # as subtitles.worth_checking, counted here so the list needs no second query.
     sql = ("SELECT job.*, (SELECT COUNT(*) FROM detection d WHERE d.job_id=job.id"
-           f" AND (d.subtitle_state='differs' OR d.confidence < {LOW_CONFIDENCE}))"
+           " AND (d.subtitle_state IN ('soundalike','subtitle_only')"
+           f" OR (COALESCE(d.subtitle_state,'')='' AND d.confidence < {LOW_CONFIDENCE})))"
            " AS to_check"
            f" FROM job WHERE id IN ({_LATEST_CLEAN})")
     args: list = []
@@ -502,8 +517,15 @@ def job_paths() -> dict[str, str]:
     """Every path this service has a job for, and its latest status. Used to
     mark up a library listing without one query per episode."""
     rows = connect().execute(
-        "SELECT path, status FROM job ORDER BY id").fetchall()
-    return {r["path"]: r["status"] for r in rows}
+        "SELECT path, status, action FROM job ORDER BY id").fetchall()
+    out: dict[str, str] = {}
+    for r in rows:
+        if _removal(r):
+            if r["status"] in ("done", "skipped"):
+                out.pop(r["path"], None)
+            continue
+        out[r["path"]] = r["status"]
+    return out
 
 
 def job_titles() -> dict[str, list[tuple[str, str]]]:

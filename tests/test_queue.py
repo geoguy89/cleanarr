@@ -143,6 +143,26 @@ def test_cleaning_again_lists_the_file_once(home):
                           "added_bytes": 1200}
 
 
+def test_a_removed_track_leaves_the_file_uncleaned(home):
+    """Removing a track used to leave the file showing as cleaned - the
+    removal job read as a finished clean - so the page offered "Clean again"."""
+    clean = q("a")
+    db.update(clean, status="done", muted=3, finished_at=1.0)
+    gone = q("a", action="remove")
+    db.update(gone, status="done", finished_at=2.0)
+    db.forget_cleaned("/tv/a.mkv")
+    assert db.cleaned_paths(["/tv/a.mkv"]) == {}
+    assert "/tv/a.mkv" not in db.job_paths()
+
+
+def test_a_removal_still_waiting_leaves_the_clean_standing(home):
+    clean = q("a")
+    db.update(clean, status="done", muted=3, finished_at=1.0)
+    q("a", action="remove")
+    assert db.cleaned_paths(["/tv/a.mkv"])["/tv/a.mkv"]["status"] == "done"
+    assert db.job_paths()["/tv/a.mkv"] == "done"
+
+
 def test_cleaned_paths_reports_latest(home):
     a = q("a")
     db.update(a, status="done", muted=2, finished_at=1.0)

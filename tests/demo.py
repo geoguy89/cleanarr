@@ -267,11 +267,17 @@ class Demo:
             words.Match(730.1, 730.5, "god", "blasphemy", True,
                         "the Lord's name used as an exclamation (in “oh my god”)",
                         confidence=0.9, subtitle="Oh, my God.", subtitle_state="agrees"),
-            words.Match(1205.0, 1205.4, "cock", "slurs_sexual", confidence=0.34,
-                        subtitle="Pass me the caulk gun.", subtitle_state="differs"),
+            words.Match(1205.0, 1205.4, "pussy.", "slurs_sexual", True,
+                        "muted from the subtitles: Whisper heard “posse”",
+                        subtitle="Don't turn your back on me, you pussy.",
+                        subtitle_state="subtitle_only"),
+            # Unsure, but the subtitles have it: settled, not worth a listen.
+            words.Match(1210.0, 1210.4, "damn", "mild", confidence=0.34,
+                        subtitle="Damn it.", subtitle_state="agrees"),
         ]
-        left = [words.Match(880.0, 880.4, "cock", "slurs_sexual", True, "left in: heard as “caulk” here",
-                            confidence=0.62, subtitle="More caulk here.", subtitle_state="differs")]
+        left = [words.Match(880.0, 880.4, "cock", "slurs_sexual", True,
+                            "left in: the subtitles have “caulk” here, which sounds like it",
+                            confidence=0.62, subtitle="More caulk here.", subtitle_state="soundalike")]
         for n in range(1, 9):
             j = job(0, 1, n, "done", muted=5 + n, size=88_000_000 + n * 1_000_000,
                     message=f"added “Cleaned - English” · {5 + n} muted", ago=86400 * (10 - n))

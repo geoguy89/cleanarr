@@ -205,8 +205,9 @@ function posterUrl(item, kind) {
 
 /* The same rule as subtitles.worth_checking on the server. */
 const LOW_CONFIDENCE = 0.5;
-const worthChecking = (d) => ['soundalike', 'subtitle_only', 'differs'].includes(d.subtitle_state)
-  || (d.confidence !== null && d.confidence !== undefined && d.confidence < LOW_CONFIDENCE);
+const unsure = (d) => d.confidence !== null && d.confidence !== undefined && d.confidence < LOW_CONFIDENCE;
+const worthChecking = (d) => ['soundalike', 'subtitle_only'].includes(d.subtitle_state)
+  || (!d.subtitle_state && unsure(d));
 
 const DONE = ['done', 'skipped'];
 const isDone = (status) => DONE.includes(status);
@@ -1137,8 +1138,10 @@ function renderJob() {
     const evidence = [];
     if (d.confidence !== null && d.confidence !== undefined) {
       const pct = Math.round(d.confidence * 100);
-      evidence.push(d.confidence < LOW_CONFIDENCE
-        ? `<span class="flag">Whisper was only ${pct}% sure of this word</span>`
+      // Only a flag when nothing else settled it: the subtitles having the
+      // word answers the doubt.
+      evidence.push(unsure(d) && !d.subtitle_state
+        ? `<span class="flag">Whisper was only ${pct}% sure of this word, and there is no subtitle to check it</span>`
         : `Whisper ${pct}% sure`);
     }
     if (d.subtitle_state === 'soundalike') {

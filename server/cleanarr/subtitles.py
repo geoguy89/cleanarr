@@ -754,13 +754,17 @@ def annotate(matches: list[words.Match], cues: list[Cue],
 
 
 def worth_checking(match) -> bool:
-    """Whether a detection is worth a listen: left in as a sound-alike, muted
-    only on the subtitles' word, a line near it that says something else, or
-    Whisper was unsure of the word. Works on a Match or a detection row."""
+    """Whether a detection is worth a listen - whether it could be wrong:
+    left in because the subtitles' word only sounds like it, muted on the
+    subtitles' word alone, or Whisper was unsure and nothing could check it.
+
+    Whisper being unsure is not enough once the subtitles have ruled: a word
+    they have, soften or leave out is settled. Flagging those made a film show
+    fourteen words worth a listen where one was (Trap House)."""
     state = match["subtitle_state"] if not hasattr(match, "subtitle_state") else match.subtitle_state
     sure = match["confidence"] if not hasattr(match, "confidence") else match.confidence
-    return (state in (SOUNDALIKE, SUBTITLE_ONLY, DIFFERS)
-            or (sure is not None and sure < LOW_CONFIDENCE))
+    return (state in (SOUNDALIKE, SUBTITLE_ONLY)
+            or (not state and sure is not None and sure < LOW_CONFIDENCE))
 
 
 def decide(matches: list[words.Match]
@@ -782,7 +786,7 @@ def decide(matches: list[words.Match]
             alike.append(m)
         elif m.subtitle_state in reasons:
             muted.append(replace(m, reason=m.reason or reasons[m.subtitle_state],
-                                 needs_review=m.needs_review or m.subtitle_state == DIFFERS))
+                                 needs_review=m.needs_review))
         else:
             still_open.append(m)
     return muted, alike, still_open
