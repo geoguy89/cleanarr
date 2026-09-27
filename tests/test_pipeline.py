@@ -324,17 +324,29 @@ SRT = ("1\n00:00:00,800 --> 00:00:01,600\nWhat the fuck?\n\n"
 
 
 class FakeServer:
-    """A media server that knows a film's versions and holds one subtitle file."""
+    """A media server that knows a film's versions and holds one subtitle file.
 
-    def __init__(self, versions, films=()):
+    `on_search` is what the item's versions become once it is asked to search
+    online; None means the search finds nothing."""
+
+    def __init__(self, versions, films=(), on_search=None):
         self._versions, self._films, self.asked = versions, list(films), []
+        self.on_search, self.searched, self.found_for = on_search, [], []
 
     def versions(self, item_id):
         self.asked.append(item_id)
         return self._versions
 
-    def movies(self):
-        return self._films
+    def find(self, kind, path, title=""):
+        self.found_for.append((kind, title))
+        return next((f["id"] for f in self._films if f["path"] == path), "")
+
+    def search_subtitles(self, item_id):
+        self.searched.append(item_id)
+        if self.on_search is None:
+            return ""
+        self._versions = self.on_search
+        return "English (OpenSubtitles)"
 
     def download(self, url):
         return SRT
@@ -397,6 +409,47 @@ def test_without_the_subtitle_opinion_nothing_else_is_read(home, settings, monke
     monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
     job = run(plain, settings, home / "cache", source="plex", source_id="7")
     assert job["muted"] == 2 and server.asked == []
+
+
+def test_the_media_server_is_asked_to_search_when_nothing_else_has_them(
+        home, settings, monkeypatch, tmp_path):
+    unsure_cock(monkeypatch)
+    settings.subtitle_opinion = settings.subtitle_search = True
+    settings.media_server = "plex"
+    monkeypatch.setattr(pipeline, "SEARCH_WAIT", 0)
+    plain = make_media(tmp_path / "e1.mkv", seconds=6.0, subtitles=False)
+    server = FakeServer([{"path": str(plain), "subtitles": []}],
+                        films=[{"id": "41", "path": str(plain)}],
+                        on_search=[{"path": str(plain), "subtitles": [("English", "http://p/s/9")]}])
+    monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
+    # An episode Sonarr listed: found on the media server by its show and file.
+    job = run(plain, settings, home / "cache", source="sonarr", source_id="1234")
+    assert job["status"] == "done", job["message"]
+    assert job["muted"] == 1
+    assert "subtitles from a Plex search (English (OpenSubtitles))" in job["message"]
+    assert server.found_for == [("episode", "Show")] and server.searched == ["41"]
+
+
+def test_no_search_unless_it_is_switched_on(home, settings, monkeypatch, tmp_path):
+    unsure_cock(monkeypatch)
+    settings.subtitle_opinion, settings.media_server = True, "plex"
+    plain = make_media(tmp_path / "e1.mkv", seconds=6.0, subtitles=False)
+    server = FakeServer([{"path": str(plain), "subtitles": []}],
+                        films=[{"id": "41", "path": str(plain)}], on_search=[])
+    monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
+    job = run(plain, settings, home / "cache", source="plex", source_id="41")
+    assert job["muted"] == 2 and server.searched == []
+
+
+def test_a_search_that_finds_nothing_leaves_everything_muted(home, settings, monkeypatch, tmp_path):
+    unsure_cock(monkeypatch)
+    settings.subtitle_opinion = settings.subtitle_search = True
+    plain = make_media(tmp_path / "e1.mkv", seconds=6.0, subtitles=False)
+    server = FakeServer([{"path": str(plain), "subtitles": []}])
+    monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
+    job = run(plain, settings, home / "cache", source="plex", source_id="41")
+    assert job["muted"] == 2 and server.searched == ["41"]
+    assert "no subtitles found" in job["message"]
 
 
 def test_a_file_without_subtitles_still_cleans(home, settings, fake_asr, tmp_path):

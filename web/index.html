@@ -526,7 +526,17 @@
                   bleep), it is muted; if it says something else, it is left in and
                   marked worth a listen; with no line, the model below decides, or
                   it is muted. Uses the file's English subtitles, or an
-                  <code>.srt</code> beside it (<code>Episode.en.srt</code>). Instant.</p></div>
+                  <code>.srt</code> beside it (<code>Episode.en.srt</code>), or ones
+                  your media server holds, or those of another copy of the film.</p></div>
+              <div class="field"><label class="switch">
+                <input type="checkbox" name="subtitle_search" role="switch">
+                <span class="track" aria-hidden="true"></span>
+                <span>If none are found, ask the media server to search online</span></label>
+                <p class="hint">Plex or Jellyfin looks the file up on OpenSubtitles and
+                  attaches the best English match, as its own "Search subtitles" does.
+                  The subtitles stay on the item in your media server afterwards.
+                  Jellyfin needs its OpenSubtitles plugin. Adds a few seconds, only
+                  to files with no subtitles.</p></div>
               <div class="callout"><svg class="i"><use href="#i-info"/></svg>
                 <p><strong>Most people can leave the model off.</strong> Across 196
                   checks on a real library it changed the outcome twice, at

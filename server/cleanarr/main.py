@@ -589,7 +589,8 @@ def put_settings(payload: dict):
                 "media_server", "jellyfin_url", "library_source",
                 "judge_threads", "judge_keep_alive", "bitrate_surround",
                 "bitrate_stereo", "ffmpeg_threads", "hold_policy",
-                "check_in_context", "allow_words_by_title", "subtitle_opinion"):
+                "check_in_context", "allow_words_by_title", "subtitle_opinion",
+                "subtitle_search"):
         if key in payload:
             setattr(settings, key, payload[key])
     # Same masking rule for every secret: all-stars means "leave it".

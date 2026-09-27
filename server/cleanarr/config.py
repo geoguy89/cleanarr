@@ -103,6 +103,11 @@ class Settings:
     # Let the file's subtitles (or a .srt beside it) decide the uncertain
     # words - see subtitles.decide. Off by default: when unsure, mute.
     subtitle_opinion: bool = False
+    # With the above on, and no subtitles found anywhere else, ask Plex or
+    # Jellyfin to search online and attach the best match - as their own
+    # "Search subtitles" does. Off by default: it adds subtitles to the item
+    # in the media server for everyone.
+    subtitle_search: bool = False
 
     # Bitrate for the cleaned track, per channel layout. The cleaned track is
     # a re-encode either way; this decides how much the file grows.

@@ -38,6 +38,8 @@ from dataclasses import dataclass
 import httpx
 
 TIMEOUT = 30.0
+# An online subtitle search goes out to OpenSubtitles and back.
+SEARCH_TIMEOUT = 90.0
 
 
 class LibraryError(RuntimeError):
@@ -89,13 +91,14 @@ class PlexLibrary:
 
     name = "plex"
 
-    def _get(self, path: str, **params) -> dict:
+    def _get(self, path: str, timeout: float = 0, **params) -> dict:
         if not self.url or not self.token:
             raise LibraryError("Plex address and token are not set")
         params["X-Plex-Token"] = self.token
         try:
             resp = httpx.get(f"{self.url.rstrip('/')}{path}", params=params,
-                             headers={"Accept": "application/json"}, timeout=TIMEOUT)
+                             headers={"Accept": "application/json"},
+                             timeout=timeout or TIMEOUT)
         except httpx.HTTPError as exc:
             raise LibraryError(f"could not reach Plex: {exc}") from exc
         if resp.status_code == 401:
@@ -281,6 +284,52 @@ class PlexLibrary:
         resp.raise_for_status()
         return resp.text
 
+    def find(self, kind: str, path: str, title: str = "") -> str:
+        """The item id of the film or episode whose file is `path`, or "".
+
+        An episode is found through its show, by name, and then matched on the
+        file itself - so a show with the same name elsewhere cannot answer.
+        """
+        if kind == "movie":
+            return next((m["id"] for m in self.movies() if m["path"] == path), "")
+        if not title:
+            return ""
+        for section in self._sections("show"):
+            for show in self._all(section, title=title):
+                for e in self.episodes(str(show.get("ratingKey"))):
+                    if e["path"] == path:
+                        return e["id"]
+        return ""
+
+    def search_subtitles(self, item_id: str) -> str:
+        """Ask Plex to find English subtitles online and attach the best match,
+        as its own "Search subtitles" does. The label of what was attached, or ""
+        when Plex found nothing.
+
+        Plex searches with its own OpenSubtitles account and matches on the
+        file, so a hit is usually timed for this very copy.
+        """
+        found = self._get(f"/library/metadata/{item_id}/subtitles",
+                          language="en", hearingImpaired=0, forced=0, timeout=SEARCH_TIMEOUT)
+        results = [s for s in (found.get("Stream") or [])
+                   if s.get("key") and not _forced(s.get("forced"), s.get("title"))]
+        if not results:
+            return ""
+        best = max(results, key=lambda s: (s.get("perfectMatch") in (True, 1, "1"),
+                                           float(s.get("score") or 0)))
+        self._send("PUT", f"/library/metadata/{item_id}/subtitles", key=best["key"])
+        return str(best.get("displayTitle") or best.get("title") or "English")
+
+    def _send(self, method: str, path: str, **params) -> None:
+        params["X-Plex-Token"] = self.token
+        try:
+            resp = httpx.request(method, f"{self.url.rstrip('/')}{path}", params=params,
+                                 timeout=SEARCH_TIMEOUT)
+        except httpx.HTTPError as exc:
+            raise LibraryError(f"could not reach Plex: {exc}") from exc
+        if resp.status_code >= 400:
+            raise LibraryError(f"Plex said {resp.status_code}")
+
     def test(self) -> dict:
         container = self._get("/library/sections")
         kinds = [d.get("type") for d in (container.get("Directory") or [])]
@@ -460,6 +509,38 @@ class JellyfinLibrary:
         resp = httpx.get(url, headers=jellyfin_headers(self.api_key), timeout=TIMEOUT)
         resp.raise_for_status()
         return resp.text
+
+    def find(self, kind: str, path: str, title: str = "") -> str:
+        """As PlexLibrary.find."""
+        if kind == "movie":
+            return next((m["id"] for m in self.movies() if m["path"] == path), "")
+        if not title:
+            return ""
+        for show in self._items(IncludeItemTypes="Series", SearchTerm=title, Fields="Path"):
+            for e in self.episodes(str(show.get("Id"))):
+                if e["path"] == path:
+                    return e["id"]
+        return ""
+
+    def search_subtitles(self, item_id: str) -> str:
+        """As PlexLibrary.search_subtitles. Needs a subtitle provider plugin
+        (OpenSubtitles) installed in Jellyfin; without one the search is empty."""
+        found = self._get(f"/Items/{item_id}/RemoteSearch/Subtitles/eng") or []
+        results = [r for r in found if r.get("Id") and not r.get("IsForced")]
+        if not results:
+            return ""
+        best = max(results, key=lambda r: (bool(r.get("IsHashMatch")),
+                                           float(r.get("CommunityRating") or 0),
+                                           int(r.get("DownloadCount") or 0)))
+        try:
+            resp = httpx.post(f"{self.url.rstrip('/')}/Items/{item_id}/RemoteSearch/"
+                              f"Subtitles/{best['Id']}",
+                              headers=jellyfin_headers(self.api_key), timeout=SEARCH_TIMEOUT)
+        except httpx.HTTPError as exc:
+            raise LibraryError(f"could not reach Jellyfin: {exc}") from exc
+        if resp.status_code >= 400:
+            raise LibraryError(f"Jellyfin said {resp.status_code}")
+        return str(best.get("Name") or "English")
 
     def test(self) -> dict:
         info = self._get("/System/Info")

@@ -1646,6 +1646,7 @@ function collect() {
     device: F('device').value,
     trim_silence: F('trim_silence').checked,
     subtitle_opinion: F('subtitle_opinion').checked,
+    subtitle_search: F('subtitle_search').checked,
     pad_start: F('pad_start').value, pad_end: F('pad_end').value, fade: F('fade').value,
     track_title: F('track_title').value.trim(),
     check_in_context: tags('check_in_context'),
@@ -1723,6 +1724,7 @@ function fillSettings(s) {
   set('device', s.device || 'auto');
   F('trim_silence').checked = !!s.trim_silence;
   F('subtitle_opinion').checked = !!s.subtitle_opinion;
+  F('subtitle_search').checked = !!s.subtitle_search;
   set('pad_start', s.pad_start); set('pad_end', s.pad_end); set('fade', s.fade);
   set('track_title', s.track_title);
   set('judge_url', s.judge_url); set('judge_model', s.judge_model);

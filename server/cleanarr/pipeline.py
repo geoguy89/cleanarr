@@ -376,26 +376,25 @@ def _sweep_stale_work(folder: Path, older_than: float = 6 * 3600) -> None:
 
 
 def more_subtitles(settings, kind: str, source: str, source_id: str, path: Path,
-                   work: Path) -> tuple[str, str]:
+                   work: Path, title: str = "") -> tuple[str, str]:
     """(SRT text, where it came from) for a file with no subtitles of its own,
     or ("", "").
 
-    First what the media server holds for this very file - subtitles it
-    downloaded, say. Then, for a film, another copy of it: the media server
-    knows a film's versions, and a WEB-DL beside a WEBRip often carries the
-    subtitles the other lacks. Either may be timed for a different cut; the
-    comparison sets such subtitles aside when too many lines disagree, and then
-    everything stays muted as it would have anyway.
+    In order: what the media server holds for this very file (subtitles it
+    downloaded, say); for a film, another copy of it that the server knows
+    about - a WEB-DL beside a WEBRip often carries the subtitles the other
+    lacks; and, with subtitle_search on, a search the server makes online.
+    Any of these may be timed for a different cut: the caller lines them up,
+    and sets them aside if they still disagree.
     """
-    name = source if source in ("plex", "jellyfin") else (
-        library.film_source(settings) if kind == "movie" else "")
-    client = library.server(settings, name) if name else None
+    name = source if source in ("plex", "jellyfin") else getattr(settings, "media_server", "")
+    client = library.server(settings, name) if name in ("plex", "jellyfin") else None
     if client is None:
         return "", ""
     here = str(path)
     try:
-        item_id = str(source_id) if source == name and source_id else next(
-            (m["id"] for m in client.movies() if m["path"] == here), "")
+        item_id = (str(source_id) if source == name and source_id
+                   else client.find(kind, here, title))
         versions = client.versions(item_id) if item_id else []
     except Exception as exc:  # noqa: BLE001
         print(f"[cleanarr] subtitles from {name}: {exc}", flush=True)
@@ -415,31 +414,60 @@ def more_subtitles(settings, kind: str, source: str, source_id: str, path: Path,
         found = fetch(v)
         if found[0]:
             return found
-    if kind != "movie":
+    if kind == "movie":
+        for v in (v for v in versions if v["path"] != here):
+            other = Path(v["path"])
+            if not other.is_file():
+                continue
+            where = f"another copy ({other.name})"
+            try:
+                stream = media.pick_subtitles(media.probe(other))
+            except Exception:  # noqa: BLE001
+                stream = None
+            dest = work / "other-copy.srt"
+            if stream is not None and media.extract_subtitles(other, stream, dest):
+                text = dest.read_text(encoding="utf8", errors="replace")
+                if subtitles.parse_srt(text):
+                    return text, where
+            side = media.find_sidecar_subtitles(other)
+            if side is not None:
+                text = side.read_text(encoding="utf8", errors="replace")
+                if subtitles.parse_srt(text):
+                    return text, where
+            text, _label = fetch(v)
+            if text:
+                return text, where
+
+    if not getattr(settings, "subtitle_search", False) or not item_id:
         return "", ""
-    for v in (v for v in versions if v["path"] != here):
-        other = Path(v["path"])
-        if not other.is_file():
-            continue
-        where = f"another copy ({other.name})"
+    try:
+        attached = client.search_subtitles(item_id)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[cleanarr] {name} subtitle search: {exc}", flush=True)
+        return "", ""
+    if not attached:
+        return "", ""
+    # The server fetches the file after answering, so it can take a moment to
+    # appear on the item.
+    for attempt in range(SEARCH_POLLS):
         try:
-            stream = media.pick_subtitles(media.probe(other))
+            mine = [v for v in client.versions(item_id) if v["path"] == here]
         except Exception:  # noqa: BLE001
-            stream = None
-        dest = work / "other-copy.srt"
-        if stream is not None and media.extract_subtitles(other, stream, dest):
-            text = dest.read_text(encoding="utf8", errors="replace")
-            if subtitles.parse_srt(text):
-                return text, where
-        side = media.find_sidecar_subtitles(other)
-        if side is not None:
-            text = side.read_text(encoding="utf8", errors="replace")
-            if subtitles.parse_srt(text):
-                return text, where
-        text, _label = fetch(v)
-        if text:
-            return text, where
+            mine = []
+        for v in mine:
+            text, _label = fetch(v)
+            if text:
+                return text, f"a {name.title()} search ({attached})"
+        if attempt + 1 < SEARCH_POLLS:
+            time.sleep(SEARCH_WAIT)
+    print(f"[cleanarr] {name} attached {attached!r} but it never appeared on the file",
+          flush=True)
     return "", ""
+
+
+# How long to wait for subtitles the media server was asked to fetch.
+SEARCH_POLLS = 6
+SEARCH_WAIT = 3.0
 
 
 def run_job(job_id: int, settings: config.Settings, cache_dir: Path,
@@ -470,7 +498,8 @@ def run_job(job_id: int, settings: config.Settings, cache_dir: Path,
                 more_subtitles=lambda work: more_subtitles(
                     settings, job["kind"] if "kind" in keys else "",
                     job["source"] if "source" in keys else "",
-                    job["source_id"] if "source_id" in keys else "", path, work))
+                    job["source_id"] if "source_id" in keys else "", path, work,
+                    title=job["title"]))
         db.update(job_id, status=result.get("status", "done"),
                   muted=result.get("muted", 0), message=result.get("message", ""),
                   added_bytes=result.get("added_bytes", 0),

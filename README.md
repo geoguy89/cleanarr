@@ -441,9 +441,13 @@ Where the subtitles come from, first found wins:
 4. for a film, **another copy of it** that the media server knows about: a
    WEB-DL beside a WEBRip often has the subtitles the other lacks. The other
    copy is only read, never changed.
+5. with **If none are found, ask the media server to search online** also on,
+   a search by Plex or Jellyfin, which attaches the best English match to the
+   item exactly as its own *Search subtitles* does. Those subtitles stay on the
+   item in your media server. Jellyfin needs its OpenSubtitles plugin.
 
-3 and 4 are only looked for with this switch on, since 4 means reading a
-second file. Another copy is often a slightly different cut — a studio logo more
+3 to 5 are only looked for with this switch on, since 4 means reading a
+second file and 5 goes online. Another copy is often a slightly different cut — a studio logo more
 or less at the start shifts every line by the same few seconds — so borrowed
 subtitles are first moved to line up with what Whisper heard, when one shift
 clearly fits (up to three minutes either way). Subtitles that still disagree

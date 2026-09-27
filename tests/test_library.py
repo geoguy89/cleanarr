@@ -244,3 +244,45 @@ def test_jellyfin_lists_versions_and_serves_subtitles_as_srt(stub):
     assert got[0]["subtitles"] == [("English", f"{stub.url}/Videos/77/a1/Subtitles/3/Stream.srt")]
     assert [v["path"] for v in got] == ["/m/one.mkv", "/m/two.mkv"]
     assert stub.requests[0].query["Ids"] == ["77"]
+
+
+def test_plex_finds_an_episode_by_its_show_and_file(stub):
+    stub.route("GET", "/library/sections", {"MediaContainer": {"Directory": [
+        {"key": "1", "type": "show", "title": "TV"}]}})
+    stub.route("GET", "/library/sections/1/all", {"MediaContainer": {"totalSize": 1, "Metadata": [
+        {"ratingKey": "70", "title": "Chance"}]}})
+    stub.route("GET", "/library/metadata/70/allLeaves", {"MediaContainer": {"Metadata": [
+        {"ratingKey": "71", "index": 1, "parentIndex": 2, "Media": [{"Part": [{"file": "/tv/c/1.mkv"}]}]},
+        {"ratingKey": "72", "index": 2, "parentIndex": 2, "Media": [{"Part": [{"file": "/tv/c/2.mkv"}]}]}]}})
+    plex = library.PlexLibrary(stub.url, "t")
+    assert plex.find("episode", "/tv/c/2.mkv", "Chance") == "72"
+    assert stub.seen("/library/sections/1/all")[0].query["title"] == ["Chance"]
+    assert plex.find("episode", "/tv/c/9.mkv", "Chance") == ""
+
+
+def test_plex_search_attaches_the_best_match(stub):
+    stub.route("GET", "/library/metadata/72/subtitles", {"MediaContainer": {"Stream": [
+        {"key": "/sub/a", "score": 90, "displayTitle": "English (a)"},
+        {"key": "/sub/b", "score": 70, "perfectMatch": True, "displayTitle": "English (b)"},
+        {"key": "/sub/c", "score": 99, "forced": True}]}})
+    stub.route("PUT", "/library/metadata/72/subtitles", {})
+    assert library.PlexLibrary(stub.url, "t").search_subtitles("72") == "English (b)"
+    asked = stub.seen("/library/metadata/72/subtitles")
+    assert asked[0].query["language"] == ["en"]
+    assert asked[1].method == "PUT" and asked[1].query["key"] == ["/sub/b"]
+
+
+def test_plex_search_that_finds_nothing_attaches_nothing(stub):
+    stub.route("GET", "/library/metadata/72/subtitles", {"MediaContainer": {"size": 0}})
+    assert library.PlexLibrary(stub.url, "t").search_subtitles("72") == ""
+    assert [r.method for r in stub.seen("/library/metadata/72/subtitles")] == ["GET"]
+
+
+def test_jellyfin_search_downloads_the_best_match(stub):
+    stub.route("GET", "/Items/5/RemoteSearch/Subtitles/eng", [
+        {"Id": "x", "Name": "plain", "DownloadCount": 900},
+        {"Id": "y", "Name": "hash match", "IsHashMatch": True, "DownloadCount": 3},
+        {"Id": "z", "Name": "forced", "IsForced": True, "IsHashMatch": True}])
+    stub.route("POST", "/Items/5/RemoteSearch/Subtitles/y", {})
+    assert library.JellyfinLibrary(stub.url, "k").search_subtitles("5") == "hash match"
+    assert stub.seen("/Items/5/RemoteSearch/Subtitles/y")[0].method == "POST"
