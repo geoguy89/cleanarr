@@ -8,13 +8,16 @@ muted. What separates them is sound: a mishearing sounds like the swear, a
 softening usually does not.
 
 Pronunciations come from the CMU Pronouncing Dictionary (data/, BSD licence).
-Two strings are compared phoneme by phoneme, with near sounds (two vowels, two
-stops) cheaper to swap than unrelated ones. Measured:
+Two strings are compared sound by sound, the way speech runs together: near
+sounds cost less to swap (two vowels; two sounds made in the same place, like
+d and z), and the sounds running speech swallows - h, t, d, the "uh" and "oo"
+of little words - cost less to lose. That is what lets a phrase match a word:
+Whisper wrote "the road to hell" where the line was "the Roosevelt" (0.74).
+Measured:
 
-    sound-alikes   caulk 1.0, sheet 0.9, beach 0.9, hail 0.9, dig 0.83,
-                   slob 0.8, fork 0.72, duck 0.67
-    softenings     "come on" for "damn it" 0.58, "oh no" 0.47,
-                   crap 0.35, whoa 0.3, screw 0.27
+    sound-alikes   caulk 1.0, sheet 0.9, purses 0.88, dig 0.87, slob 0.8,
+                   Roosevelt for "road to hell" 0.74, fork 0.72
+    softenings     "oh no" 0.57, "get that" 0.53, whoa 0.43, crap 0.35
 
 Minced oaths - freaking, heck, darn, gosh - sound close on purpose, so they are
 listed and always count as softening. A word the dictionary does not know
@@ -39,10 +42,22 @@ MINCED = frozenset("""
     effing effin eff frak frakking fracking bleep bleeping bleepin
     darn darned darnit dang danged dagnabbit dadgum dern goldarn
     heck gosh golly gee geez jeez jeepers jeeze sheesh
-    crap crappy crud shoot shucks fudge fudging sugar
+    crap crappy crud shoot shucks fudge fudging sugar shh
     butt butthole jerk screw screwed screwing
+    freak freakin flaming flamin peeved ticked teed
     mothertrucker motherfudger
 """.split())
+
+# Where each consonant is made: a swap within one place is a near miss.
+_PLACE = {}
+for _place, _phones in {
+        "lips": "P B M F V W", "teeth": "TH DH", "ridge": "T D N S Z L R",
+        "palate": "SH ZH CH JH Y", "velum": "K G NG", "glottis": "HH"}.items():
+    for _p in _phones.split():
+        _PLACE[_p] = _place
+
+# Swallowed in running speech: cheap to lose.
+_WEAK = frozenset({"HH", "AH", "IH", "UW", "T", "D"})
 
 _CLASS = {}
 for _cls, _phones in {
@@ -57,7 +72,11 @@ for _cls, _phones in {
         _CLASS[_p] = _cls
 
 _WORD = re.compile(r"[a-z']+")
-_GAP = 0.8          # adding or dropping a sound
+
+
+def _gap(sound: str) -> float:
+    """Adding or dropping a sound."""
+    return 0.4 if sound in _WEAK else 0.8
 
 
 @lru_cache(maxsize=1)
@@ -92,8 +111,13 @@ def phones(text: str) -> list[str] | None:
 def _swap(a: str, b: str) -> float:
     if a == b:
         return 0.0
-    if _CLASS.get(a) == _CLASS.get(b):
-        return 0.3 if _CLASS.get(a) == "vowel" else 0.5
+    kind_a, kind_b = _CLASS.get(a), _CLASS.get(b)
+    if kind_a == kind_b == "vowel":
+        return 0.3
+    if kind_a == kind_b:
+        return 0.4 if _PLACE.get(a) == _PLACE.get(b) else 0.5
+    if _PLACE.get(a) and _PLACE.get(a) == _PLACE.get(b):
+        return 0.5
     return 1.0
 
 
@@ -102,11 +126,13 @@ def similarity(a: str, b: str) -> float | None:
     x, y = phones(a), phones(b)
     if not x or not y:
         return None
-    prev = [j * _GAP for j in range(len(y) + 1)]
+    prev = [0.0]
+    for sound in y:
+        prev.append(prev[-1] + _gap(sound))
     for i in range(1, len(x) + 1):
-        row = [i * _GAP]
+        row = [prev[0] + _gap(x[i - 1])]
         for j in range(1, len(y) + 1):
-            row.append(min(prev[j] + _GAP, row[j - 1] + _GAP,
+            row.append(min(prev[j] + _gap(x[i - 1]), row[j - 1] + _gap(y[j - 1]),
                            prev[j - 1] + _swap(x[i - 1], y[j - 1])))
         prev = row
     return round(1 - prev[-1] / max(len(x), len(y)), 2)
@@ -122,6 +148,14 @@ def softened(word: str) -> bool:
 # scored 0.73 against "shit" - a caption's "Let me get that" for "Oh, shit!".
 # Every real mishearing measured shares its first sound: caulk, slob, sheet.
 ONSET_EXEMPT = 0.85
+# The hissing sounds count as one start: a crowd's "City! City!" came out as
+# "Shit, shit!" ten times in Ted Lasso S02E08. "That" still does not pass for
+# "shit" - th is not a hiss.
+_HISS = frozenset({"S", "Z", "SH", "ZH"})
+
+
+def _same_start(a: str, b: str) -> bool:
+    return a == b or (a in _HISS and b in _HISS)
 
 
 def sounds_alike(heard: str, shown: str) -> bool:
@@ -130,6 +164,6 @@ def sounds_alike(heard: str, shown: str) -> bool:
     score = similarity(heard, shown)
     if score is None or not x or not y:
         return False
-    if x[0] != y[0] and score < ONSET_EXEMPT:
+    if not _same_start(x[0], y[0]) and score < ONSET_EXEMPT:
         return False
     return score >= SOUNDALIKE

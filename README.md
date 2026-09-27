@@ -443,13 +443,22 @@ heard, word by word, both ways:
 | a swear | something else, or nothing | **muted** from the subtitles, worth a listen |
 
 “At that spot” is read from the script: the words heard just before and after
-are found in the subtitles, and what sits between them is the answer. “Sounds
-like” compares pronunciations from the CMU Pronouncing Dictionary: *caulk* and
-*cock* are pronounced identically; *whoa* and *shit* share nothing. A sound-alike
-also has to start with the same sound, so a caption's *“get that”* for *“Oh,
-shit!”* is a softening, not a mishearing. How sure Whisper was makes no
-difference: a word it was sure of is left in when the subtitles have a
-sound-alike there, and muted otherwise.
+are found in the subtitles, and what sits between them is the answer — a
+phrase as well as a word, so *“the road to hell”* against *“the Roosevelt”* is
+compared whole. Where nothing anchors it (a chant: *“City! City!”* heard as
+*“Shit, shit!”*), the line on screen is read at about the right point in it;
+a word Whisper also heard close by does not count there, since it was said as
+well.
+
+“Sounds like” compares pronunciations from the CMU Pronouncing Dictionary, the
+way speech runs together: *caulk* and *cock* are pronounced identically, the
+*t* and *h* of *“road to hell”* are nearly swallowed, and *whoa* and *shit*
+share nothing. A sound-alike also has to start with the same sound (s and sh
+count as one), so a caption's *“get that”* for *“Oh, shit!”* is a softening,
+not a mishearing; so are minced oaths (*freaking*, *heck*, *peeved*) and a word
+cut short (*“mother”*). How sure Whisper was makes no difference: a word it was
+sure of is left in when the subtitles have a sound-alike there, and muted
+otherwise.
 
 A swear only the subtitles have — mumbled, talked over, or heard as *“posse”* —
 is muted between the words heard either side of it. It is not placed when
@@ -457,8 +466,9 @@ Whisper already caught it nearby, when only one side is found by a single
 common word, or when the words either side were said back to back: then the
 captions added it.
 
-On 9 episodes of 4 shows (471 detections), this left in 12 words — ten
-*caulk*, a *slob* and a *purses* — and muted 3 swears Whisper had missed.
+On 9 episodes of 4 shows (471 detections), this left in 20 words — ten
+*caulk*, a *slob*, a *purses*, seven of a crowd's *“City!”* and a *“Go on!”* —
+and muted 3 swears Whisper had missed. *“The Roosevelt”* was checked separately.
 
 Where the subtitles come from, first found wins:
 

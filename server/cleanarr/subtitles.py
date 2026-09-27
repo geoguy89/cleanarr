@@ -104,6 +104,8 @@ _HIDDEN_WORD = re.compile(r"[^\w*#@$%]*[a-z]+[*#@$%]+[a-z]*[^\w*#@$%]*", re.I)
 def _plain(bare: str) -> str:
     """One spelling for comparing: "fuckin'" and "fucking", "goddamn'" alike."""
     bare = bare.replace("'", "").replace("’", "")
+    if bare.startswith("arse"):                           # British: arse, arsehole
+        bare = "ass" + bare[4:]
     return bare + "g" if bare.endswith("in") and len(bare) >= 5 else bare
 _BLEEP = re.compile(r"\[\s*(bleep|beep|censored|expletive)[^\]]*\]|\*{3,}", re.I)
 
@@ -454,7 +456,14 @@ def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[
         if any(sounds.softened(t) for t in rest) or matcher.find(
                 [{"word": raw, "start": 0.0, "end": 0.0} for raw in shown]):
             return REPLACED, said
-        spoken = " ".join(bare[i - lgap:i + 1 + rgap])
+        # Cut short: "mother" for "motherfucker".
+        if any(len(t) >= 4 and word.startswith(_plain(t)) for t in rest):
+            return REPLACED, said
+        # What was heard there that the line does not have - the swear, and
+        # any words misheard with it: "road to hell" against "Roosevelt".
+        in_line = {t for t, _raw in slot}
+        spoken = " ".join(w for w in bare[i - lgap:i + 1 + rgap]
+                          if w == bare[i] or w not in in_line)
         if sounds.sounds_alike(spoken, " ".join(shown)) or any(
                 sounds.sounds_alike(word, raw) for raw in shown):
             return SOUNDALIKE, said
@@ -546,7 +555,46 @@ def _evidence(match: words.Match, cues: list[Cue], matcher: words.Matcher,
     # line's own swear ("What the fuck is that?") says nothing about this one.
     if any(_says_it(c.text, word, matcher) for c in wide):
         return AGREES, shown, ""
+    alike = _sounds_alike_on_screen(match, word, near or wide, matcher, heard or [])
+    if alike:
+        return SOUNDALIKE, shown, alike
     return DIFFERS, shown, ""
+
+
+# How far a word may sit from where its place in the line puts it in time.
+LINE_POSITION = 1.2
+
+
+def _sounds_alike_on_screen(match: words.Match, word: str, cues: list[Cue],
+                            matcher: words.Matcher, heard: list[dict]) -> str:
+    """A word in the lines on screen that sounds like the swear, at about the
+    right point of its line - for when the script cannot be read around it
+    (a chant: "City! City!", heard as "Shit, shit!"). Where a line's words fall
+    is estimated from their place in it, and only one within LINE_POSITION
+    seconds of the swear counts, so another "help" in the line cannot excuse a
+    "hell". Nor does a word Whisper also heard close by: it was said as well,
+    so it is not what the swear really was ("This is what you get." with the
+    "Oh my god" after it left out)."""
+    said = {_plain(words.normalize(h.get("word", ""))) for h in heard
+            if abs(float(h.get("start") or 0.0) - match.start) <= 3.0}
+    for cue in cues:
+        tokens = [r for r in _ASIDE.sub(" ", cue.text).split() if words.normalize(r)]
+        if not tokens:
+            continue
+        step = (cue.end - cue.start) / len(tokens)
+        for n, raw in enumerate(tokens):
+            at = cue.start + step * (n + 0.5)
+            if abs(at - (match.start + match.end) / 2) > LINE_POSITION + step / 2:
+                continue
+            bare = words.normalize(raw)
+            if _plain(bare) in said:
+                continue
+            if (sounds.softened(bare) or matcher.find([{"word": raw, "start": 0.0, "end": 0.0}])
+                    or len(word) >= 4 and word.startswith(_plain(bare))):
+                continue
+            if sounds.sounds_alike(word, raw):
+                return raw.strip(" ,.!?;:-")
+    return ""
 
 
 def annotate(matches: list[words.Match], cues: list[Cue],

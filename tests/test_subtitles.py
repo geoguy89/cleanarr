@@ -45,7 +45,7 @@ def test_parse_srt():
 
 @pytest.mark.parametrize("match, state", [
     (m("fuck,", 1.0), "agrees"),               # the same word
-    (m("cock", 3.2), "differs"),               # the homophone case
+    (m("cock", 3.2), "soundalike"),            # the homophone case: caulk
     (m("shit", 10.2), "agrees"),               # censored in the subtitle
     (m("damn", 20.3), "agrees"),               # [BLEEP]
     (m("shit", 40.0), ""),                     # no line anywhere near
@@ -68,7 +68,7 @@ def test_annotate_records_evidence_and_keeps_every_match():
     cues = subtitles.parse_srt(SRT)
     got, note = subtitles.annotate([m("fuck", 1.0), m("cock", 3.2)], cues)
     assert note == ""
-    assert [(g.text, g.subtitle_state) for g in got] == [("fuck", "agrees"), ("cock", "differs")]
+    assert [(g.text, g.subtitle_state) for g in got] == [("fuck", "agrees"), ("cock", "soundalike")]
     assert "caulk" in got[1].subtitle
 
 
@@ -263,6 +263,8 @@ SCRIPT_CASES = [
     ("let me oh shit oh no it is fine", "Let me get that. Oh! No, it's fine.", "shit", "replaced"),
     ("what the fucking hell is that", "What the fuckin' hell is that?", "fucking", "agrees"),
     ("stop being such a fucking idiot", "Stop being such a freaking idiot.", "fucking", "replaced"),
+    ("an accident on the road to hell i tried", "An accident on the Roosevelt. I tried", "hell", "soundalike"),
+    ("kill this motherfucker right now", "Kill this mother right now.", "motherfucker", "replaced"),
     ("we are here kill this motherfucker right away", "-We are here! -Kill this mother--", "motherfucker", "agrees"),
     ("you know on your period or some shit but anyway", "You know, on your period or...", "shit", "omits"),
     ("look at that holy shit it is huge", "Look at that. Holy shit, it is huge!", "shit", "agrees"),
@@ -322,3 +324,30 @@ def test_a_swear_with_nowhere_to_go_is_not_placed():
     """The words either side were said back to back: the captions added it."""
     got, _ = placed("i dont know right i mean", "I don't know shit, right? I mean...", start=10.0)
     assert got == []
+
+
+
+# ---------------------------------------------------------------- when the script cannot be read
+
+def on_screen(heard_text, line, word, start=10.0):
+    heard = said(heard_text, start)
+    cues = [subtitles.Cue(start - 0.1, start + len(heard_text.split()) * 0.35, line)]
+    return subtitles.evidence(detection(heard, word), cues, words.Matcher(context_words=frozenset()), heard)
+
+
+def test_a_chant_misheard_is_a_sound_alike():
+    """Nothing to anchor on in a chant: the line on screen at that moment."""
+    state, _ = on_screen("shit shit shit shit", "-City! -City! -City! -City!", "shit")
+    assert state == "soundalike"
+
+
+def test_a_word_that_was_also_said_does_not_excuse_the_swear():
+    """The captions left "Oh my god" out; "get" before it was said as well."""
+    state, _ = on_screen("this is what you get oh my god", "This is what you get.", "god")
+    assert state != "soundalike"
+
+
+def test_british_spellings_are_the_same_swear():
+    matcher = words.Matcher(context_words=frozenset())
+    assert subtitles._is_word("arse", "ass", matcher)
+    assert subtitles._is_word("arsehole", "asshole", matcher)
