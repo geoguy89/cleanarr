@@ -469,8 +469,8 @@ def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[
         if any(sounds.softened(t) for t in rest) or matcher.find(
                 [{"word": raw, "start": 0.0, "end": 0.0} for raw in shown]):
             return REPLACED, said
-        # Cut short: "mother" for "motherfucker".
-        if any(len(t) >= 4 and word.startswith(_plain(t)) for t in rest):
+        # Cut short ("mother" for "motherfucker"), or run on ("pussycat").
+        if any(_softens(raw, word, matcher) for raw in shown):
             return REPLACED, said
         # What was heard there that the line does not have - the swear, and
         # any words misheard with it: "road to hell" against "Roosevelt".
@@ -624,8 +624,13 @@ def _softens(raw: str, word: str, matcher: words.Matcher) -> bool:
         if sounds.softened(part) or matcher.find([{"word": part, "start": 0.0, "end": 0.0}]):
             return True
         plain = _plain(part)
-        if len(plain) >= 3 and plain != word and word.startswith(plain):
-            return True
+        if len(plain) >= 3 and plain != word and (word.startswith(plain) or plain.startswith(word)):
+            # Cut short ("puss"), or the swear with more on it ("pussycat",
+            # "what the dickens") - unless it is the same sound spelled
+            # another way: "dam" is not "damn" cut short, it is a homophone.
+            x, y = sounds.phones(plain), sounds.phones(word)
+            if not (x and y and x == y):
+                return True
     return bool(_STUB.fullmatch(raw))
 
 

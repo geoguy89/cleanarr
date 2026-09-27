@@ -517,3 +517,13 @@ def test_a_name_written_with_a_symbol_is_not_a_hidden_swear(name):
 @pytest.mark.parametrize("hidden", ["f***", "sh*t", "a**hole", "b*tch", "f***ing"])
 def test_a_hidden_swear_still_is(hidden):
     assert subtitles._hides_a_swear(hidden)
+
+
+@pytest.mark.parametrize("shown", ["pussycat", "puss", "pussy-"])
+def test_a_caption_that_cuts_or_runs_on_the_swear_is_a_softening(shown):
+    assert subtitles._softens(shown, "pussy", words.Matcher(context_words=frozenset()))
+
+
+def test_a_homophone_is_not_cut_short():
+    """"dam" sounds exactly like "damn": a mishearing, not a cut."""
+    assert not subtitles._softens("dam", "damn", words.Matcher(context_words=frozenset()))
