@@ -37,6 +37,7 @@ def test_never_mute_fixes_a_phrase_word(client, detection):
 
 def test_check_in_context(client, settings, detection):
     settings.check_in_context = []
+    settings.subtitle_opinion = False
     config.save(settings)
     r = client.post(f"/api/detections/{detection['Dick,']}/correct", json={"list": "context"})
     assert r.json()["judge_configured"] is False       # the UI warns about this

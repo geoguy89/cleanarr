@@ -100,14 +100,15 @@ class Settings:
     # was the first design and it made clearing the box impossible.)
     check_in_context: list[str] = field(
         default_factory=lambda: sorted(DEFAULT_CHECK_IN_CONTEXT))
-    # Let the file's subtitles (or a .srt beside it) decide the uncertain
-    # words - see subtitles.decide. Off by default: when unsure, mute.
-    subtitle_opinion: bool = False
+    # Let the subtitles decide the uncertain words - see subtitles.decide.
+    # On by default: a word Whisper was sure of is still muted whatever the
+    # subtitles say, and with no subtitles every word is muted as before.
+    subtitle_opinion: bool = True
     # With the above on, and no subtitles found anywhere else, ask Plex or
     # Jellyfin to search online and attach the best match - as their own
-    # "Search subtitles" does. Off by default: it adds subtitles to the item
-    # in the media server for everyone.
-    subtitle_search: bool = False
+    # "Search subtitles" does. On by default; it does nothing until a media
+    # server is chosen, and the subtitles it adds stay on the item there.
+    subtitle_search: bool = True
 
     # Bitrate for the cleaned track, per channel layout. The cleaned track is
     # a re-encode either way; this decides how much the file grows.

@@ -267,6 +267,14 @@ def test_which_subtitle_file_beside_the_media_is_used(tmp_path):
     assert media.find_sidecar_subtitles(video) is None       # French and forced never
 
 
+def test_a_late_audio_track_is_measured(tmp_path):
+    late = make_media(tmp_path / "late.mkv", seconds=6.0, audio_delay=2.0)
+    p = media.probe(late)
+    assert media.speech_offset(p, p.audio[0]) == pytest.approx(2.0, abs=0.05)
+    on_time = media.probe(make_media(tmp_path / "on.mkv", seconds=6.0))
+    assert media.speech_offset(on_time, on_time.audio[0]) == pytest.approx(0.0, abs=0.05)
+
+
 def test_which_subtitles_are_used():
     def sub(i, codec="subrip", language="eng", forced=False, title=""):
         return media.SubtitleStream(i, codec, language, title, forced)
@@ -274,6 +282,8 @@ def test_which_subtitles_are_used():
     p.subtitles = [sub(0, codec="hdmv_pgs_subtitle"), sub(1, forced=True), sub(2, language="fre"),
                    sub(3, language=""), sub(4)]
     assert media.pick_subtitles(p).sub_index == 4           # English, text, not forced
+    p.subtitles = [sub(0, title="Commentary"), sub(1, title="Signs & Songs"), sub(2, title="SDH")]
+    assert media.pick_subtitles(p).sub_index == 2           # somebody else talking, or a few lines
     p.subtitles = [sub(0, title="English (Forced)"), sub(1, language="")]
     assert media.pick_subtitles(p).sub_index == 1           # untagged beats forced
     p.subtitles = [sub(0, codec="dvd_subtitle")]

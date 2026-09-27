@@ -541,3 +541,15 @@ def test_a_menu_at_the_bottom_opens_upwards(desk):
     menu = last.locator(".menu-list")
     box, area = menu.bounding_box(), page.locator("#sheet-body").bounding_box()
     assert box["y"] + box["height"] <= area["y"] + area["height"]
+
+
+def test_the_search_says_when_there_is_no_media_server_to_ask(desk):
+    page = desk.go("settings/judge")
+    page.locator("#settings-form").wait_for()
+    assert page.locator("[name=subtitle_opinion]").is_checked()
+    assert page.locator("[name=subtitle_search]").is_checked()
+    page.locator("input[name=media_server][value=none]").check(force=True)
+    assert page.locator("#search-note").is_visible()
+    page.locator("input[name=media_server][value=plex]").check(force=True)
+    assert page.locator("#search-note").is_hidden()
+    assert desk.errors == []
