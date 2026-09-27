@@ -684,7 +684,7 @@ def _sounds_alike_on_screen(match: words.Match, word: str, cues: list[Cue],
     said = _heard_stems(heard, match.start)
     for cue in cues:
         tokens = [r for r in _ASIDE.sub(" ", cue.text).split() if words.normalize(r)]
-        if not tokens:
+        if not tokens or _reworded(cue, tokens, heard, match):
             continue
         step = (cue.end - cue.start) / len(tokens)
         for n, raw in enumerate(tokens):
@@ -699,6 +699,29 @@ def _sounds_alike_on_screen(match: words.Match, word: str, cues: list[Cue],
             if _alike(word, raw):
                 return raw.strip(" ,.!?;:-")
     return ""
+
+
+def _reworded(cue: Cue, tokens: list[str], heard: list[dict], match: words.Match) -> bool:
+    """Whether a line leaves out words Whisper heard while it was on screen -
+    content words, not the swears or the little words captions drop. Then the
+    line was reworded ("It's freezing out here." for "it is fucking cold out
+    here"), and where a word falls in it says nothing about what the swear was.
+    A chant ("City! City!" heard as "Shit, shit!") leaves nothing out."""
+    shown: set[str] = set()
+    for raw in tokens:
+        for part in [raw, *_SPLIT.split(raw)]:
+            if words.normalize(part):
+                shown |= _stems(words.normalize(part))
+    for h in heard:
+        at = float(h.get("start") or 0.0)
+        if not cue.start - 0.3 <= at <= cue.end + 0.3 or abs(at - match.start) < 0.01:
+            continue
+        bare = words.normalize(h.get("word", ""))
+        if len(bare) < 3 or sounds.function_word(bare) or _listed(bare):
+            continue
+        if not _stems(bare) & shown:
+            return True
+    return False
 
 
 def annotate(matches: list[words.Match], cues: list[Cue],

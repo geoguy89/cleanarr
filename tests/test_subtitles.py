@@ -476,3 +476,21 @@ def test_a_dropped_small_word_is_no_part_of_a_misheard_phrase():
     state, _ = subtitles.evidence(detection(heard, "hell"), cues,
                                   words.Matcher(context_words=frozenset()), heard)
     assert state != "soundalike"
+
+
+@pytest.mark.parametrize("heard_text, line, word", [
+    ("it is fucking cold out here", "It's freezing out here.", "fucking"),
+    ("and bastard last that", "And before last that the.", "bastard"),
+])
+def test_a_reworded_line_on_screen_is_no_evidence_of_a_mishearing(heard_text, line, word):
+    heard = said(heard_text)
+    state, _ = subtitles.evidence(detection(heard, word), line_at(heard, line, 9.8, 12.5),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state != "soundalike"
+
+
+def test_a_chant_on_screen_is_still_read():
+    heard = said("shit shit shit")
+    state, _ = subtitles.evidence(detection(heard, "shit"), line_at(heard, "City! City! City!", 9.9, 11.2),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state == "soundalike"
