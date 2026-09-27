@@ -394,6 +394,7 @@ Everything else lives in `/config`:
 | `/config/cache/models/` | The speech model, about 1.5 GB |
 | `/config/cache/*.json` | Transcripts, so a re-clean after a word-list change skips listening |
 | `/config/cache/posters/` | Artwork, fetched once |
+| `/config/cache/subtitles/` | Subtitles borrowed for a file with none of its own, one per job |
 | `/config/cache/huggingface/` | Hugging Face's own download cache |
 
 Deleting `/config/cache` is safe: the model downloads again and files are
@@ -447,16 +448,21 @@ Where the subtitles come from, first found wins:
    item in your media server. Jellyfin needs its OpenSubtitles plugin.
 
 3 to 5 are only looked for with this switch on, since 4 means reading a
-second file and 5 goes online. Another copy is often a slightly different cut — a studio logo more
-or less at the start shifts every line by the same few seconds, and a TV
-recording with the adverts cut differently drifts further at every break — so
-borrowed subtitles are first moved to line up with what Whisper heard: one
-shift for the file (up to three minutes either way), kept only when it clearly
-fits, then refined every few minutes. Subtitles that still disagree
-with most detections, from a copy that drifts or a different film, are set
-aside as above. The job
-says which it used — *subtitles from another copy (Film WEBDL-1080p.mkv)* — or
-*no subtitles found to check against*.
+second file and 5 goes online. The file is found in the media server by its
+path, and a show by its name, so they work when the media server has the
+library mounted somewhere else (`/data/tv` in Plex, `/tv` here) and when
+Sonarr's name carries a year Plex leaves off (*Doctor Who (2005)*).
+
+Another copy is often a slightly different cut — a studio logo more or less at
+the start shifts every line by the same few seconds, and a TV recording with
+the adverts cut differently drifts further at every break — so borrowed
+subtitles are first moved to line up with what Whisper heard: one shift for the
+file (up to three minutes either way), kept only when it clearly fits, then
+refined every few minutes. Subtitles that still disagree with most detections,
+from a copy that drifts or a different film, are set aside as above. The job
+says which it used — *subtitles from another copy (Film WEBDL-1080p.mkv)*,
+*subtitles from a Plex search (…)* — or *no subtitles found to check against*,
+and a copy of borrowed subtitles is kept in `/config/cache/subtitles/`.
 
 ### A model
 

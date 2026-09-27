@@ -33,6 +33,7 @@ import history gives.
 from __future__ import annotations
 
 import datetime as _dt
+import re
 from dataclasses import dataclass
 
 import httpx
@@ -78,6 +79,62 @@ def _english(tag) -> bool:
 def _forced(flag, title) -> bool:
     """Forced subtitles carry only the foreign-language lines - useless here."""
     return flag in (True, 1, "1", "true") or "forced" in str(title or "").lower()
+
+
+def _parts(path: str) -> list[str]:
+    return [p for p in str(path or "").replace("\\", "/").split("/") if p]
+
+
+def same_file(a: str, b: str) -> bool:
+    """Whether two paths name the same file as two programs see it.
+
+    The media server often has the library mounted somewhere else than Sonarr
+    and this container do - /data/tv against /tv - so an exact match is tried
+    first, then the file name and its folder, which inside one show or film
+    library is only ever one file.
+    """
+    if a == b:
+        return bool(a)
+    pa, pb = _parts(a), _parts(b)
+    if len(pa) < 2 or len(pb) < 2:
+        return False
+    return [x.lower() for x in pa[-2:]] == [x.lower() for x in pb[-2:]]
+
+
+def local_path(theirs: str, their_here: str, our_here: str) -> str:
+    """`theirs`, a path as the media server sees it, as this container sees it -
+    by swapping the prefix the two paths of one known file differ by."""
+    if their_here == our_here:
+        return theirs
+    a, b = _parts(their_here), _parts(our_here)
+    common = 0
+    while common < min(len(a), len(b)) and a[-1 - common] == b[-1 - common]:
+        common += 1
+    if common == 0:
+        return theirs
+    prefix, ours = a[:len(a) - common], b[:len(b) - common]
+    t = _parts(theirs)
+    if t[:len(prefix)] != prefix:
+        return theirs
+    return "/" + "/".join(ours + t[len(prefix):])
+
+
+def title_variants(title: str) -> list[str]:
+    """The show's name as Sonarr has it, and without a trailing year or country:
+    Sonarr says "Doctor Who (2005)" where Plex says "Doctor Who"."""
+    title = str(title or "").strip()
+    bare = re.sub(r"\s*\((?:\d{4}|[A-Za-z]{2,3})\)\s*$", "", title).strip()
+    return [t for t in dict.fromkeys((title, bare)) if t]
+
+
+def _pick(items: list[dict], path: str) -> str:
+    """The id of the item whose file is `path`: the exact path if one has it,
+    else the one file whose name and folder match."""
+    exact = [i["id"] for i in items if i.get("path") == path]
+    if exact:
+        return exact[0]
+    near = [i["id"] for i in items if same_file(i.get("path", ""), path)]
+    return near[0] if len(near) == 1 else ""
 
 
 # ---------------------------------------------------------------------------
@@ -291,14 +348,14 @@ class PlexLibrary:
         file itself - so a show with the same name elsewhere cannot answer.
         """
         if kind == "movie":
-            return next((m["id"] for m in self.movies() if m["path"] == path), "")
-        if not title:
-            return ""
-        for section in self._sections("show"):
-            for show in self._all(section, title=title):
-                for e in self.episodes(str(show.get("ratingKey"))):
-                    if e["path"] == path:
-                        return e["id"]
+            return _pick(self.movies(), path)
+        sections = self._sections("show") if title else []
+        for name in title_variants(title):
+            for section in sections:
+                for show in self._all(section, title=name):
+                    found = _pick(self.episodes(str(show.get("ratingKey"))), path)
+                    if found:
+                        return found
         return ""
 
     def search_subtitles(self, item_id: str) -> str:
@@ -348,14 +405,14 @@ class JellyfinLibrary:
 
     name = "jellyfin"
 
-    def _get(self, path: str, **params):
+    def _get(self, path: str, timeout: float = 0, **params):
         if not self.url or not self.api_key:
             raise LibraryError("Jellyfin address and API key are not set")
         try:
             resp = httpx.get(f"{self.url.rstrip('/')}{path}", params=params,
                              headers={**jellyfin_headers(self.api_key),
                                       "Accept": "application/json"},
-                             timeout=TIMEOUT)
+                             timeout=timeout or TIMEOUT)
         except httpx.HTTPError as exc:
             raise LibraryError(f"could not reach Jellyfin: {exc}") from exc
         if resp.status_code in (401, 403):
@@ -513,19 +570,19 @@ class JellyfinLibrary:
     def find(self, kind: str, path: str, title: str = "") -> str:
         """As PlexLibrary.find."""
         if kind == "movie":
-            return next((m["id"] for m in self.movies() if m["path"] == path), "")
-        if not title:
-            return ""
-        for show in self._items(IncludeItemTypes="Series", SearchTerm=title, Fields="Path"):
-            for e in self.episodes(str(show.get("Id"))):
-                if e["path"] == path:
-                    return e["id"]
+            return _pick(self.movies(), path)
+        for name in title_variants(title):
+            for show in self._items(IncludeItemTypes="Series", SearchTerm=name, Fields="Path"):
+                found = _pick(self.episodes(str(show.get("Id"))), path)
+                if found:
+                    return found
         return ""
 
     def search_subtitles(self, item_id: str) -> str:
         """As PlexLibrary.search_subtitles. Needs a subtitle provider plugin
         (OpenSubtitles) installed in Jellyfin; without one the search is empty."""
-        found = self._get(f"/Items/{item_id}/RemoteSearch/Subtitles/eng") or []
+        found = self._get(f"/Items/{item_id}/RemoteSearch/Subtitles/eng",
+                          timeout=SEARCH_TIMEOUT) or []
         results = [r for r in found if r.get("Id") and not r.get("IsForced")]
         if not results:
             return ""

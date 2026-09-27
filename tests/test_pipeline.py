@@ -378,6 +378,42 @@ def test_another_copy_of_the_film_lends_its_subtitles(home, settings, monkeypatc
     assert media.probe(other).cleaned_track is None        # the other copy is only read
 
 
+def test_another_copy_is_found_when_the_server_mounts_films_elsewhere(
+        home, settings, monkeypatch, tmp_path):
+    unsure_cock(monkeypatch)
+    settings.subtitle_opinion, settings.media_server = True, "plex"
+    folder = tmp_path / "movies" / "Film"
+    folder.mkdir(parents=True)
+    plain = make_media(folder / "Film WEBRip.mkv", seconds=6.0, subtitles=False)
+    make_media(folder / "Film WEBDL.mkv", seconds=6.0, cues=CUES)
+    # Plex has the films at /srv/movies; this container at <tmp>/movies.
+    server = FakeServer([{"path": "/srv/movies/Film/Film WEBRip.mkv", "subtitles": []},
+                         {"path": "/srv/movies/Film/Film WEBDL.mkv", "subtitles": []}],
+                        films=[{"id": "5", "path": str(plain)}])
+    monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
+    job = run_film(plain, settings, home / "cache")
+    assert job["status"] == "done", job["message"]
+    assert job["muted"] == 1
+    assert "subtitles from another copy (Film WEBDL.mkv)" in job["message"]
+
+
+def test_a_search_is_read_back_when_the_server_mounts_shows_elsewhere(
+        home, settings, monkeypatch, tmp_path):
+    unsure_cock(monkeypatch)
+    settings.subtitle_opinion = settings.subtitle_search = True
+    monkeypatch.setattr(pipeline, "SEARCH_WAIT", 0)
+    folder = tmp_path / "Season 01"
+    folder.mkdir()
+    plain = make_media(folder / "e1.mkv", seconds=6.0, subtitles=False)
+    theirs = "/data/tv/Show/Season 01/e1.mkv"
+    server = FakeServer([{"path": theirs, "subtitles": []}],
+                        on_search=[{"path": theirs, "subtitles": [("English", "http://p/s/9")]}])
+    monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
+    job = run(plain, settings, home / "cache", source="plex", source_id="41")
+    assert job["status"] == "done", job["message"]
+    assert job["muted"] == 1 and "a Plex search" in job["message"]
+
+
 def test_subtitles_the_media_server_holds_are_used(home, settings, monkeypatch, tmp_path):
     unsure_cock(monkeypatch)
     settings.subtitle_opinion = True
