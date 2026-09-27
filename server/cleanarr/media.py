@@ -74,6 +74,8 @@ class AudioStream:
     default: bool
     handler: str = ""
     mark: str = ""
+    # When the track's first sample plays, in seconds - see speech_offset.
+    start: float = 0.0
 
     @property
     def is_cleaned(self) -> bool:
@@ -141,6 +143,8 @@ class Probe:
     audio: list[AudioStream]
     container: str
     subtitles: list[SubtitleStream] = field(default_factory=list)
+    # The file's own start time; ffmpeg counts every stream's time from here.
+    start: float = 0.0
 
     @property
     def cleaned_track(self) -> AudioStream | None:
@@ -186,6 +190,7 @@ def probe(path: str | Path) -> Probe:
             default=bool((s.get("disposition") or {}).get("default")),
             handler=str(tags.get("handler_name", "")),
             mark=str(tags.get(MARK_KEY, "")),
+            start=_seconds(s.get("start_time")),
         ))
         ai += 1
     return Probe(
@@ -195,7 +200,27 @@ def probe(path: str | Path) -> Probe:
         audio=audio,
         container=path.suffix.lower().lstrip("."),
         subtitles=subtitles,
+        start=_seconds((data.get("format") or {}).get("start_time")),
     )
+
+
+def _seconds(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0         # "N/A", or not reported
+
+
+def speech_offset(p: Probe, track: AudioStream) -> float:
+    """Seconds to add to a time in the extracted audio to get the file's time.
+
+    The WAV Whisper hears starts at the track's first sample. The mute filter,
+    the subtitles and every player count from the start of the file. They are
+    the same only when the audio starts with the picture: a recording whose
+    audio starts 2 s in (TV captures often do) had every mute land 2 s early,
+    missing the word, and every subtitle look 2 s out.
+    """
+    return round(track.start - p.start, 3)
 
 
 def pick_source_track(p: Probe, prefer_language: str = "eng") -> AudioStream:
@@ -237,7 +262,10 @@ def pick_subtitles(p: Probe, prefer_language: str = "eng") -> SubtitleStream | N
     """
     def usable(s: SubtitleStream) -> bool:
         lang = s.language.lower()
-        return (s.is_text and not s.is_forced
+        # Commentary is somebody else talking; signs and songs, like forced
+        # subtitles, cover only a few lines.
+        extra = any(w in s.title.lower() for w in ("commentary", "signs", "songs"))
+        return (s.is_text and not s.is_forced and not extra
                 and (lang.startswith(prefer_language[:2]) or lang in ("", "und")))
 
     tagged = [s for s in p.subtitles if usable(s) and s.language]

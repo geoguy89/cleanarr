@@ -5,12 +5,13 @@ nothing in the transcript says so. The subtitles often do: they were written
 by a person who knew what was said. So each detection is compared with the
 subtitle on screen at that moment.
 
-By default this never changes what is muted. When unsure, the word is muted;
-a subtitle that disagrees only marks the detection as worth a listen, with the
-line quoted, so a wrong call is quick to find and fix with "That was wrong".
+With the subtitle second opinion switched off, this never changes what is
+muted: a subtitle that disagrees only marks the detection as worth a listen,
+with the line quoted, so a wrong call is quick to find and fix with "That was
+wrong".
 
-With the subtitles switched on as a second opinion (see decide), they also
-rule on the uncertain detections: a word on the check-in-context list, or one
+With it on - the default - the subtitles also rule on the uncertain
+detections (see decide): a word on the check-in-context list, or one
 Whisper itself was unsure of. A line that agrees keeps it muted without asking
 anyone else; a line that says something else leaves it in, marked for a
 listen; no line near it leaves the word to the model, or muted.
@@ -173,6 +174,39 @@ def align(cues: list[Cue], heard: list[dict]) -> tuple[list[Cue], float, float]:
     if best < ALIGN_MIN_SHARE or best - here < ALIGN_MIN_GAIN:
         return cues, 0.0, 0.0
 
+    # Every word heard, short ones included, for finding where a line starts.
+    spoken = sorted((float(w.get("start") or 0.0), words.normalize(w.get("word", "")))
+                    for w in heard)
+    spoken_at = [t for t, _w in spoken]
+
+    def settle(local: float, lo: float, hi: float) -> float:
+        """`local` corrected so each line starts where its first word is heard.
+
+        The best-fit run above is found from where words fall inside lines,
+        and a line stays on screen after its words end - reading time - so the
+        middle of that run sits about half a second late. Where a line begins
+        is what a subtitler times to, so the typical gap between the start of a
+        line and its first word heard is taken off. Needs three lines that
+        agree on their first word; moves at most a second."""
+        gaps = []
+        for cue in ordered:
+            at = cue.start - local
+            if not lo <= at < hi:
+                continue
+            first = _WORD.findall(cue.text.lower())
+            if not first:
+                continue
+            a = bisect.bisect_left(spoken_at, at - 1.0)
+            b = bisect.bisect_right(spoken_at, at + 1.0)
+            near = [t - at for t, w in spoken[a:b] if w == first[0]]
+            if near:
+                gaps.append(min(near, key=abs))
+        if len(gaps) < 3:
+            return local
+        gaps.sort()
+        middle = gaps[len(gaps) // 2]
+        return round(local - max(-1.0, min(1.0, middle)), 2)
+
     # Window by window, on the transcript's clock, with a tighter slack: here
     # the question is which line, not which film.
     end = words_heard[-1][0] if words_heard else 0.0
@@ -188,6 +222,7 @@ def align(cues: list[Cue], heard: list[dict]) -> tuple[list[Cue], float, float]:
                                     for d in range(-reach, reach + 1)])
             if score >= ALIGN_MIN_SHARE:
                 local = found
+        local = settle(local, centre - ALIGN_SPAN / 2, centre + ALIGN_SPAN / 2)
         windows.append((centre, local))
         centre += ALIGN_STEP
 
@@ -218,6 +253,27 @@ def align(cues: list[Cue], heard: list[dict]) -> tuple[list[Cue], float, float]:
         used.append(shift)
         moved.append(Cue(cue.start - shift, cue.end - shift, cue.text))
     return moved, min(used), max(used)
+
+
+# Whether a set of subtitles is of this dialogue at all. Measured after lining
+# up: the right subtitles put 78-98% of heard words in the line on screen,
+# another film's 2%. Checked against everything heard, not only the swears, so
+# a file with two detections is protected as well as one with twenty.
+FIT_MIN = 0.3
+FIT_MIN_WORDS = 20          # fewer words heard than this: no verdict
+
+
+def fits(cues: list[Cue], heard: list[dict]) -> bool:
+    """False when enough was heard to tell, and the subtitles do not follow it -
+    a commentary track, another episode, a language tagged wrongly."""
+    ordered = sorted(cues, key=lambda c: c.start)
+    sample = [(float(w.get("start") or 0.0), words.normalize(w.get("word", "")))
+              for w in heard]
+    sample = [(t, w) for t, w in sample if len(w) >= 4][::2][:3000]
+    if not ordered or len(sample) < FIT_MIN_WORDS:
+        return True
+    vocab = [set(_WORD.findall(c.text.lower())) for c in ordered]
+    return _share(ordered, [c.start for c in ordered], vocab, sample, 0.0) >= FIT_MIN
 
 
 def evidence(match: words.Match, cues: list[Cue], matcher: words.Matcher) -> tuple[str, str]:

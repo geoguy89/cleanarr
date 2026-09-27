@@ -1787,7 +1787,15 @@ $('#title-exceptions').addEventListener('click', (e) => {
   markDirty();
 });
 
+function renderSearchNote() {
+  const note = $('#search-note');
+  if (!note) return;
+  const server = $$('input[name="media_server"]').find((r) => r.checked)?.value || 'none';
+  note.hidden = !(F('subtitle_opinion').checked && F('subtitle_search').checked && server === 'none');
+}
+
 function renderContextNote() {
+  renderSearchNote();
   const words = tags('check_in_context').length;
   const note = $('#context-note');
   if (!note) return;

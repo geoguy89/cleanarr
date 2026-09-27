@@ -36,14 +36,19 @@ def srt(path: Path, seconds: float, cues=None) -> Path:
 
 def make_media(dest: Path, seconds: float = 6.0, audio: Path | None = None,
                channels: int = 2, audio_codec: str = "aac",
-               title: str = "Surround", subtitles: bool = True, cues=None) -> Path:
+               title: str = "Surround", subtitles: bool = True, cues=None,
+               audio_delay: float = 0.0) -> Path:
     """A tiny video with one audio track and, by default, a subtitle track.
 
     The audio is a steady tone unless `audio` names a file to use instead.
+    With `audio_delay`, the audio starts that many seconds after the picture,
+    as it often does in a TV recording.
     """
     container = dest.suffix.lower().lstrip(".")
     cmd = ["ffmpeg", "-nostdin", "-v", "error", "-y",
            "-f", "lavfi", "-i", f"testsrc=size=160x90:rate=10:duration={seconds}"]
+    if audio_delay:
+        cmd += ["-itsoffset", str(audio_delay)]
     if audio is None:
         layout = "5.1" if channels == 6 else ("mono" if channels == 1 else "stereo")
         cmd += ["-f", "lavfi", "-i",
@@ -79,11 +84,15 @@ def audio_tags(path: Path, audio_index: int) -> dict:
     return {k.lower(): v for k, v in (audio[audio_index].get("tags") or {}).items()}
 
 
-def samples(path: Path, audio_index: int) -> np.ndarray:
-    """One audio track decoded to mono float samples at RATE."""
+def samples(path: Path, audio_index: int, file_clock: bool = False) -> np.ndarray:
+    """One audio track decoded to mono float samples at RATE.
+
+    Sample 0 is the track's first sample, or with `file_clock` the start of
+    the file: a track that starts late is padded with silence in front."""
+    pad = ["-af", "aresample=async=1:first_pts=0"] if file_clock else []
     out = subprocess.run(
         ["ffmpeg", "-nostdin", "-v", "error", "-i", str(path),
-         "-map", f"0:a:{audio_index}", "-ac", "1", "-ar", str(RATE),
+         "-map", f"0:a:{audio_index}", *pad, "-ac", "1", "-ar", str(RATE),
          "-f", "s16le", "-"], capture_output=True)
     if out.returncode != 0:
         raise RuntimeError(out.stderr.decode()[-400:])

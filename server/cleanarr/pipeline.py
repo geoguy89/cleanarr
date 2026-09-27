@@ -268,6 +268,16 @@ class Pipeline:
                 download_root=str(self.cache_dir / "models"),
                 progress=self._progress(job_id, "listening"))
 
+            # Whisper's times count from the track's first sample; everything
+            # after this - the mutes, the subtitles, the times shown - counts
+            # from the start of the file. The cached transcript keeps its own.
+            offset = media.speech_offset(original, source)
+            if abs(offset) >= 0.005:
+                transcript = replace(transcript, words=[
+                    {**w, "start": float(w.get("start") or 0.0) + offset,
+                     "end": float(w.get("end") or 0.0) + offset}
+                    for w in transcript.words])
+
             self._stage(job_id, "matching", "checking the word list")
             context_words = {w.strip().lower() for w in settings.check_in_context
                              if w.strip()}
@@ -304,12 +314,21 @@ class Pipeline:
                     kept = self.cache_dir / "subtitles"
                     kept.mkdir(parents=True, exist_ok=True)
                     (kept / f"job-{job_id}.srt").write_text(text, encoding="utf8")
-                # Borrowed subtitles may be for a slightly different cut.
+            # Any of them may be timed for another cut - borrowed ones often,
+            # a .srt downloaded for the file now and then, the file's own
+            # track rarely. align() leaves subtitles that already fit alone.
+            moved = ""
+            if cues:
                 cues, low, high = subtitles.align(cues, transcript.words)
                 if low or high:
                     low, high = sorted((abs(low), abs(high)))
-                    found_where += (f", moved {high:g} s to line up" if low == high
-                                    else f", moved {low:g}-{high:g} s to line up")
+                    moved = (f"moved {high:g} s to line up" if low == high
+                             else f"moved {low:g}-{high:g} s to line up")
+            if found_where and moved:
+                found_where += f", {moved}"
+            unrelated = bool(cues) and not subtitles.fits(cues, transcript.words)
+            if unrelated:
+                cues = []
             matches, note = subtitles.annotate(matches, cues)
             if note:
                 print(f"[cleanarr] job {job_id}: {note}", flush=True)
@@ -321,12 +340,16 @@ class Pipeline:
             # used and simply agreed with everything.
             sub_note = ""
             if settings.subtitle_opinion:
-                if not cues:
+                if unrelated:
+                    sub_note = " · subtitles set aside (they do not follow the dialogue)"
+                elif not cues:
                     sub_note = " · no subtitles found to check against"
                 elif note:
                     sub_note = " · subtitles set aside (another release?)"
                 elif found_where:
                     sub_note = f" · subtitles from {found_where}"
+                elif moved:
+                    sub_note = f" · subtitles {moved}"
             matches, judged = self._adjudicate(matches, transcript.words, settings)
             matches = sorted([*settled, *matches], key=lambda m: m.start)
             kept = sorted([*kept, *judged], key=lambda m: m.start)

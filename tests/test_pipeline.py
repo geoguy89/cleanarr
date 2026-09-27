@@ -47,6 +47,7 @@ def run(path, settings, cache, **kw) -> dict:
 
 
 def test_cleans_marks_and_records(home, settings, fake_asr, episode):
+    settings.subtitle_opinion = False       # the filler subtitles would decide "cock"
     job = run(episode, settings, home / "cache")
     assert job["status"] == "done", job["message"]
     assert job["muted"] == 2
@@ -111,6 +112,7 @@ def test_the_judge_can_leave_a_word_in(home, settings, fake_asr, stub, episode):
     stub.route("POST", "/api/generate", generate)
     stub.route("GET", "/api/ps", {"models": []})
     settings.judge_url = stub.url
+    settings.subtitle_opinion = False       # the model alone decides here
     job = run(episode, settings, home / "cache")
     assert job["status"] == "done", job["message"]
     assert job["muted"] == 1
@@ -123,6 +125,7 @@ def test_the_judge_can_leave_a_word_in(home, settings, fake_asr, stub, episode):
 
 def test_an_unanswered_judge_leaves_the_word_muted(home, settings, fake_asr, episode):
     settings.judge_url = "http://127.0.0.1:9"
+    settings.subtitle_opinion = False       # the model alone decides here
     job = run(episode, settings, home / "cache")
     assert job["muted"] == 2
 
@@ -239,7 +242,8 @@ def subtitled(request, tmp_path):
     return make_media(folder / f"e1.{request.param}", seconds=6.0, cues=CUES)
 
 
-def test_subtitles_and_confidence_are_recorded_but_never_unmute(home, settings, monkeypatch, subtitled):
+def test_with_the_subtitle_opinion_off_subtitles_never_unmute(home, settings, monkeypatch, subtitled):
+    settings.subtitle_opinion = False
     heard = [dict(w) for w in WORDS]
     heard[2]["probability"] = 0.97          # "fuck," - sure
     heard[4]["probability"] = 0.31          # "cock" - unsure
@@ -440,6 +444,7 @@ def test_an_episode_never_borrows_another_files_subtitles(home, settings, monkey
 
 def test_without_the_subtitle_opinion_nothing_else_is_read(home, settings, monkeypatch, tmp_path):
     unsure_cock(monkeypatch)
+    settings.subtitle_opinion = False
     plain = make_media(tmp_path / "e1.mkv", seconds=6.0, subtitles=False)
     server = FakeServer([])
     monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
@@ -469,6 +474,7 @@ def test_the_media_server_is_asked_to_search_when_nothing_else_has_them(
 def test_no_search_unless_it_is_switched_on(home, settings, monkeypatch, tmp_path):
     unsure_cock(monkeypatch)
     settings.subtitle_opinion, settings.media_server = True, "plex"
+    settings.subtitle_search = False
     plain = make_media(tmp_path / "e1.mkv", seconds=6.0, subtitles=False)
     server = FakeServer([{"path": str(plain), "subtitles": []}],
                         films=[{"id": "41", "path": str(plain)}], on_search=[])
@@ -488,7 +494,35 @@ def test_a_search_that_finds_nothing_leaves_everything_muted(home, settings, mon
     assert "no subtitles found" in job["message"]
 
 
+def test_the_subtitle_opinion_and_search_are_on_by_default():
+    fresh = config.Settings()
+    assert fresh.subtitle_opinion and fresh.subtitle_search
+
+
+def test_subtitles_that_do_not_follow_the_dialogue_decide_nothing(home, settings, monkeypatch, tmp_path):
+    """Two detections are too few for the per-detection check; the whole
+    transcript is not."""
+    talk = [f"sentence{n} about gardening tomatoes carefully" for n in range(12)]
+    heard, cues = [], []
+    for n, line in enumerate(talk):
+        start = 10.0 + n * 4.0
+        for k, word in enumerate(line.split()):
+            heard.append({"word": " " + word, "start": start + k * 0.4, "end": start + k * 0.4 + 0.3,
+                          "probability": 0.9})
+        cues.append((start - 0.1, start + 2.5, "Completely unrelated commentary about lenses"))
+    heard.append({"word": " cock", "start": 70.0, "end": 70.3, "probability": 0.3})
+    cues.append((69.8, 71.0, "Get some caulk on it."))
+    monkeypatch.setattr(asr, "transcribe", lambda audio, **kw: asr.Transcript(
+        words=heard, language="en", duration=80.0, model="fake"))
+    src = make_media(tmp_path / "e1.mkv", seconds=80.0, cues=cues)
+    job = run(src, settings, home / "cache")
+    assert job["status"] == "done", job["message"]
+    assert job["muted"] == 1                            # "cock" stays muted
+    assert "do not follow the dialogue" in job["message"]
+
+
 def test_a_file_without_subtitles_still_cleans(home, settings, fake_asr, tmp_path):
+    settings.subtitle_opinion = False
     src = make_media(tmp_path / "plain.mkv", seconds=6.0, subtitles=False)
     job = run(src, settings, home / "cache")
     assert job["status"] == "done"

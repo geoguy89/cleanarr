@@ -210,8 +210,9 @@ numbered in the order things need doing:
 3. **Listening** — download the speech model here rather than during your first
    clean.
 4. **Muting** — padding, fade and the new track's name. The defaults are fine.
-5. **Second opinion** — optional, off by default: the file's subtitles, your
-   own model, or both.
+5. **Second opinion** — the subtitles settle uncertain words (on by default,
+   with an online search through Plex or Jellyfin for files that have none);
+   your own model is optional.
 6. **Media server** — where films come from, and extra subtitles; also
    refreshes the library and pauses during transcodes.
 7. **Advanced** — bitrates, ffmpeg threads, number format, keeping backups.
@@ -280,7 +281,10 @@ the library reports costs nothing and leaves one fewer thing to get wrong.
 
 1. **Probe** — ffprobe reads the file. One already carrying a cleaned track is
    skipped unless you ask again.
-2. **Extract** — the English audio, as 16 kHz mono.
+2. **Extract** — the English audio, as 16 kHz mono. Times are then counted
+   from the start of the file, not of the audio: TV recordings often start the
+   audio a second or two after the picture, and the mutes and subtitles follow
+   the file's clock.
 3. **Listen** — Whisper transcribes with **word-level** timestamps. A subtitle
    line says a swear happened somewhere in four seconds; words give ~50 ms.
 4. **Match** — whole words only, so *class* and *cockpit* are never caught. A
@@ -297,10 +301,11 @@ re-cleaning skips the slow part.
 
 ## Keeping the right words
 
-When anything is uncertain the word is muted — that is the default, and only
-a [second opinion](#the-second-opinion) you switch on changes it. What these
-do is keep innocent words out of the lists in the first place, and make the
-rare wrong call quick to find and fix.
+When nothing settles an uncertain word, it is muted. The subtitle
+[second opinion](#the-second-opinion), on by default, leaves one in only when
+the line on screen clearly says something else. What these do is keep innocent
+words out of the lists in the first place, and make the rare wrong call quick
+to find and fix.
 
 **Before anything is muted**
 
@@ -406,8 +411,8 @@ by this version are still recognised as Cleanarr's from the file alone.
 
 ## The second opinion
 
-**Optional and off by default.** Two can be switched on, alone or together:
-the file's own subtitles, which cost nothing, and your own model.
+Two, alone or together: the subtitles, **on by default** and free, and your
+own model, optional and off.
 
 Speech recognition writes homophones. A scene about drywall produced nine mutes
 of *“cock”* — the word was *“caulk”*. No word list fixes that, because the
@@ -442,23 +447,28 @@ Where the subtitles come from, first found wins:
 4. for a film, **another copy of it** that the media server knows about: a
    WEB-DL beside a WEBRip often has the subtitles the other lacks. The other
    copy is only read, never changed.
-5. with **If none are found, ask the media server to search online** also on,
-   a search by Plex or Jellyfin, which attaches the best English match to the
-   item exactly as its own *Search subtitles* does. Those subtitles stay on the
-   item in your media server. Jellyfin needs its OpenSubtitles plugin.
+5. with **If none are found, ask the media server to search online** (on by
+   default), a search by Plex or Jellyfin, which attaches the best English
+   match to the item exactly as its own *Search subtitles* does. Those
+   subtitles stay on the item in your media server. Jellyfin needs its
+   OpenSubtitles plugin.
 
-3 to 5 are only looked for with this switch on, since 4 means reading a
-second file and 5 goes online. The file is found in the media server by its
+3 to 5 need a media server chosen under **Media server**, and are only looked
+for with this switch on, since 4 means reading a second file and 5 goes
+online. The file is found in the media server by its
 path, and a show by its name, so they work when the media server has the
 library mounted somewhere else (`/data/tv` in Plex, `/tv` here) and when
 Sonarr's name carries a year Plex leaves off (*Doctor Who (2005)*).
 
-Another copy is often a slightly different cut — a studio logo more or less at
-the start shifts every line by the same few seconds, and a TV recording with
-the adverts cut differently drifts further at every break — so borrowed
-subtitles are first moved to line up with what Whisper heard: one shift for the
-file (up to three minutes either way), kept only when it clearly fits, then
-refined every few minutes. Subtitles that still disagree with most detections,
+Subtitles are often timed for a slightly different cut — a studio logo more
+or less at the start shifts every line by the same few seconds, and a TV
+recording with the adverts cut differently drifts further at every break. It
+happens most with another copy's or a search's, sometimes with a downloaded
+`.srt`, rarely with the file's own. So whatever the source, the subtitles are
+first lined up with what Whisper heard: one shift for the file (up to three
+minutes either way), kept only when it clearly fits, then refined every few
+minutes, each line starting where its first word is heard. Subtitles that
+already fit are left alone. Subtitles that still disagree with most detections,
 from a copy that drifts or a different film, are set aside as above. The job
 says which it used — *subtitles from another copy (Film WEBDL-1080p.mkv)*,
 *subtitles from a Plex search (…)* — or *no subtitles found to check against*,

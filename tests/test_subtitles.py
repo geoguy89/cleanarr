@@ -197,3 +197,13 @@ def test_subtitles_of_something_else_are_not_forced_into_line():
     other = [subtitles.Cue(c.start, c.end, "Completely unrelated dialogue here") for c in cues]
     assert subtitles.align(other, heard) == (other, 0.0, 0.0)
     assert subtitles.align([], heard) == ([], 0.0, 0.0)
+
+
+def test_subtitles_that_do_not_follow_the_dialogue_are_rejected():
+    heard, cues = heard_and_cues(0.0)
+    assert subtitles.fits(cues, heard)
+    other = [subtitles.Cue(c.start, c.end, "Completely unrelated dialogue here") for c in cues]
+    assert not subtitles.fits(other, heard)
+    # Too little heard to tell: no verdict, so the old per-detection check decides.
+    assert subtitles.fits(other, heard[:30])
+    assert subtitles.fits([], heard)

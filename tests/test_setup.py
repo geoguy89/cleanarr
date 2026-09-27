@@ -18,14 +18,14 @@ def test_a_fresh_install_has_everything_to_do(client, settings):
     assert got["listening"][0] == "todo"
     assert got["first_clean"][0] == "todo"
     assert got["login"][0] == "info"
-    assert "judge" in got                   # default words listed, no judge set
+    assert "judge" not in got               # the subtitles are the second opinion
     assert client.get("/api/setup").json()["done"] is False
 
 
-def test_the_subtitle_opinion_counts_as_a_second_opinion(client, settings):
-    settings.subtitle_opinion = True
+def test_with_no_second_opinion_the_checklist_says_so(client, settings):
+    settings.subtitle_opinion = False
     config.save(settings)
-    assert "judge" not in states(client)
+    assert "judge" in states(client)        # default words listed, nothing to ask
 
 
 def test_a_finished_install(client, settings, stub, tmp_path, monkeypatch):
