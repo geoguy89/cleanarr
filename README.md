@@ -14,10 +14,22 @@ Built for a household with a small child in the room, so when anything is
 uncertain the word gets muted.
 
 ```
- your library ──▶ queue ──▶ ffmpeg ──▶ Whisper ──▶ word list
-                                                       │
-                         file with a new track ◀── mute + remux
+ your library ──▶ queue ──▶ ffmpeg ──▶ Whisper ──▶ word list ──▶ subtitles
+                                                                    │
+                                   file with a new track ◀── mute + remux
 ```
+
+* **Word-accurate muting** — Whisper gives each word's time to ~50 ms, so only
+  the swear goes silent, not the line around it.
+* **Subtitles as a second opinion** (on by default) — for a word Whisper was
+  unsure of, the subtitle line on screen settles it: *“Pass me the caulk gun”*
+  leaves *caulk* in. Subtitles come from the file, a `.srt` beside it, or
+  Plex or Jellyfin, which can search for them online, and are lined up with
+  the speech first.
+* **One click to fix a wrong call**, per show or everywhere, and every mute is
+  listed with its evidence.
+* **Shows that clean themselves** as new episodes arrive, from Sonarr, Plex or
+  Jellyfin.
 
 ---
 
@@ -78,8 +90,9 @@ until you press Save. Each Test button tries what is typed, before it is saved.
 
 | | |
 |---|---|
-| **A library** | Plex or Jellyfin, optionally with Sonarr for shows. Read-only — Cleanarr never writes to any of them. |
-| **Media** | Reachable from this container. The paths do not have to match your library's; see [Paths](#paths). |
+| **A library** | Plex or Jellyfin, optionally with Sonarr for shows. Only asked what exists — except that the subtitle search asks Plex or Jellyfin to attach subtitles it finds (see [The subtitles](#the-subtitles)). |
+| **Media** | Mounted so the paths your library reports exist in this container; see [Paths](#paths). |
+| **Subtitles** | Optional, and used when there: in the file, a `.srt` beside it, or found by Plex or Jellyfin. |
 | **GPU** | Optional. NVIDIA is much faster; CPU works. See [Hardware](#hardware). |
 | **Disk** | ~1.5 GB for the speech model, plus ~90 MB per cleaned 25-minute episode. |
 | **Ollama** | Optional, off by default. See [The second opinion](#the-second-opinion). |
@@ -289,8 +302,11 @@ the library reports costs nothing and leaves one fewer thing to get wrong.
    line says a swear happened somewhere in four seconds; words give ~50 ms.
 4. **Match** — whole words only, so *class* and *cockpit* are never caught. A
    phrase mutes only the profane word: *“oh my god”* silences *god*.
-5. **Mute** — each match silenced with a 20 ms fade at each edge.
-6. **Verify, then swap** — the new file replaces the original **only** after
+5. **Check** — the subtitles are lined up with what was heard, and settle the
+   uncertain words; your own model, if set, gets the rest. See
+   [The second opinion](#the-second-opinion).
+6. **Mute** — each match silenced with a 20 ms fade at each edge.
+7. **Verify, then swap** — the new file replaces the original **only** after
    ffprobe confirms every original stream is present plus one, at the same
    duration, correctly interleaved.
 
