@@ -27,6 +27,7 @@ from __future__ import annotations
 import bisect
 import re
 from dataclasses import dataclass, replace
+from functools import lru_cache
 
 from . import sounds, words
 
@@ -108,6 +109,8 @@ def _plain(bare: str) -> str:
         bare = "ass" + bare[4:]
     return bare + "g" if bare.endswith("in") and len(bare) >= 5 else bare
 _BLEEP = re.compile(r"\[\s*(bleep|beep|censored|expletive)[^\]]*\]|\*{3,}", re.I)
+# A word broken off: letters, then a dash or dots, and nothing after.
+_STUB = re.compile(r"[^\w]*([a-z]+)(?:-+|—|–|…|\.\.\.)[^\w]*", re.I)
 
 
 def _is_word(raw: str, word: str, matcher: words.Matcher) -> bool:
@@ -119,10 +122,15 @@ def _is_word(raw: str, word: str, matcher: words.Matcher) -> bool:
         letters = _HIDDEN.split(raw.lower())
         pattern = ".+".join(re.escape(re.sub(r"[^a-z']", "", p)) for p in letters)
         return bool(pattern.strip(".+")) and re.fullmatch(pattern, word) is not None
+    # Cut short with a dash or dots: "sh-", "f--", "mother—", "b...".
+    stub = _STUB.fullmatch(raw)
+    if stub:
+        return word.startswith(stub.group(1).lower())
     bare, word = _plain(words.normalize(raw)), _plain(word)
     if not bare:
         return False
-    if bare == word:
+    # The word itself, possessive or plural: "Christ's", "fucks".
+    if bare in (word, word + "s", word + "es"):
         return True
     if len(bare) >= 3 and len(word) >= 3 and (word in bare or bare in word):
         return bool(matcher.find([{"word": bare, "start": 0.0, "end": 0.0}]))
@@ -134,7 +142,9 @@ def _says_it(text: str, word: str, matcher: words.Matcher) -> bool:
     that could be any word."""
     if _BLEEP.search(text):
         return True
-    return any(_is_word(raw, word, matcher) for raw in _SPLIT.split(text) if raw)
+    # Whole tokens first, so a dash that cuts a word short is still seen.
+    return any(_is_word(raw, word, matcher) for raw in text.split()) or \
+        any(_is_word(raw, word, matcher) for raw in _SPLIT.split(text) if raw)
 
 
 # Lining up borrowed subtitles - another copy's, or ones the media server
@@ -443,6 +453,9 @@ def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[
     tokens = _script_tokens(cues, match.start)
     if not tokens:
         return None
+    # Words Whisper heard around the swear: in the line, they were said too,
+    # so they are not what the swear really was.
+    heard_here = _heard_stems(heard, match.start)
 
     def says(slot) -> bool:
         return any(_is_word(raw, word, matcher) or _BLEEP.search(raw)
@@ -456,16 +469,22 @@ def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[
         if any(sounds.softened(t) for t in rest) or matcher.find(
                 [{"word": raw, "start": 0.0, "end": 0.0} for raw in shown]):
             return REPLACED, said
-        # Cut short: "mother" for "motherfucker".
-        if any(len(t) >= 4 and word.startswith(_plain(t)) for t in rest):
+        # Cut short ("mother" for "motherfucker"), or run on ("pussycat").
+        if any(_softens(raw, word, matcher) for raw in shown):
             return REPLACED, said
         # What was heard there that the line does not have - the swear, and
         # any words misheard with it: "road to hell" against "Roosevelt".
         in_line = {t for t, _raw in slot}
-        spoken = " ".join(w for w in bare[i - lgap:i + 1 + rgap]
-                          if w == bare[i] or w not in in_line)
-        if sounds.sounds_alike(spoken, " ".join(shown)) or any(
-                sounds.sounds_alike(word, raw) for raw in shown):
+        span = [w for w in bare[i - lgap:i + 1 + rgap] if w == bare[i] or w not in in_line]
+        # From its first content word to its last: a "to" the line dropped is
+        # no part of the mishearing ("to hell" scored 0.65+ against "table").
+        while len(span) > 1 and span[0] != bare[i] and sounds.function_word(span[0]):
+            span.pop(0)
+        while len(span) > 1 and span[-1] != bare[i] and sounds.function_word(span[-1]):
+            span.pop()
+        spoken = " ".join(span)
+        new = [raw for raw in shown if not _stems(words.normalize(raw)) & heard_here]
+        if new and (_alike(spoken, " ".join(new)) or any(_alike(word, raw) for raw in new)):
             return SOUNDALIKE, said
         return REPLACED, said
 
@@ -517,10 +536,102 @@ def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[
                 t, raw = tokens[k]
                 if _is_word(raw, word, matcher) or _BLEEP.search(raw):
                     return AGREES, ""
-                if not matcher.find([{"word": raw, "start": 0.0, "end": 0.0}]) \
-                        and not sounds.softened(t) and sounds.sounds_alike(word, raw):
+                if not _softens(raw, word, matcher) and not _stems(t) & heard_here \
+                        and _alike(word, raw):
                     return SOUNDALIKE, raw.strip(" ,.!?;:-")
     return None
+
+
+# Endings, not words: "fuck" + "ing" is not a compound.
+_ENDINGS = frozenset({"ing", "ings", "ed", "er", "ers", "es", "in", "ted", "ting", "ter", "ty"})
+
+
+@lru_cache(maxsize=4096)
+def _halves(word: str) -> tuple[str, str, bool] | None:
+    """(harmless half, swear half, whether the harmless half comes first) for a
+    compound swear - "mother" + "fucker", "dumb" + "ass", "dick" + "head" - or None."""
+    if not word.isalpha():
+        return None
+    known, listed = sounds._dictionary(), _listed
+    for i in range(3, len(word) - 2):
+        a, b = word[:i], word[i:]
+        if a in known and b in known:
+            if listed(b) and not listed(a) and a not in _ENDINGS:
+                return a, b, True
+            if listed(a) and not listed(b) and b not in _ENDINGS:
+                return b, a, False
+    return None
+
+
+@lru_cache(maxsize=4096)
+def _listed(word: str) -> bool:
+    return bool(_everyone().find([{"word": word, "start": 0.0, "end": 0.0}]))
+
+
+@lru_cache(maxsize=1)
+def _everyone() -> words.Matcher:
+    return words.Matcher(context_words=frozenset())
+
+
+def _alike(heard: str, shown: str) -> bool:
+    """sounds.sounds_alike, except that a caption keeping the harmless half of a
+    compound swear is compared on the other half alone: "mother-trucker" is
+    trucker against fucker, "smarty" is -y against ass. The shared half made
+    them score as sound-alikes (0.84, 0.84) and a dub was left in. With nothing
+    left once the shared half is taken off, the swear was cut short. Nor is a
+    caption of only function words a sound-alike: see sounds.FUNCTION_WORDS."""
+    shown_words = _WORD.findall(str(shown or "").lower().replace("’", "'"))
+    if shown_words and all(sounds.function_word(w) for w in shown_words):
+        return False
+    halves = _halves(heard)
+    y = sounds.phones(shown)
+    if halves and y:
+        harmless, swear, first = halves
+        h = sounds.phones(harmless) or []
+        if h and first and y[:len(h)] == h:
+            return sounds.phones_alike(sounds.phones(swear), y[len(h):])
+        if h and not first and y[-len(h):] == h:
+            return sounds.phones_alike(sounds.phones(swear), y[:-len(h)])
+    return sounds.sounds_alike(heard, shown)
+
+
+def _stems(bare: str) -> set[str]:
+    """A word and what it may be short for: "she's" -> she, "we're" -> we,
+    "gets" -> get. A caption contracts and inflects what was said."""
+    plain = _plain(bare)
+    out = {plain}
+    for end in ("s", "es", "d", "ed", "ing", "ll", "re", "ve", "nt"):
+        if plain.endswith(end) and len(plain) - len(end) >= 2:
+            out.add(plain[:-len(end)])
+    return out
+
+
+def _heard_stems(heard: list[dict], at: float, seconds: float = 3.0) -> set[str]:
+    out: set[str] = set()
+    for h in heard:
+        if abs(float(h.get("start") or 0.0) - at) <= seconds:
+            out |= _stems(words.normalize(h.get("word", "")))
+    return out
+
+
+def _softens(raw: str, word: str, matcher: words.Matcher) -> bool:
+    """Whether a caption word stands in for the swear rather than sounding like
+    it, reading each part of a hyphenated one: a minced oath ("bull-shoot",
+    "god dang"), another swear ("horse-crap"), or the swear cut short ("mother",
+    "bull-", "jack", "bone" for "boner")."""
+    parts = [words.normalize(x) for x in [raw, *_SPLIT.split(raw)]]
+    for part in filter(None, parts):
+        if sounds.softened(part) or matcher.find([{"word": part, "start": 0.0, "end": 0.0}]):
+            return True
+        plain = _plain(part)
+        if len(plain) >= 3 and plain != word and (word.startswith(plain) or plain.startswith(word)):
+            # Cut short ("puss"), or the swear with more on it ("pussycat",
+            # "what the dickens") - unless it is the same sound spelled
+            # another way: "dam" is not "damn" cut short, it is a homophone.
+            x, y = sounds.phones(plain), sounds.phones(word)
+            if not (x and y and x == y):
+                return True
+    return bool(_STUB.fullmatch(raw))
 
 
 def evidence(match: words.Match, cues: list[Cue], matcher: words.Matcher,
@@ -575,11 +686,10 @@ def _sounds_alike_on_screen(match: words.Match, word: str, cues: list[Cue],
     "hell". Nor does a word Whisper also heard close by: it was said as well,
     so it is not what the swear really was ("This is what you get." with the
     "Oh my god" after it left out)."""
-    said = {_plain(words.normalize(h.get("word", ""))) for h in heard
-            if abs(float(h.get("start") or 0.0) - match.start) <= 3.0}
+    said = _heard_stems(heard, match.start)
     for cue in cues:
         tokens = [r for r in _ASIDE.sub(" ", cue.text).split() if words.normalize(r)]
-        if not tokens:
+        if not tokens or _reworded(cue, tokens, heard, match):
             continue
         step = (cue.end - cue.start) / len(tokens)
         for n, raw in enumerate(tokens):
@@ -587,14 +697,36 @@ def _sounds_alike_on_screen(match: words.Match, word: str, cues: list[Cue],
             if abs(at - (match.start + match.end) / 2) > LINE_POSITION + step / 2:
                 continue
             bare = words.normalize(raw)
-            if _plain(bare) in said:
+            if _stems(bare) & said:
                 continue
-            if (sounds.softened(bare) or matcher.find([{"word": raw, "start": 0.0, "end": 0.0}])
-                    or len(word) >= 4 and word.startswith(_plain(bare))):
+            if _softens(raw, word, matcher):
                 continue
-            if sounds.sounds_alike(word, raw):
+            if _alike(word, raw):
                 return raw.strip(" ,.!?;:-")
     return ""
+
+
+def _reworded(cue: Cue, tokens: list[str], heard: list[dict], match: words.Match) -> bool:
+    """Whether a line leaves out words Whisper heard while it was on screen -
+    content words, not the swears or the little words captions drop. Then the
+    line was reworded ("It's freezing out here." for "it is fucking cold out
+    here"), and where a word falls in it says nothing about what the swear was.
+    A chant ("City! City!" heard as "Shit, shit!") leaves nothing out."""
+    shown: set[str] = set()
+    for raw in tokens:
+        for part in [raw, *_SPLIT.split(raw)]:
+            if words.normalize(part):
+                shown |= _stems(words.normalize(part))
+    for h in heard:
+        at = float(h.get("start") or 0.0)
+        if not cue.start - 0.3 <= at <= cue.end + 0.3 or abs(at - match.start) < 0.01:
+            continue
+        bare = words.normalize(h.get("word", ""))
+        if len(bare) < 3 or sounds.function_word(bare) or _listed(bare):
+            continue
+        if not _stems(bare) & shown:
+            return True
+    return False
 
 
 def annotate(matches: list[words.Match], cues: list[Cue],
@@ -698,7 +830,7 @@ def from_subtitles(cues: list[Cue], heard: list[dict], matches: list[words.Match
                   if cue.start - WIDE_WINDOW <= m.start <= cue.end + WIDE_WINDOW]
         for n, (bare, raw) in enumerate(tokens):
             found = matcher.find([{"word": raw, "start": 0.0, "end": 0.0}])
-            hidden = bool(_HIDDEN_WORD.fullmatch(raw)) and "strong" in matcher.categories
+            hidden = _hides_a_swear(raw) and "strong" in matcher.categories
             if not (found or hidden):
                 continue
             if found and bare in matcher.context_words:
@@ -727,6 +859,26 @@ def from_subtitles(cues: list[Cue], heard: list[dict], matches: list[words.Match
     return out
 
 
+@lru_cache(maxsize=1)
+def _all_listed() -> tuple[str, ...]:
+    out = set(words.BLASPHEMY_SOLO)
+    for group in words.WORDLISTS.values():
+        out |= set(group)
+    return tuple(sorted(out))
+
+
+def _hides_a_swear(raw: str) -> bool:
+    """A word with letters hidden that fits a listed swear: "f***", "sh*t",
+    "a**hole". Names written with a symbol - "Ke$ha", "A$AP", "C#",
+    "E*Trade", "M*A*S*H" - fit none, and a lone $ or # is a name or a note,
+    not a bleep: each was muted as a swear before."""
+    if not _HIDDEN_WORD.fullmatch(raw):
+        return False
+    if "*" not in raw and sum(len(x) for x in _HIDDEN.findall(raw)) < 2:
+        return False
+    return any(_is_word(raw, w, _everyone()) for w in _all_listed())
+
+
 def _place(tokens, n, window) -> tuple[float, float, str] | None:
     curse = tokens[n][0]
     """(start, end, what Whisper heard there) for subtitle token n, from the
@@ -738,6 +890,31 @@ def _place(tokens, n, window) -> tuple[float, float, str] | None:
         hits = [p for p in range(len(bare) - len(seq) + 1)
                 if tuple(bare[p:p + len(seq)]) == seq]
         return hits
+
+    def usable(seq, k) -> bool:
+        return len(seq) == k and all(seq) and (k == 2 or (seq[0] not in _ANCHOR_STOP
+                                                          and len(seq[0]) >= 3))
+
+    # Every place either side is found, paired nearest first: when the words
+    # either side repeat ("about hell about"), the last "about" before the
+    # swear and the first after it are not the pair that holds it.
+    lefts, rights = [], []
+    for k in (1, 2):
+        if n - k >= 0:
+            seq = tuple(t for t, _r in tokens[n - k:n])
+            if usable(seq, k):
+                lefts += [p + k - 1 for p in find(seq, True)]
+        seq = tuple(t for t, _r in tokens[n + 1:n + 1 + k])
+        if usable(seq, k):
+            rights += find(seq, False)
+    pairs = sorted((r - l, l, r) for l in lefts for r in rights if 0 < r - l <= 4)
+    if pairs:
+        _gap, left, right = pairs[0]
+        start, end = window[left][1], window[right][0]
+        between = " ".join(w[3] for w in window[left + 1:right])
+        if not PLACE_MIN <= end - start <= PLACE_MAX:
+            return None
+        return start, end, between
 
     left = right = None
     paired = False

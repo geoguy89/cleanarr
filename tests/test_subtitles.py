@@ -351,3 +351,179 @@ def test_british_spellings_are_the_same_swear():
     matcher = words.Matcher(context_words=frozenset())
     assert subtitles._is_word("arse", "ass", matcher)
     assert subtitles._is_word("arsehole", "asshole", matcher)
+
+
+# ---------------------------------------------------------------- stress-test findings
+
+@pytest.mark.parametrize("raw, word", [
+    ("sh-", "shit"), ("f--", "fuck"), ("Mother—", "motherfucker"), ("b...", "bitch"),
+    ("Christ's", "christ"), ("fucks", "fuck"),
+])
+def test_a_word_cut_short_or_possessive_is_the_word(raw, word):
+    assert subtitles._is_word(raw, word, words.Matcher(context_words=frozenset()))
+
+
+def test_a_dash_inside_a_word_is_not_a_cut():
+    assert not subtitles._is_word("mother-in-law", "motherfucker",
+                                  words.Matcher(context_words=frozenset()))
+
+
+@pytest.mark.parametrize("heard_text, line, word", [
+    ("oh shit they found us", "Oh, sh-, they found us!", "shit"),
+    ("oh christ not again", "Oh, Christ's sake, not again.", "christ"),
+])
+def test_a_cut_short_or_possessive_caption_mutes(heard_text, line, word):
+    heard = said(heard_text)
+    state, _ = subtitles.evidence(detection(heard, word), line_at(heard, line, 9.8, 12.5),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state == "agrees"
+
+
+@pytest.mark.parametrize("heard_text, line, word", [
+    ("kill this motherfucker", "Kill this mother...", "motherfucker"),
+    ("motherfucker i forgot the keys", "Mother, I forgot the keys.", "motherfucker"),
+    ("that is total bullshit", "That is total bull-shoot.", "bullshit"),
+    ("what a load of horseshit", "What a load of horse-crap.", "horseshit"),
+    ("well goddamn", "Well, god dang!", "goddamn"),
+    ("you are such a jackass", "You're such a jack-", "jackass"),
+    ("i got a boner", "I got a bone.", "boner"),
+])
+def test_a_softening_on_one_side_of_the_line_is_never_a_sound_alike(heard_text, line, word):
+    heard = said(heard_text)
+    state, _ = subtitles.evidence(detection(heard, word), line_at(heard, line, 9.8, 12.5),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state != "soundalike"
+
+
+@pytest.mark.parametrize("heard, shown", [
+    ("motherfucker", "mother-trucker"), ("motherfucker", "mother lover"),
+    ("motherfucking", "mother-loving"), ("smartass", "smarty"), ("dumbass", "dummy"),
+    ("dumbass", "dumbo"), ("asshole", "a-hole"), ("motherfucker", "mother"),
+])
+def test_a_compound_is_compared_on_its_swear_half(heard, shown):
+    assert not subtitles._alike(heard, shown)
+
+
+def test_a_compound_still_finds_a_mishearing_of_its_swear_half():
+    assert subtitles._alike("cocksucker", "caulk sucker")
+    assert subtitles._alike("dickhead", "dig head")
+
+
+@pytest.mark.parametrize("heard_text, line", [
+    ("you motherfucker", "You mother-trucker!"),
+    ("what a smartass you are", "What a smarty you are."),
+    ("do not be a dumbass", "Don't be a dummy."),
+])
+def test_a_tv_dub_of_a_compound_is_muted(heard_text, line):
+    heard = said(heard_text)
+    m = next(x for x in words.Matcher().find(heard))
+    state, _ = subtitles.evidence(m, line_at(heard, line, 9.8, 12.5),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state != "soundalike"
+
+
+@pytest.mark.parametrize("heard_text, line, word", [
+    ("you little fucker get back here", "You little sucker, get back here!", "fucker"),
+    ("we are so fucked now", "We're so freaked now.", "fucked"),
+    ("snakes on this motherfucking plane", "Snakes on this monkey-fighting plane!", "motherfucking"),
+    ("you motherfucker", "You mother flipper!", "motherfucker"),
+    ("what a dickhead", "What a dipstick.", "dickhead"),
+])
+def test_a_known_dub_is_muted(heard_text, line, word):
+    heard = said(heard_text)
+    state, _ = subtitles.evidence(detection(heard, word), line_at(heard, line, 9.8, 12.5),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state != "soundalike"
+
+
+@pytest.mark.parametrize("heard_text, line, word", [
+    ("oh shit she is here", "Oh, she's here.", "shit"),
+    ("because the at and get ass talk", "Because the get and at whoa talk.", "ass"),
+])
+def test_a_caption_word_whisper_heard_nearby_is_not_the_sound_alike(heard_text, line, word):
+    """Contracted ("she's" for "she is") or moved, it was said as well."""
+    heard = said(heard_text)
+    state, _ = subtitles.evidence(detection(heard, word), line_at(heard, line, 9.8, 13.0),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state != "soundalike"
+
+
+def test_stems():
+    assert {"she"} <= subtitles._stems("she's") and {"we"} <= subtitles._stems("we're")
+    assert subtitles._stems("caulk") == {"caulk"}
+
+
+@pytest.mark.parametrize("heard, shown", [
+    ("tits", "it's"), ("damn", "am"), ("cunt", "can't"), ("hell", "here"), ("shit", "she"),
+    ("dick", "did"), ("whore", "or"), ("ass", "as"), ("bitch", "been"),
+])
+def test_a_function_word_is_never_a_sound_alike(heard, shown):
+    """They score 0.67-0.9 against the swear, but a caption with one in the
+    swear's place has reworded the line."""
+    assert not subtitles._alike(heard, shown)
+
+
+def test_tits_out_lads():
+    heard = said("tits out lads")
+    state, _ = subtitles.evidence(detection(heard, "tits"), line_at(heard, "It's out, lads.", 9.8, 11.5),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state != "soundalike"
+
+
+def test_a_dropped_small_word_is_no_part_of_a_misheard_phrase():
+    heard = said("what up with to hell can")
+    cues = [subtitles.Cue(9.8, 10.9, "What up"), subtitles.Cue(10.95, 12.4, "- with TABLE can!")]
+    state, _ = subtitles.evidence(detection(heard, "hell"), cues,
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state != "soundalike"
+
+
+@pytest.mark.parametrize("heard_text, line, word", [
+    ("it is fucking cold out here", "It's freezing out here.", "fucking"),
+    ("and bastard last that", "And before last that the.", "bastard"),
+])
+def test_a_reworded_line_on_screen_is_no_evidence_of_a_mishearing(heard_text, line, word):
+    heard = said(heard_text)
+    state, _ = subtitles.evidence(detection(heard, word), line_at(heard, line, 9.8, 12.5),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state != "soundalike"
+
+
+def test_a_chant_on_screen_is_still_read():
+    heard = said("shit shit shit")
+    state, _ = subtitles.evidence(detection(heard, "shit"), line_at(heard, "City! City! City!", 9.9, 11.2),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state == "soundalike"
+
+
+@pytest.mark.parametrize("heard_text, line, misheard", [
+    ("because about hail about back", "Because about hell about back.", "hail"),
+    ("get dan get party because back", "Get damn get party because back.", "dan"),
+    ("to can dig can talk", "To can dick can talk.", "dig"),
+])
+def test_a_missed_swear_between_repeated_words_is_still_placed(heard_text, line, misheard):
+    got, heard = placed(heard_text, line)
+    w = next(h for h in heard if h["word"].strip() == misheard)
+    assert len(got) == 1 and got[0].start <= w["start"] and got[0].end >= w["end"]
+
+
+@pytest.mark.parametrize("name", ["Ke$ha", "A$AP", "C#", "F#", "E*Trade", "Q*bert", "M*A*S*H",
+                                  "B*Witched"])
+def test_a_name_written_with_a_symbol_is_not_a_hidden_swear(name):
+    got, _ = placed("we were listening to something all night", f"We were listening to {name} all night.")
+    assert got == []
+
+
+@pytest.mark.parametrize("hidden", ["f***", "sh*t", "a**hole", "b*tch", "f***ing"])
+def test_a_hidden_swear_still_is(hidden):
+    assert subtitles._hides_a_swear(hidden)
+
+
+@pytest.mark.parametrize("shown", ["pussycat", "puss", "pussy-"])
+def test_a_caption_that_cuts_or_runs_on_the_swear_is_a_softening(shown):
+    assert subtitles._softens(shown, "pussy", words.Matcher(context_words=frozenset()))
+
+
+def test_a_homophone_is_not_cut_short():
+    """"dam" sounds exactly like "damn": a mishearing, not a cut."""
+    assert not subtitles._softens("dam", "damn", words.Matcher(context_words=frozenset()))
