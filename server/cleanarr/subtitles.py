@@ -94,25 +94,37 @@ def _says_it(text: str, word: str, matcher: words.Matcher) -> bool:
     return bool(matcher.find(tokens))
 
 
-# Lining up subtitles borrowed from another copy of a film. A WEB-DL and a
-# WEBRip of the same film can differ by a studio logo or two at the start, which
-# shifts every line by the same few seconds. Measured on Trap House (2025): 3%
-# of the transcript's words matched the other copy's subtitles as they were,
-# 79% at -8.5 s, and 2% for subtitles of the wrong film at any shift.
-ALIGN_LIMIT = 180.0        # seconds either way
+# Lining up borrowed subtitles - another copy's, or ones the media server
+# fetched. Two kinds of difference, both measured:
+#   * a steady shift: a WEB-DL and a WEBRip of Trap House (2025) differ by a
+#     studio logo, so every line is 8.5 s out. 3% of the transcript's words
+#     matched as they were, 79% shifted, 2% for the wrong film at any shift.
+#   * drift: an HDTV recording of Line of Fire S01E01 against subtitles made
+#     for a release with the adverts cut differently - 2 s out at the start,
+#     13 s by the end, stepping at each break. One shift for the file put 32%
+#     of words in the right line; a shift per three-minute window put 91%.
+# So a shift is found for the whole file first, then refined window by window.
+ALIGN_LIMIT = 180.0        # seconds either way, for the whole file
 ALIGN_MIN_SHARE = 0.4      # of sampled words found in the line at the new time
 ALIGN_MIN_GAIN = 0.15      # over leaving them where they are
+ALIGN_SPAN = 180.0         # seconds of speech per window
+ALIGN_STEP = 60.0          # between window centres
+ALIGN_REACH = 20.0         # how far a window may move from the whole-file shift
+ALIGN_MIN_WORDS = 25       # fewer than this in a window: use the whole-file shift
 _WORD = re.compile(r"[a-z']+")
 
 
 def _share(cues: list[Cue], starts: list[float], vocab: list[set[str]],
-           sample: list[tuple[float, str]], offset: float) -> float:
-    """Share of sampled words that a line on screen at (their time + offset) contains."""
+           sample: list[tuple[float, str]], offset: float, slack: float = 1.0) -> float:
+    """Share of sampled words that a line on screen at (their time + offset),
+    give or take `slack` seconds, contains."""
+    if not sample:
+        return 0.0
     hit = 0
     for at, word in sample:
         at += offset
-        i = bisect.bisect_right(starts, at + 1.0) - 1
-        while i >= 0 and cues[i].end >= at - 1.0:
+        i = bisect.bisect_right(starts, at + slack) - 1
+        while i >= 0 and cues[i].end >= at - slack:
             if word in vocab[i]:
                 hit += 1
                 break
@@ -120,38 +132,92 @@ def _share(cues: list[Cue], starts: list[float], vocab: list[set[str]],
     return hit / len(sample)
 
 
-def align(cues: list[Cue], heard: list[dict]) -> tuple[list[Cue], float]:
-    """(the cues, moved to line up with what was heard; the shift in seconds).
+def _middle(scored: list[tuple[float, float]]) -> tuple[float, float]:
+    """(shift, its score): the middle of the best-scoring run of shifts.
 
-    The shift is kept only when it clearly helps - otherwise the cues come back
-    unmoved, and if they belong to another cut entirely the mismatch check in
-    annotate() sets them aside as before. One shift for the whole file: a copy
-    that drifts is not lined up, and is then set aside the same way.
+    A line stays on screen for seconds, so neighbouring shifts score about the
+    same; the middle of that run is the one that lines up, not whichever end
+    max() happens to land on."""
+    best = max(v for _o, v in scored)
+    top = [o for o, v in scored if v >= best * 0.98]
+    return round((min(top) + max(top)) / 2 * 4) / 4, best
+
+
+def align(cues: list[Cue], heard: list[dict]) -> tuple[list[Cue], float, float]:
+    """(the cues moved to line up with what was heard; smallest and largest
+    shift applied, in seconds - both 0 when they were left alone).
+
+    Kept only when the whole-file shift clearly helps - otherwise the cues come
+    back unmoved, and if they belong to another cut entirely the mismatch check
+    in annotate() sets them aside as before. A window with too few words, or no
+    clear fit of its own, uses the whole-file shift.
     """
     ordered = sorted(cues, key=lambda c: c.start)
-    sample = [(float(w.get("start") or 0.0), words.normalize(w.get("word", "")))
-              for w in heard]
-    sample = [(t, w) for t, w in sample if len(w) >= 4][::2][:3000]
+    words_heard = [(float(w.get("start") or 0.0), words.normalize(w.get("word", "")))
+                   for w in heard]
+    words_heard = [(t, w) for t, w in words_heard if len(w) >= 4]
+    sample = words_heard[::2][:3000]
     if not ordered or not sample:
-        return cues, 0.0
+        return cues, 0.0, 0.0
     starts = [c.start for c in ordered]
     vocab = [set(_WORD.findall(c.text.lower())) for c in ordered]
-    share = lambda off: _share(ordered, starts, vocab, sample, off)  # noqa: E731
-    here = share(0.0)
-    _best, rough = max((share(float(k)), float(k))
+
+    def share(words_, off, slack=1.0):
+        return _share(ordered, starts, vocab, words_, off, slack)
+
+    here = share(sample, 0.0)
+    _best, rough = max((share(sample, float(k)), float(k))
                        for k in range(-int(ALIGN_LIMIT), int(ALIGN_LIMIT) + 1))
-    # Lines stay on screen for seconds, so a run of neighbouring shifts scores
-    # about the same; the middle of that run is the one that lines up, not
-    # whichever end max() happens to land on.
-    fine = [(rough + d / 4, share(rough + d / 4)) for d in range(-12, 13)]
-    best = max(v for _o, v in fine)
-    top = [o for o, v in fine if v >= best * 0.98]
-    offset = round((min(top) + max(top)) / 2 * 4) / 4
+    offset, best = _middle([(rough + d / 4, share(sample, rough + d / 4))
+                            for d in range(-12, 13)])
     if best < ALIGN_MIN_SHARE or best - here < ALIGN_MIN_GAIN:
-        return cues, 0.0
-    # The cues are moved onto the transcript's clock: a word heard at t was
-    # shown at t + offset, so a line shown at s belongs at s - offset.
-    return [Cue(c.start - offset, c.end - offset, c.text) for c in cues], offset
+        return cues, 0.0, 0.0
+
+    # Window by window, on the transcript's clock, with a tighter slack: here
+    # the question is which line, not which film.
+    end = words_heard[-1][0] if words_heard else 0.0
+    windows: list[tuple[float, float]] = []
+    centre = ALIGN_SPAN / 2
+    while centre - ALIGN_SPAN / 2 <= end:
+        chunk = [(t, w) for t, w in words_heard
+                 if centre - ALIGN_SPAN / 2 <= t < centre + ALIGN_SPAN / 2]
+        local = offset
+        if len(chunk) >= ALIGN_MIN_WORDS:
+            reach = int(ALIGN_REACH * 4)
+            found, score = _middle([(offset + d / 4, share(chunk, offset + d / 4, 0.3))
+                                    for d in range(-reach, reach + 1)])
+            if score >= ALIGN_MIN_SHARE:
+                local = found
+        windows.append((centre, local))
+        centre += ALIGN_STEP
+
+    # A word heard at t was shown at t + shift, so a line shown at s belongs
+    # at s - shift. Each line takes the shift of the window it falls in - or,
+    # next to an advert break where the shift steps, a neighbouring window's,
+    # if that puts more of its own words where they were heard.
+    centres = [c for c, _ in windows]
+    times = [t for t, _ in words_heard]
+
+    def fits(cue: Cue, shift: float) -> int:
+        lo = bisect.bisect_left(times, cue.start - shift - 0.3)
+        hi = bisect.bisect_right(times, cue.end - shift + 0.3)
+        mine = set(_WORD.findall(cue.text.lower()))
+        return sum(1 for _t, w in words_heard[lo:hi] if w in mine)
+
+    moved, used = [], []
+    for cue in cues:
+        heard_at = cue.start - offset
+        k = bisect.bisect_left(centres, heard_at)
+        if k == len(centres) or (k > 0 and heard_at - centres[k - 1] < centres[k] - heard_at):
+            k -= 1
+        k = max(k, 0)
+        shift = windows[k][1]
+        for other in {windows[j][1] for j in (k - 1, k + 1) if 0 <= j < len(windows)} - {shift}:
+            if fits(cue, other) > fits(cue, shift):
+                shift = other
+        used.append(shift)
+        moved.append(Cue(cue.start - shift, cue.end - shift, cue.text))
+    return moved, min(used), max(used)
 
 
 def evidence(match: words.Match, cues: list[Cue], matcher: words.Matcher) -> tuple[str, str]:

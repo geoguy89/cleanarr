@@ -168,20 +168,32 @@ def heard_and_cues(shift: float):
 
 def test_subtitles_from_another_cut_are_moved_into_line():
     heard, cues = heard_and_cues(-8.5)
-    moved, shift = subtitles.align(cues, heard)
-    assert abs(shift + 8.5) <= 0.5
-    assert abs(moved[0].start - cues[0].start + shift) < 1e-9
-    assert subtitles.align(moved, heard)[1] == 0.0          # and they stay put
+    moved, low, high = subtitles.align(cues, heard)
+    assert abs(low + 8.5) <= 0.5 and abs(high + 8.5) <= 0.5
+    assert abs(moved[0].start - cues[0].start + low) < 1e-9
+    assert subtitles.align(moved, heard)[1:] == (0.0, 0.0)   # and they stay put
+
+
+def test_subtitles_that_drift_are_moved_window_by_window():
+    """Adverts cut differently: 2 s out at first, 12 s out after a break."""
+    heard, cues = heard_and_cues(0.0)
+    late = [subtitles.Cue(c.start + (2.0 if c.start < 220 else 12.0),
+                          c.end + (2.0 if c.start < 220 else 12.0), c.text) for c in cues]
+    moved, low, high = subtitles.align(late, heard)
+    assert abs(low - 2.0) <= 0.5 and abs(high - 12.0) <= 0.5
+    # Every line back within a fraction of its time on screen, the ones beside
+    # the break included.
+    assert max(abs(m.start - c.start) for m, c in zip(moved, cues)) <= 0.75
 
 
 def test_subtitles_already_in_line_are_left_alone():
     heard, cues = heard_and_cues(0.0)
-    moved, shift = subtitles.align(cues, heard)
-    assert shift == 0.0 and moved == cues
+    moved, low, high = subtitles.align(cues, heard)
+    assert (low, high) == (0.0, 0.0) and moved == cues
 
 
 def test_subtitles_of_something_else_are_not_forced_into_line():
     heard, cues = heard_and_cues(0.0)
     other = [subtitles.Cue(c.start, c.end, "Completely unrelated dialogue here") for c in cues]
-    assert subtitles.align(other, heard) == (other, 0.0)
-    assert subtitles.align([], heard) == ([], 0.0)
+    assert subtitles.align(other, heard) == (other, 0.0, 0.0)
+    assert subtitles.align([], heard) == ([], 0.0, 0.0)

@@ -448,9 +448,11 @@ Where the subtitles come from, first found wins:
 
 3 to 5 are only looked for with this switch on, since 4 means reading a
 second file and 5 goes online. Another copy is often a slightly different cut — a studio logo more
-or less at the start shifts every line by the same few seconds — so borrowed
-subtitles are first moved to line up with what Whisper heard, when one shift
-clearly fits (up to three minutes either way). Subtitles that still disagree
+or less at the start shifts every line by the same few seconds, and a TV
+recording with the adverts cut differently drifts further at every break — so
+borrowed subtitles are first moved to line up with what Whisper heard: one
+shift for the file (up to three minutes either way), kept only when it clearly
+fits, then refined every few minutes. Subtitles that still disagree
 with most detections, from a copy that drifts or a different film, are set
 aside as above. The job
 says which it used — *subtitles from another copy (Film WEBDL-1080p.mkv)* — or

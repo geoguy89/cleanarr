@@ -298,10 +298,18 @@ class Pipeline:
                 self._stage(job_id, "judging", "looking for subtitles elsewhere")
                 text, found_where = more_subtitles(work)
                 cues = subtitles.parse_srt(text) if text else []
+                if text:
+                    # Kept for review: the file has none of its own, so this is
+                    # the only copy of what its words were checked against.
+                    kept = self.cache_dir / "subtitles"
+                    kept.mkdir(parents=True, exist_ok=True)
+                    (kept / f"job-{job_id}.srt").write_text(text, encoding="utf8")
                 # Borrowed subtitles may be for a slightly different cut.
-                cues, shift = subtitles.align(cues, transcript.words)
-                if shift:
-                    found_where += f", moved {abs(shift):g} s to line up"
+                cues, low, high = subtitles.align(cues, transcript.words)
+                if low or high:
+                    low, high = sorted((abs(low), abs(high)))
+                    found_where += (f", moved {high:g} s to line up" if low == high
+                                    else f", moved {low:g}-{high:g} s to line up")
             matches, note = subtitles.annotate(matches, cues)
             if note:
                 print(f"[cleanarr] job {job_id}: {note}", flush=True)
