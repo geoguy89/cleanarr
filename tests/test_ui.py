@@ -554,3 +554,37 @@ def test_the_subtitles_are_not_a_switch_any_more(desk):
     assert page.locator("[name=subtitle_search]").count() == 0
     assert "sounds like" in page.locator("#s-judge").inner_text()
     assert desk.errors == []
+
+
+def test_the_app_is_installable(browser, demo):
+    """What Chrome checks before it offers "Install app": a manifest it can
+    read, with a name, a start page, standalone display and 192 and 512 px
+    icons, and a service worker. Chrome also needs a secure address - here
+    localhost - which a plain http:// LAN address is not."""
+    import json
+    import struct
+    import urllib.request
+    ctx = browser.new_context()
+    page = ctx.new_page()
+    try:
+        page.goto(demo.url + "/")
+        page.wait_for_load_state("networkidle")
+        assert page.evaluate("navigator.serviceWorker.ready.then(r => !!r.active)")
+        cdp = ctx.new_cdp_session(page)
+        assert cdp.send("Page.getInstallabilityErrors")["installabilityErrors"] == []
+        got = cdp.send("Page.getAppManifest")
+        assert got["errors"] == [] and got["url"].endswith("/static/manifest.json")
+        manifest = json.loads(got["data"])
+        assert manifest["name"] and manifest["short_name"] and manifest["start_url"] == "/"
+        assert manifest["display"] == "standalone"
+        sizes = set()
+        for icon in manifest["icons"]:
+            with urllib.request.urlopen(demo.url + icon["src"]) as resp:
+                head = resp.read(24)
+            assert head[:8] == b"\x89PNG\r\n\x1a\n"
+            w, h = struct.unpack(">II", head[16:24])
+            assert f"{w}x{h}" == icon["sizes"]
+            sizes.add(icon["sizes"])
+        assert {"192x192", "512x512"} <= sizes
+    finally:
+        ctx.close()
