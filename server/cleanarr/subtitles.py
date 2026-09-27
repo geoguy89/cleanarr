@@ -27,6 +27,7 @@ from __future__ import annotations
 import bisect
 import re
 from dataclasses import dataclass, replace
+from functools import lru_cache
 
 from . import sounds, words
 
@@ -473,8 +474,7 @@ def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[
         in_line = {t for t, _raw in slot}
         spoken = " ".join(w for w in bare[i - lgap:i + 1 + rgap]
                           if w == bare[i] or w not in in_line)
-        if sounds.sounds_alike(spoken, " ".join(shown)) or any(
-                sounds.sounds_alike(word, raw) for raw in shown):
+        if _alike(spoken, " ".join(shown)) or any(_alike(word, raw) for raw in shown):
             return SOUNDALIKE, said
         return REPLACED, said
 
@@ -526,9 +526,58 @@ def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[
                 t, raw = tokens[k]
                 if _is_word(raw, word, matcher) or _BLEEP.search(raw):
                     return AGREES, ""
-                if not _softens(raw, word, matcher) and sounds.sounds_alike(word, raw):
+                if not _softens(raw, word, matcher) and _alike(word, raw):
                     return SOUNDALIKE, raw.strip(" ,.!?;:-")
     return None
+
+
+# Endings, not words: "fuck" + "ing" is not a compound.
+_ENDINGS = frozenset({"ing", "ings", "ed", "er", "ers", "es", "in", "ted", "ting", "ter", "ty"})
+
+
+@lru_cache(maxsize=4096)
+def _halves(word: str) -> tuple[str, str, bool] | None:
+    """(harmless half, swear half, whether the harmless half comes first) for a
+    compound swear - "mother" + "fucker", "dumb" + "ass", "dick" + "head" - or None."""
+    if not word.isalpha():
+        return None
+    known, listed = sounds._dictionary(), _listed
+    for i in range(3, len(word) - 2):
+        a, b = word[:i], word[i:]
+        if a in known and b in known:
+            if listed(b) and not listed(a) and a not in _ENDINGS:
+                return a, b, True
+            if listed(a) and not listed(b) and b not in _ENDINGS:
+                return b, a, False
+    return None
+
+
+@lru_cache(maxsize=4096)
+def _listed(word: str) -> bool:
+    return bool(_everyone().find([{"word": word, "start": 0.0, "end": 0.0}]))
+
+
+@lru_cache(maxsize=1)
+def _everyone() -> words.Matcher:
+    return words.Matcher(context_words=frozenset())
+
+
+def _alike(heard: str, shown: str) -> bool:
+    """sounds.sounds_alike, except that a caption keeping the harmless half of a
+    compound swear is compared on the other half alone: "mother-trucker" is
+    trucker against fucker, "smarty" is -y against ass. The shared half made
+    them score as sound-alikes (0.84, 0.84) and a dub was left in. With nothing
+    left once the shared half is taken off, the swear was cut short."""
+    halves = _halves(heard)
+    y = sounds.phones(shown)
+    if halves and y:
+        harmless, swear, first = halves
+        h = sounds.phones(harmless) or []
+        if h and first and y[:len(h)] == h:
+            return sounds.phones_alike(sounds.phones(swear), y[len(h):])
+        if h and not first and y[-len(h):] == h:
+            return sounds.phones_alike(sounds.phones(swear), y[:-len(h)])
+    return sounds.sounds_alike(heard, shown)
 
 
 def _softens(raw: str, word: str, matcher: words.Matcher) -> bool:
@@ -614,7 +663,7 @@ def _sounds_alike_on_screen(match: words.Match, word: str, cues: list[Cue],
                 continue
             if _softens(raw, word, matcher):
                 continue
-            if sounds.sounds_alike(word, raw):
+            if _alike(word, raw):
                 return raw.strip(" ,.!?;:-")
     return ""
 

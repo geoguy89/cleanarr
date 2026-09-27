@@ -126,6 +126,10 @@ def similarity(a: str, b: str) -> float | None:
     x, y = phones(a), phones(b)
     if not x or not y:
         return None
+    return _score(x, y)
+
+
+def _score(x: list[str], y: list[str]) -> float:
     prev = [0.0]
     for sound in y:
         prev.append(prev[-1] + _gap(sound))
@@ -160,10 +164,14 @@ def _same_start(a: str, b: str) -> bool:
 
 def sounds_alike(heard: str, shown: str) -> bool:
     """Whether the subtitle's `shown` sounds like what Whisper `heard`."""
-    x, y = phones(heard), phones(shown)
-    score = similarity(heard, shown)
-    if score is None or not x or not y:
+    return phones_alike(phones(heard), phones(shown))
+
+
+def phones_alike(x: list[str] | None, y: list[str] | None) -> bool:
+    """sounds_alike, for two strings of sounds."""
+    if not x or not y:
         return False
+    score = _score(x, y)
     if not _same_start(x[0], y[0]) and score < ONSET_EXEMPT:
         return False
     return score >= SOUNDALIKE

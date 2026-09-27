@@ -393,3 +393,30 @@ def test_a_softening_on_one_side_of_the_line_is_never_a_sound_alike(heard_text, 
     state, _ = subtitles.evidence(detection(heard, word), line_at(heard, line, 9.8, 12.5),
                                   words.Matcher(context_words=frozenset()), heard)
     assert state != "soundalike"
+
+
+@pytest.mark.parametrize("heard, shown", [
+    ("motherfucker", "mother-trucker"), ("motherfucker", "mother lover"),
+    ("motherfucking", "mother-loving"), ("smartass", "smarty"), ("dumbass", "dummy"),
+    ("dumbass", "dumbo"), ("asshole", "a-hole"), ("motherfucker", "mother"),
+])
+def test_a_compound_is_compared_on_its_swear_half(heard, shown):
+    assert not subtitles._alike(heard, shown)
+
+
+def test_a_compound_still_finds_a_mishearing_of_its_swear_half():
+    assert subtitles._alike("cocksucker", "caulk sucker")
+    assert subtitles._alike("dickhead", "dig head")
+
+
+@pytest.mark.parametrize("heard_text, line", [
+    ("you motherfucker", "You mother-trucker!"),
+    ("what a smartass you are", "What a smarty you are."),
+    ("do not be a dumbass", "Don't be a dummy."),
+])
+def test_a_tv_dub_of_a_compound_is_muted(heard_text, line):
+    heard = said(heard_text)
+    m = next(x for x in words.Matcher().find(heard))
+    state, _ = subtitles.evidence(m, line_at(heard, line, 9.8, 12.5),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state != "soundalike"
