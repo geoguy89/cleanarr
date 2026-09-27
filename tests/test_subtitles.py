@@ -377,3 +377,19 @@ def test_a_cut_short_or_possessive_caption_mutes(heard_text, line, word):
     state, _ = subtitles.evidence(detection(heard, word), line_at(heard, line, 9.8, 12.5),
                                   words.Matcher(context_words=frozenset()), heard)
     assert state == "agrees"
+
+
+@pytest.mark.parametrize("heard_text, line, word", [
+    ("kill this motherfucker", "Kill this mother...", "motherfucker"),
+    ("motherfucker i forgot the keys", "Mother, I forgot the keys.", "motherfucker"),
+    ("that is total bullshit", "That is total bull-shoot.", "bullshit"),
+    ("what a load of horseshit", "What a load of horse-crap.", "horseshit"),
+    ("well goddamn", "Well, god dang!", "goddamn"),
+    ("you are such a jackass", "You're such a jack-", "jackass"),
+    ("i got a boner", "I got a bone.", "boner"),
+])
+def test_a_softening_on_one_side_of_the_line_is_never_a_sound_alike(heard_text, line, word):
+    heard = said(heard_text)
+    state, _ = subtitles.evidence(detection(heard, word), line_at(heard, line, 9.8, 12.5),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state != "soundalike"

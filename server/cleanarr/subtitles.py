@@ -526,10 +526,24 @@ def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[
                 t, raw = tokens[k]
                 if _is_word(raw, word, matcher) or _BLEEP.search(raw):
                     return AGREES, ""
-                if not matcher.find([{"word": raw, "start": 0.0, "end": 0.0}]) \
-                        and not sounds.softened(t) and sounds.sounds_alike(word, raw):
+                if not _softens(raw, word, matcher) and sounds.sounds_alike(word, raw):
                     return SOUNDALIKE, raw.strip(" ,.!?;:-")
     return None
+
+
+def _softens(raw: str, word: str, matcher: words.Matcher) -> bool:
+    """Whether a caption word stands in for the swear rather than sounding like
+    it, reading each part of a hyphenated one: a minced oath ("bull-shoot",
+    "god dang"), another swear ("horse-crap"), or the swear cut short ("mother",
+    "bull-", "jack", "bone" for "boner")."""
+    parts = [words.normalize(x) for x in [raw, *_SPLIT.split(raw)]]
+    for part in filter(None, parts):
+        if sounds.softened(part) or matcher.find([{"word": part, "start": 0.0, "end": 0.0}]):
+            return True
+        plain = _plain(part)
+        if len(plain) >= 3 and plain != word and word.startswith(plain):
+            return True
+    return bool(_STUB.fullmatch(raw))
 
 
 def evidence(match: words.Match, cues: list[Cue], matcher: words.Matcher,
@@ -598,8 +612,7 @@ def _sounds_alike_on_screen(match: words.Match, word: str, cues: list[Cue],
             bare = words.normalize(raw)
             if _plain(bare) in said:
                 continue
-            if (sounds.softened(bare) or matcher.find([{"word": raw, "start": 0.0, "end": 0.0}])
-                    or len(word) >= 4 and word.startswith(_plain(bare))):
+            if _softens(raw, word, matcher):
                 continue
             if sounds.sounds_alike(word, raw):
                 return raw.strip(" ,.!?;:-")
