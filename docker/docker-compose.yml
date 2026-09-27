@@ -18,7 +18,7 @@ services:
       - /mnt/user/appdata/cleanarr:/config
       # The RIGHT-hand side has to be what your library reports, because
       # Cleanarr opens those paths unchanged - there is nothing to
-      # translate them with, on purpose. Sonarr, Radarr and Plex all run
+      # translate them with, on purpose. Sonarr and Plex both run
       # in containers here and report /data/media/..., so the media is
       # mounted as /data. Check yours in Settings -> Your library.
       - /mnt/user/data:/data

@@ -169,32 +169,36 @@ function ask(title, body, choices, { danger = false } = {}) {
 const state = {
   settings: null, setup: null, home: null, shows: null, movies: null,
   calendar: null, jobs: null, history: null,
-  libSource: 'arr', view: null,
+  libSource: 'sonarr', view: null,
   picked: new Set(), lastPicked: null, queueIds: [],
   sheet: null, labels: {},
 };
 
-try { state.libSource = localStorage.getItem('cleanarr.library_source') || 'arr'; } catch (e) { /* private window */ }
+try { state.libSource = localStorage.getItem('cleanarr.library_source') || 'sonarr'; } catch (e) { /* private window */ }
+if (state.libSource === 'arr') state.libSource = 'sonarr';   // Sonarr + Radarr, before Radarr was dropped
 
 function noteSource(data) {
-  const s = data && (data.library_source || data.source);
-  if (!['arr', 'plex', 'jellyfin'].includes(s)) return;
+  let s = data && (data.library_source || data.source);
+  if (s === 'arr') s = 'sonarr';
+  if (!['sonarr', 'plex', 'jellyfin'].includes(s)) return;
   state.libSource = s;
   try { localStorage.setItem('cleanarr.library_source', s); } catch (e) { /* ignore */ }
-  $('#nav-upcoming').hidden = s !== 'arr';
-  $('#more-upcoming').parentElement.hidden = s !== 'arr';
+  $('#nav-upcoming').hidden = s !== 'sonarr';
+  $('#more-upcoming').parentElement.hidden = s !== 'sonarr';
 }
 
+const serverName = () => ({ plex: 'Plex', jellyfin: 'Jellyfin' }[state.settings?.media_server] || 'the media server');
+// Films always come from the media server; shows from Sonarr unless the
+// media server is the whole library.
 function sourceName(kind) {
   if (state.libSource === 'plex') return 'Plex';
   if (state.libSource === 'jellyfin') return 'Jellyfin';
-  return kind === 'movie' ? 'Radarr' : 'Sonarr';
+  return kind === 'movie' ? serverName() : 'Sonarr';
 }
-const serverName = () => ({ plex: 'Plex', jellyfin: 'Jellyfin' }[state.settings?.media_server] || 'the media server');
 const trackName = () => state.settings?.track_title || 'Cleaned - English';
 
 function posterUrl(item, kind) {
-  const src = item.source || (kind === 'movie' ? 'radarr' : 'sonarr');
+  const src = item.source || (kind === 'movie' ? (state.settings?.media_server || 'none') : state.libSource);
   const id = item.id !== undefined && kind !== 'episode' ? item.id : item.series_id;
   return `/api/poster?source=${encodeURIComponent(src)}&id=${encodeURIComponent(id)}`;
 }
@@ -1052,7 +1056,7 @@ function openMovie(m) {
 }
 
 const movieJob = (m, extra = {}) => ({ kind: 'movie', title: m.title, subtitle: String(m.year || ''),
-  path: m.path, source: 'radarr', source_id: String(m.id), ...extra });
+  path: m.path, source: m.source || state.settings?.media_server || '', source_id: String(m.id), ...extra });
 ACTIONS['clean-movie'] = async (el) => {
   const m = state.sheet.movie;
   const wanted = await confirmRedo([{ ...m, label: m.title }]);
@@ -1243,7 +1247,7 @@ async function loadCalendar() {
     if (data.unavailable) {
       state.calendar = [];
       $('#calendar-list').innerHTML = empty({ icon: 'calendar', title: 'Only Sonarr has a calendar',
-        text: `${esc(sourceName('show'))} only knows what it already has. Use Sonarr and Radarr as the library to see what is coming.` });
+        text: `${esc(sourceName('show'))} only knows what it already has. Use Sonarr as the library to see what is coming.` });
       return;
     }
     state.calendar = data.items;
@@ -1629,9 +1633,8 @@ const tagWords = (host) => {
 
 function collect() {
   return {
-    library_source: radio('library_source') || 'arr',
+    library_source: radio('library_source') || 'sonarr',
     sonarr: { url: F('sonarr.url').value.trim(), api_key: F('sonarr.api_key').value.trim(), enabled: true },
-    radarr: { url: F('radarr.url').value.trim(), api_key: F('radarr.api_key').value.trim(), enabled: true },
     plex_url: F('plex_url').value.trim(), plex_token: F('plex_token').value.trim(),
     jellyfin_url: F('jellyfin_url').value.trim(), jellyfin_api_key: F('jellyfin_api_key').value.trim(),
     categories: $$('#categories input:checked').map((i) => i.value),
@@ -1710,11 +1713,10 @@ function fillSettings(s) {
   $('#s-security').hidden = false;
   const set = (name, value) => { if (F(name)) F(name).value = value ?? ''; };
   const check = (name, value) => $$(`input[name="${name}"]`).forEach((r) => { r.checked = r.value === value; });
-  check('library_source', s.library_source || 'arr');
+  check('library_source', s.library_source === 'arr' ? 'sonarr' : (s.library_source || 'sonarr'));
   check('asr_backend', s.asr_backend || 'builtin');
   check('media_server', s.media_server || 'none');
   set('sonarr.url', s.sonarr.url); set('sonarr.api_key', s.sonarr.api_key);
-  set('radarr.url', s.radarr.url); set('radarr.api_key', s.radarr.api_key);
   set('plex_url', s.plex_url); set('plex_token', s.plex_token);
   set('jellyfin_url', s.jellyfin_url); set('jellyfin_api_key', s.jellyfin_api_key);
   set('asr_url', s.asr_url); set('asr_api_key', s.asr_api_key); set('asr_remote_model', s.asr_remote_model);
@@ -1800,7 +1802,7 @@ function renderContextNote() {
 /* One set of Plex fields and one set of Jellyfin fields, moved to whichever
    section needs them: two inputs bound to one setting drift apart. */
 function placeServerFields() {
-  const lib = radio('library_source') || 'arr';
+  const lib = radio('library_source') || 'sonarr';
   const srv = radio('media_server') || 'none';
   ['plex', 'jellyfin'].forEach((name) => {
     const block = $(`#server-${name}`);
@@ -1812,12 +1814,12 @@ function placeServerFields() {
 }
 
 function renderLibrarySource() {
-  const which = radio('library_source') || 'arr';
-  $('#lib-arr').hidden = which !== 'arr';
-  $('#lib-server').hidden = which === 'arr';
+  const which = radio('library_source') || 'sonarr';
+  $('#lib-arr').hidden = which !== 'sonarr';
+  $('#lib-server').hidden = which === 'sonarr';
   placeServerFields();
-  $('#path-note').textContent = which === 'arr'
-    ? 'TV paths come from Sonarr, film paths from Radarr.'
+  $('#path-note').textContent = which === 'sonarr'
+    ? 'TV paths come from Sonarr, film paths from your media server.'
     : `${which === 'plex' ? 'Plex' : 'Jellyfin'} reports paths as it sees them, so if it runs in a container too, both need the same mount.`;
 }
 
@@ -1935,7 +1937,7 @@ $$('[data-test]').forEach((btn) => btn.addEventListener('click', async () => {
   const service = btn.dataset.test;
   const out = $(`[data-result="${service}"]`);
   const fields = {
-    sonarr: ['sonarr.url', 'sonarr.api_key'], radarr: ['radarr.url', 'radarr.api_key'],
+    sonarr: ['sonarr.url', 'sonarr.api_key'],
     plex: ['plex_url', 'plex_token'], jellyfin: ['jellyfin_url', 'jellyfin_api_key'],
   }[service];
   out.className = 'test-result';

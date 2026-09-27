@@ -78,7 +78,7 @@ until you press Save. Each Test button tries what is typed, before it is saved.
 
 | | |
 |---|---|
-| **A library** | Sonarr + Radarr, **or** Plex, **or** Jellyfin. Read-only — Cleanarr never writes to any of them. |
+| **A library** | Plex or Jellyfin, optionally with Sonarr for shows. Read-only — Cleanarr never writes to any of them. |
 | **Media** | Reachable from this container. The paths do not have to match your library's; see [Paths](#paths). |
 | **GPU** | Optional. NVIDIA is much faster; CPU works. See [Hardware](#hardware). |
 | **Disk** | ~1.5 GB for the speech model, plus ~90 MB per cleaned 25-minute episode. |
@@ -202,8 +202,9 @@ Open `http://<host>:8477`. **Home** shows a checklist of what is left to do,
 with a link to each fix; it goes away once everything is done. **Settings** is
 numbered in the order things need doing:
 
-1. **Your library** — Sonarr + Radarr, Plex or Jellyfin, with a test button,
-   and a check that each library folder opens from inside the container.
+1. **Your library** — where shows come from: Sonarr, Plex or Jellyfin, with a
+   test button, and a check that each library folder opens from inside the
+   container.
 2. **What gets silenced** — four switchable lists, plus your own always/never
    words.
 3. **Listening** — download the speech model here rather than during your first
@@ -211,7 +212,8 @@ numbered in the order things need doing:
 4. **Muting** — padding, fade and the new track's name. The defaults are fine.
 5. **Second opinion** — optional, off by default: the file's subtitles, your
    own model, or both.
-6. **Media server** — optional, for refreshing and pausing during transcodes.
+6. **Media server** — where films come from, and extra subtitles; also
+   refreshes the library and pauses during transcodes.
 7. **Advanced** — bitrates, ffmpeg threads, number format, keeping backups.
 8. **Who can use this** — set a password if this is reachable from outside your
    network.
@@ -225,11 +227,18 @@ Then clean one episode before turning it loose on a season.
 
 Cleanarr needs one thing: what you own, and where each file is.
 
-| Source | Needs | Notes |
+**Films always come from your media server** (Settings → Media server). It
+knows every version of a film and the subtitles it downloaded, which a
+downloader does not. **Shows** come from whichever you pick:
+
+| Shows from | Needs | Notes |
 |---|---|---|
-| **Sonarr + Radarr** | both, with API keys | Knows the most, and the only one that can fill the Upcoming calendar |
-| **Plex** | address + token | No \*arr apps needed. Artwork comes from Plex too. |
+| **Sonarr** | address + API key | The only one that can fill the Upcoming calendar |
+| **Plex** | address + token | Nothing else needed. Artwork comes from Plex too. |
 | **Jellyfin** | address + API key | Same again |
+
+Radarr is not used. An older setup that listed films from Radarr keeps its
+history; its films are listed from the media server from now on.
 
 Everything else works the same whichever you pick, including cleaning new
 episodes automatically. The Plex and Jellyfin credentials are the same ones
@@ -420,9 +429,24 @@ A word Whisper was sure of, and that is not on the check list, is muted whatever
 the subtitles say: subtitles soften swears far more often than Whisper invents
 them. Subtitles that disagree with most detections in a file are taken to be
 from another release, or softened throughout, and set aside for that file —
-everything in it is then treated as if there were no subtitles. The file's own
-English text track is used first, else a `.srt` or `.vtt` beside it (see
-[Keeping the right words](#keeping-the-right-words)).
+everything in it is then treated as if there were no subtitles.
+
+Where the subtitles come from, first found wins:
+
+1. the file's own English text track;
+2. a `.srt` or `.vtt` beside it (see
+   [Keeping the right words](#keeping-the-right-words));
+3. subtitles your media server holds for that file — ones Plex or Jellyfin
+   downloaded, say;
+4. for a film, **another copy of it** that the media server knows about: a
+   WEB-DL beside a WEBRip often has the subtitles the other lacks. The other
+   copy is only read, never changed.
+
+3 and 4 are only looked for with this switch on, since 4 means reading a
+second file. Another copy can be timed for a different cut; if so, its
+subtitles disagree with most detections and are set aside as above. The job
+says which it used — *subtitles from another copy (Film WEBDL-1080p.mkv)* — or
+*no subtitles found to check against*.
 
 ### A model
 
@@ -472,10 +496,10 @@ server/cleanarr/
   judge.py      the second opinion
   asr.py        Whisper, local or remote, with caching
   media.py      ffprobe/ffmpeg: probe, mute, remux, verify, swap
-  library.py    Sonarr/Radarr, Plex or Jellyfin as the library
+  library.py    Sonarr, Plex or Jellyfin as the library; versions and subtitles
   pipeline.py   one file, start to finish
   worker.py     the queue
-  arr.py        Sonarr, Radarr, Plex and Jellyfin clients
+  arr.py        Sonarr client; Plex and Jellyfin refresh and sessions
   auth.py       optional login
   main.py       API and static page
   validate.py   checks a settings save

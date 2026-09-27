@@ -316,7 +316,87 @@ def test_with_the_subtitle_opinion_on_no_subtitles_means_muted(home, settings, m
     plain = make_media(tmp_path / "plain.mkv", seconds=6.0, subtitles=False)
     job = run(plain, settings, home / "cache")
     assert job["status"] == "done" and job["muted"] == 2
-    assert "no subtitles in the file or beside it" in job["message"]
+    assert "no subtitles found to check against" in job["message"]
+
+
+SRT = ("1\n00:00:00,800 --> 00:00:01,600\nWhat the fuck?\n\n"
+       "2\n00:00:02,800 --> 00:00:03,800\nGet some caulk on it.\n")
+
+
+class FakeServer:
+    """A media server that knows a film's versions and holds one subtitle file."""
+
+    def __init__(self, versions, films=()):
+        self._versions, self._films, self.asked = versions, list(films), []
+
+    def versions(self, item_id):
+        self.asked.append(item_id)
+        return self._versions
+
+    def movies(self):
+        return self._films
+
+    def download(self, url):
+        return SRT
+
+
+def run_film(path, settings, cache, **kw) -> dict:
+    job = db.enqueue(kind="movie", title="Film", path=str(path), **kw)
+    pipeline.run_job(job, settings, cache)
+    return dict(db.get(job))
+
+
+def test_another_copy_of_the_film_lends_its_subtitles(home, settings, monkeypatch, tmp_path):
+    unsure_cock(monkeypatch)
+    settings.subtitle_opinion, settings.media_server = True, "plex"
+    folder = tmp_path / "movies" / "Film"
+    folder.mkdir(parents=True)
+    plain = make_media(folder / "Film WEBRip.mkv", seconds=6.0, subtitles=False)
+    other = make_media(folder / "Film WEBDL.mkv", seconds=6.0, cues=CUES)
+    server = FakeServer([{"path": str(plain), "subtitles": []},
+                         {"path": str(other), "subtitles": []}],
+                        films=[{"id": "5", "path": str(plain)}])
+    monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
+    # Queued when Radarr listed the films: found on the media server by its path.
+    job = run_film(plain, settings, home / "cache", source="radarr", source_id="3003")
+    assert job["status"] == "done", job["message"]
+    assert job["muted"] == 1
+    assert "subtitles from another copy (Film WEBDL.mkv)" in job["message"]
+    assert server.asked == ["5"]
+    assert media.probe(other).cleaned_track is None        # the other copy is only read
+
+
+def test_subtitles_the_media_server_holds_are_used(home, settings, monkeypatch, tmp_path):
+    unsure_cock(monkeypatch)
+    settings.subtitle_opinion = True
+    plain = make_media(tmp_path / "e1.mkv", seconds=6.0, subtitles=False)
+    server = FakeServer([{"path": str(plain), "subtitles": [("English (SRT)", "http://plex/s/1")]}])
+    monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
+    job = run(plain, settings, home / "cache", source="plex", source_id="7")
+    assert job["status"] == "done", job["message"]
+    assert job["muted"] == 1 and "subtitles from Plex (English (SRT))" in job["message"]
+    assert server.asked == ["7"]
+
+
+def test_an_episode_never_borrows_another_files_subtitles(home, settings, monkeypatch, tmp_path):
+    unsure_cock(monkeypatch)
+    settings.subtitle_opinion = True
+    plain = make_media(tmp_path / "e1.mkv", seconds=6.0, subtitles=False)
+    other = make_media(tmp_path / "e2.mkv", seconds=6.0, cues=CUES)
+    server = FakeServer([{"path": str(plain), "subtitles": []},
+                         {"path": str(other), "subtitles": []}])
+    monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
+    job = run(plain, settings, home / "cache", source="plex", source_id="7")
+    assert job["muted"] == 2 and "no subtitles found" in job["message"]
+
+
+def test_without_the_subtitle_opinion_nothing_else_is_read(home, settings, monkeypatch, tmp_path):
+    unsure_cock(monkeypatch)
+    plain = make_media(tmp_path / "e1.mkv", seconds=6.0, subtitles=False)
+    server = FakeServer([])
+    monkeypatch.setattr(pipeline.library, "server", lambda s, name="": server)
+    job = run(plain, settings, home / "cache", source="plex", source_id="7")
+    assert job["muted"] == 2 and server.asked == []
 
 
 def test_a_file_without_subtitles_still_cleans(home, settings, fake_asr, tmp_path):

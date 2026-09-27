@@ -1,4 +1,4 @@
-"""The library clients, against stand-ins for Sonarr, Radarr, Plex and Jellyfin."""
+"""The library clients, against stand-ins for Sonarr, Plex and Jellyfin."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import pytest
 from cleanarr import arr, config, library
 
 
-# ---------------------------------------------------------------- Sonarr / Radarr
+# ---------------------------------------------------------------- Sonarr
 
 def test_sonarr_episodes_join_files(stub):
     stub.route("GET", "/api/v3/episode", [
@@ -30,8 +30,8 @@ def test_arr_errors_are_plain(stub):
     stub.route("GET", "/api/v3/system/status", lambda req: (401, {}))
     with pytest.raises(arr.ArrError, match="Sonarr rejected the API key"):
         arr.Sonarr(stub.url, "bad").test()
-    with pytest.raises(arr.ArrError, match="Radarr address and API key are not set"):
-        arr.Radarr("", "").test()
+    with pytest.raises(arr.ArrError, match="Sonarr address and API key are not set"):
+        arr.Sonarr("", "").test()
     with pytest.raises(arr.ArrError, match="could not reach"):
         arr.Sonarr("http://127.0.0.1:9", "k").test()
     with pytest.raises(arr.ArrError, match="URL base"):
@@ -41,19 +41,30 @@ def test_arr_errors_are_plain(stub):
         arr.Sonarr(stub.url, "k").series()
 
 
-def test_radarr_skips_films_with_no_file(stub):
-    stub.route("GET", "/api/v3/movie", [
-        {"id": 1, "title": "b film", "movieFile": {"path": "/m/b.mkv"}},
-        {"id": 2, "title": "A film", "movieFile": {"path": "/m/a.mkv"}},
-        {"id": 3, "title": "wanted"},
-    ])
-    assert [m["title"] for m in arr.Radarr(stub.url, "k").movies()] == ["A film", "b film"]
-
-
-def test_arr_library_roots(stub):
+def test_sonarr_library_roots(stub):
     stub.route("GET", "/api/v3/rootfolder", [{"path": "/data/tv"}])
-    lib = library.ArrLibrary(arr.Sonarr(stub.url, "k"), arr.Radarr("", ""))
+    lib = library.SonarrLibrary(arr.Sonarr(stub.url, "k"), None)
     assert lib.roots() == [{"library": "Sonarr", "kind": "show", "path": "/data/tv"}]
+
+
+def test_with_sonarr_the_films_come_from_the_media_server(stub):
+    stub.route("GET", "/api/v3/rootfolder", [{"path": "/data/tv"}])
+    stub.route("GET", "/library/sections", {"MediaContainer": {"Directory": [
+        {"key": "1", "type": "show", "title": "TV", "Location": [{"path": "/plex/tv"}]},
+        {"key": "2", "type": "movie", "title": "Films", "Location": [{"path": "/data/movies"}]}]}})
+    stub.route("GET", "/library/sections/2/all", {"MediaContainer": {"totalSize": 1, "Metadata": [
+        {"ratingKey": "9", "title": "A film", "Media": [{"Part": [{"file": "/data/movies/a.mkv"}]}]}]}})
+    lib = library.SonarrLibrary(arr.Sonarr(stub.url, "k"), library.PlexLibrary(stub.url, "t"))
+    assert [(m["id"], m["path"]) for m in lib.movies()] == [("9", "/data/movies/a.mkv")]
+    # TV folders are Sonarr's; Plex's own TV folder is not the one in use.
+    assert lib.roots() == [{"library": "Sonarr", "kind": "show", "path": "/data/tv"},
+                           {"library": "Films", "kind": "movie", "path": "/data/movies"}]
+
+
+def test_with_sonarr_and_no_media_server_films_say_why():
+    lib = library.SonarrLibrary(arr.Sonarr("", ""), None)
+    with pytest.raises(library.LibraryError, match="come from your media server"):
+        lib.movies()
 
 
 # ---------------------------------------------------------------- Plex
@@ -158,7 +169,12 @@ def test_jellyfin_roots(stub):
 
 def test_build_picks_the_source():
     s = config.Settings()
-    assert library.build(s).name == "arr"
+    assert library.build(s).name == "sonarr"
+    assert library.build(s).films is None
+    s.media_server = "jellyfin"
+    assert isinstance(library.build(s).films, library.JellyfinLibrary)
+    s.library_source = "arr"                  # an old config: Sonarr and Radarr
+    assert library.build(s).name == "sonarr"
     s.library_source = "plex"
     assert isinstance(library.build(s), library.PlexLibrary)
     s.library_source = "jellyfin"
@@ -193,3 +209,38 @@ def test_refresh_target_falls_back_to_the_library():
     s.media_server = "jellyfin"
     assert arr.refresh_target(s) == "jellyfin"
     assert arr.refresh_for(config.Settings(), "/x") == "no media server configured"
+
+
+# ---------------------------------------------------------------- versions and subtitles
+
+def test_plex_lists_every_version_with_its_english_text_subtitles(stub):
+    stub.route("GET", "/library/metadata/5", {"MediaContainer": {"Metadata": [{"Media": [
+        {"Part": [{"file": "/m/Film WEBRip.mkv", "Stream": [
+            {"streamType": 2, "key": "/x"},
+            {"streamType": 3, "codec": "srt", "languageCode": "eng", "key": "/library/streams/1",
+             "displayTitle": "English (SRT External)"},
+            {"streamType": 3, "codec": "srt", "languageCode": "eng", "key": "/library/streams/2",
+             "forced": True},
+            {"streamType": 3, "codec": "pgs", "languageCode": "eng", "key": "/library/streams/3"},
+            {"streamType": 3, "codec": "srt", "languageCode": "fre", "key": "/library/streams/4"},
+            {"streamType": 3, "codec": "srt", "languageCode": "eng"}]}]},
+        {"Part": [{"file": "/m/Film WEBDL.mkv"}]}]}]}})
+    got = library.PlexLibrary(stub.url, "t").versions("5")
+    assert got == [
+        {"path": "/m/Film WEBRip.mkv",
+         "subtitles": [("English (SRT External)", f"{stub.url}/library/streams/1")]},
+        {"path": "/m/Film WEBDL.mkv", "subtitles": []}]
+
+
+def test_jellyfin_lists_versions_and_serves_subtitles_as_srt(stub):
+    stub.route("GET", "/Items", {"Items": [{"MediaSources": [
+        {"Id": "a1", "Path": "/m/one.mkv", "MediaStreams": [
+            {"Type": "Subtitle", "Index": 3, "IsExternal": True, "IsTextSubtitleStream": True,
+             "Language": "eng", "DisplayTitle": "English"},
+            {"Type": "Subtitle", "Index": 4, "IsExternal": False, "IsTextSubtitleStream": True,
+             "Language": "eng"}]},
+        {"Id": "b2", "Path": "/m/two.mkv", "MediaStreams": []}]}]})
+    got = library.JellyfinLibrary(stub.url, "k").versions("77")
+    assert got[0]["subtitles"] == [("English", f"{stub.url}/Videos/77/a1/Subtitles/3/Stream.srt")]
+    assert [v["path"] for v in got] == ["/m/one.mkv", "/m/two.mkv"]
+    assert stub.requests[0].query["Ids"] == ["77"]

@@ -49,6 +49,16 @@ def test_old_config_keys_are_migrated(home):
     assert not hasattr(s, "path_map")
 
 
+def test_a_config_from_before_radarr_was_dropped(home):
+    config.CONFIG_FILE.write_text(
+        "library_source: arr\nradarr: {url: http://r, api_key: k}\n"
+        "sonarr: {url: http://s, api_key: k}\n", encoding="utf8")
+    s = config.load()
+    assert s.library_source == "sonarr" and not hasattr(s, "radarr")
+    config.save(s)
+    assert "radarr" not in config.CONFIG_FILE.read_text(encoding="utf8")
+
+
 def test_categories_and_policies_are_offered(client, settings):
     data = client.get("/api/settings").json()
     assert [c["key"] for c in data["available_categories"]] == [
@@ -323,14 +333,19 @@ def arr_library(settings, stub):
     stub.route("GET", "/api/v3/episodefile", [
         {"id": 10, "path": "/tv/s/1.mkv", "dateAdded": "2024-01-01T00:00:00Z"},
         {"id": 11, "path": "/tv/s/2.mkv", "dateAdded": "2024-01-02T00:00:00Z"}])
-    stub.route("GET", "/api/v3/movie", [{"id": 5, "title": "Film", "year": 2020,
-                                         "movieFile": {"path": "/m/f.mkv", "dateAdded": "2024-02-01T00:00:00Z"}}])
+    # Films come from the media server.
+    stub.route("GET", "/library/sections", {"MediaContainer": {"Directory": [
+        {"key": "2", "type": "movie", "title": "Films"}]}})
+    stub.route("GET", "/library/sections/2/all", {"MediaContainer": {"totalSize": 1, "Metadata": [
+        {"ratingKey": "5", "title": "Film", "year": 2020, "addedAt": 1706745600,
+         "Media": [{"Part": [{"file": "/m/f.mkv"}]}]}]}})
     stub.route("GET", "/api/v3/history", {"records": [{
         "seriesId": 3, "episodeId": 2, "date": "2024-01-02T00:00:00Z",
         "data": {"importedPath": "/tv/s/2.mkv"}, "series": {"title": "Show"},
         "episode": {"seasonNumber": 1, "episodeNumber": 2, "title": "B"}}]})
     settings.sonarr = config.ArrConfig(url=stub.url, api_key="k")
-    settings.radarr = config.ArrConfig(url=stub.url, api_key="k")
+    settings.media_server = "plex"
+    settings.plex_url, settings.plex_token = stub.url, "t"
     config.save(settings)
     done = db.enqueue(kind="episode", title="Show", path="/tv/s/1.mkv")
     db.update(done, status="done", muted=4, added_bytes=9, finished_at=100.0)
@@ -347,9 +362,9 @@ def test_episodes_carry_their_job(client, arr_library):
 
 def test_movies_carry_their_job(client, arr_library):
     film = client.get("/api/movies").json()["items"][0]
-    assert film["job_status"] == "queued" and film["source"] == "radarr"
+    assert film["job_status"] == "queued" and film["source"] == "plex" and film["id"] == "5"
     assert "added_bytes" in film          # the Remove dialog says what comes back
-    assert film["latest"] == "2024-02-01T00:00:00Z"
+    assert film["latest"].startswith("2024-02-01T00:00:00")
 
 
 def test_home(client, arr_library):
@@ -363,8 +378,9 @@ def test_home(client, arr_library):
 
 def test_home_names_what_did_not_answer(client, settings):
     home = client.get("/api/home").json()
-    assert home["problems"] == ["Sonarr: Sonarr address and API key are not set",
-                                "Radarr: Radarr address and API key are not set"]
+    assert home["problems"] == [
+        "Sonarr: Sonarr address and API key are not set",
+        "Films: they come from your media server - choose Plex or Jellyfin under Media server"]
 
 
 def test_startup_requeues_interrupted_jobs(home, monkeypatch):

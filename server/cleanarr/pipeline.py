@@ -16,7 +16,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from . import arr, asr, config, db, judge, media, subtitles, words
+from . import arr, asr, config, db, judge, library, media, subtitles, words
 
 # What each stage is worth, so the bar moves smoothly across the whole job
 # rather than sitting at 0% through the part that takes the longest.
@@ -210,7 +210,8 @@ class Pipeline:
                            f"{note}"}
 
     # -- the work ---------------------------------------------------------
-    def run(self, job_id: int, path: Path, force: bool = False, title: str = "") -> dict:
+    def run(self, job_id: int, path: Path, force: bool = False, title: str = "",
+            more_subtitles=None) -> dict:
         settings = self.settings
         if not path.exists():
             raise FileNotFoundError(_missing(path))
@@ -285,12 +286,18 @@ class Pipeline:
             # the job, and - only with the subtitle second opinion on - the
             # deciding word on the uncertain ones. The file's own track first,
             # else a subtitle file beside it.
-            cues = []
+            cues, found_where = [], ""
             source_file = (subtitle_file if subtitle_file.exists()
                            else media.find_sidecar_subtitles(path))
             if source_file is not None:
                 cues = subtitles.parse_srt(source_file.read_text(encoding="utf8",
                                                                  errors="replace"))
+            # Only when they would decide something: reading another copy of a
+            # film means reading that whole file.
+            if not cues and settings.subtitle_opinion and more_subtitles is not None:
+                self._stage(job_id, "judging", "looking for subtitles elsewhere")
+                text, found_where = more_subtitles(work)
+                cues = subtitles.parse_srt(text) if text else []
             matches, note = subtitles.annotate(matches, cues)
             if note:
                 print(f"[cleanarr] job {job_id}: {note}", flush=True)
@@ -302,10 +309,12 @@ class Pipeline:
             # used and simply agreed with everything.
             sub_note = ""
             if settings.subtitle_opinion:
-                if source_file is None or not cues:
-                    sub_note = " · no subtitles in the file or beside it"
+                if not cues:
+                    sub_note = " · no subtitles found to check against"
                 elif note:
                     sub_note = " · subtitles set aside (another release?)"
+                elif found_where:
+                    sub_note = f" · subtitles from {found_where}"
             matches, judged = self._adjudicate(matches, transcript.words, settings)
             matches = sorted([*settled, *matches], key=lambda m: m.start)
             kept = sorted([*kept, *judged], key=lambda m: m.start)
@@ -362,6 +371,73 @@ def _sweep_stale_work(folder: Path, older_than: float = 6 * 3600) -> None:
             pass
 
 
+def more_subtitles(settings, kind: str, source: str, source_id: str, path: Path,
+                   work: Path) -> tuple[str, str]:
+    """(SRT text, where it came from) for a file with no subtitles of its own,
+    or ("", "").
+
+    First what the media server holds for this very file - subtitles it
+    downloaded, say. Then, for a film, another copy of it: the media server
+    knows a film's versions, and a WEB-DL beside a WEBRip often carries the
+    subtitles the other lacks. Either may be timed for a different cut; the
+    comparison sets such subtitles aside when too many lines disagree, and then
+    everything stays muted as it would have anyway.
+    """
+    name = source if source in ("plex", "jellyfin") else (
+        library.film_source(settings) if kind == "movie" else "")
+    client = library.server(settings, name) if name else None
+    if client is None:
+        return "", ""
+    here = str(path)
+    try:
+        item_id = str(source_id) if source == name and source_id else next(
+            (m["id"] for m in client.movies() if m["path"] == here), "")
+        versions = client.versions(item_id) if item_id else []
+    except Exception as exc:  # noqa: BLE001
+        print(f"[cleanarr] subtitles from {name}: {exc}", flush=True)
+        return "", ""
+
+    def fetch(v) -> tuple[str, str]:
+        for label, url in v["subtitles"]:
+            try:
+                text = client.download(url)
+            except Exception:  # noqa: BLE001
+                continue
+            if subtitles.parse_srt(text):
+                return text, f"{name.title()} ({label})"
+        return "", ""
+
+    for v in (v for v in versions if v["path"] == here):
+        found = fetch(v)
+        if found[0]:
+            return found
+    if kind != "movie":
+        return "", ""
+    for v in (v for v in versions if v["path"] != here):
+        other = Path(v["path"])
+        if not other.is_file():
+            continue
+        where = f"another copy ({other.name})"
+        try:
+            stream = media.pick_subtitles(media.probe(other))
+        except Exception:  # noqa: BLE001
+            stream = None
+        dest = work / "other-copy.srt"
+        if stream is not None and media.extract_subtitles(other, stream, dest):
+            text = dest.read_text(encoding="utf8", errors="replace")
+            if subtitles.parse_srt(text):
+                return text, where
+        side = media.find_sidecar_subtitles(other)
+        if side is not None:
+            text = side.read_text(encoding="utf8", errors="replace")
+            if subtitles.parse_srt(text):
+                return text, where
+        text, _label = fetch(v)
+        if text:
+            return text, where
+    return "", ""
+
+
 def run_job(job_id: int, settings: config.Settings, cache_dir: Path,
             should_cancel=None) -> None:
     """Run one queued job and record what happened to it."""
@@ -384,8 +460,13 @@ def run_job(job_id: int, settings: config.Settings, cache_dir: Path,
         if action == "remove":
             result = pipeline.remove(job_id, path)
         else:
-            result = pipeline.run(job_id, path, force=bool(job["force"]),
-                                  title=job["title"])
+            keys = job.keys()
+            result = pipeline.run(
+                job_id, path, force=bool(job["force"]), title=job["title"],
+                more_subtitles=lambda work: more_subtitles(
+                    settings, job["kind"] if "kind" in keys else "",
+                    job["source"] if "source" in keys else "",
+                    job["source_id"] if "source_id" in keys else "", path, work))
         db.update(job_id, status=result.get("status", "done"),
                   muted=result.get("muted", 0), message=result.get("message", ""),
                   added_bytes=result.get("added_bytes", 0),

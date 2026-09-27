@@ -13,7 +13,7 @@ def states(client) -> dict:
 def test_a_fresh_install_has_everything_to_do(client, settings):
     got = states(client)
     assert got["library"][0] == "todo"
-    assert "Sonarr or Radarr" in got["library"][1]
+    assert "Sonarr address and API key, or a media server" in got["library"][1]
     assert got["paths"][0] == "todo"
     assert got["listening"][0] == "todo"
     assert got["first_clean"][0] == "todo"
@@ -40,7 +40,8 @@ def test_a_finished_install(client, settings, stub, tmp_path, monkeypatch):
     job = db.enqueue(kind="file", title="x", path="/x")
     db.update(job, status="done")
     got = states(client)
-    assert got["library"] == ("ok", "Sonarr answered. Radarr is not set, so films will not show.")
+    assert got["library"] == ("ok", "Sonarr answered. Films come from your media server - "
+                                    "choose Plex or Jellyfin under Media server to see them.")
     assert got["paths"][0] == "ok"
     assert got["listening"][0] == "ok"
     assert got["first_clean"][0] == "ok"
@@ -95,3 +96,13 @@ def test_model_download_error_is_shown(client, settings, monkeypatch):
     assert "huggingface.co" in row["error"]
     assert states(client)["listening"][0] == "problem"
     main._download_errors.clear()
+
+
+def test_sonarr_and_plex_both_answer(client, settings, stub, tmp_path):
+    stub.route("GET", "/api/v3/system/status", {"appName": "Sonarr", "version": "4"})
+    stub.route("GET", "/library/sections", {"MediaContainer": {"Directory": []}})
+    settings.sonarr = config.ArrConfig(url=stub.url, api_key="k")
+    settings.media_server = "plex"
+    settings.plex_url, settings.plex_token = stub.url, "t"
+    config.save(settings)
+    assert states(client)["library"] == ("ok", "Sonarr and Plex answered.")

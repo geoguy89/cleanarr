@@ -1,6 +1,6 @@
 """A made-up library for the UI tests and the README screenshots.
 
-Stand-ins for Sonarr and Radarr serve fictional shows and films, the media
+Stand-ins for Sonarr and Plex serve fictional shows and films, the media
 files exist (as empty files) in a temporary folder so the path check passes,
 and the job history is seeded with one of everything: done, failed, queued,
 running and cancelled.
@@ -175,13 +175,11 @@ class Demo:
         from stubs import Stub
         self.build_library()
         self.sonarr = Stub().start()
-        self.radarr = Stub().start()
-        s, r = self.sonarr, self.radarr
+        self.plex = Stub().start()
+        s, p = self.sonarr, self.plex
         s.route("GET", "/api/v3/system/status", {"appName": "Sonarr", "version": "4.0.10"})
-        r.route("GET", "/api/v3/system/status", {"appName": "Radarr", "version": "5.14.0"})
         s.route("GET", "/api/v3/series", self.series)
         s.route("GET", "/api/v3/rootfolder", [{"path": str(self.media / "tv")}])
-        r.route("GET", "/api/v3/rootfolder", [{"path": str(self.media / "movies")}])
         s.route("GET", "/api/v3/episode",
                 lambda req: (200, self.episodes.get(int(req.query["seriesId"][0]), [])))
 
@@ -192,12 +190,25 @@ class Demo:
         s.route("GET", "/api/v3/episodefile", files)
         s.route("GET", "/api/v3/history", lambda req: (200, {"records": self.history}))
         s.route("GET", "/api/v3/calendar", lambda req: (200, self.calendar()))
-        r.route("GET", "/api/v3/movie", self.movies)
+        # Films come from the media server, as they do for real.
+        p.route("GET", "/library/sections", {"MediaContainer": {"Directory": [
+            {"key": "2", "type": "movie", "title": "Films",
+             "Location": [{"path": str(self.media / "movies")}]}]}})
+        p.route("GET", "/library/sections/2/all", {"MediaContainer": {
+            "totalSize": len(self.movies), "Metadata": [{
+                "ratingKey": str(m["id"]), "title": m["title"], "year": m["year"],
+                "addedAt": int(dt.datetime.fromisoformat(
+                    m["movieFile"]["dateAdded"].replace("Z", "+00:00")).timestamp()),
+                "Media": [{"Part": [{"file": m["movieFile"]["path"],
+                                     "size": int(m["movieFile"]["size"])}]}]}
+                for m in self.movies]}})
         for i, show in enumerate(self.series):
             s.route("GET", f"/api/v3/mediacover/{show['id']}/poster.jpg",
                     lambda req, t=show["title"], n=i: (200, poster(t, n, self.art)))
         for i, film in enumerate(self.movies):
-            r.route("GET", f"/api/v3/mediacover/{film['id']}/poster.jpg",
+            p.route("GET", f"/library/metadata/{film['id']}",
+                    {"MediaContainer": {"Metadata": [{"thumb": f"/thumb/{film['id']}"}]}})
+            p.route("GET", f"/thumb/{film['id']}",
                     lambda req, t=film["title"], n=i: (200, poster(t, n + 20, self.art)))
 
     # ------------------------------------------------------------ the app
@@ -205,7 +216,8 @@ class Demo:
         from cleanarr import config
         settings = config.Settings()
         settings.sonarr = config.ArrConfig(url=self.sonarr.url, api_key="demo-sonarr-key")
-        settings.radarr = config.ArrConfig(url=self.radarr.url, api_key="demo-radarr-key")
+        settings.media_server = "plex"
+        settings.plex_url, settings.plex_token = self.plex.url, "demo-plex-token"
         settings.check_in_context = ["cock", "christ", "jesus"]
         settings.allow_words_by_title = {"Signal Hill": ["dick"]}
         for key, value in overrides.items():
@@ -298,7 +310,7 @@ class Demo:
     def stop(self):
         if self.server:
             self.server.should_exit = True
-        for stub in (getattr(self, "sonarr", None), getattr(self, "radarr", None)):
+        for stub in (getattr(self, "sonarr", None), getattr(self, "plex", None)):
             if stub:
                 stub.stop()
         shutil.rmtree(self.root, ignore_errors=True)

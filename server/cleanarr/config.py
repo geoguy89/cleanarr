@@ -32,18 +32,18 @@ class ArrConfig:
 class Settings:
     # Where the list of shows and films comes from.
     #
-    # "arr" is the default and knows the most - only Sonarr can say what has
-    # not aired yet, so only it can fill the Upcoming calendar. But plenty of
-    # people run a media server and nothing else, and telling them to install
-    # two more services to mute swearing is not a reasonable answer.
+    # "sonarr" is the default: shows from Sonarr, which alone can say what has
+    # not aired yet and so fill the Upcoming calendar, and films from the media
+    # server. "plex" or "jellyfin" take the shows from the server as well, for
+    # people who run nothing else.
     #
-    # One of: arr | plex | jellyfin. The Plex and Jellyfin credentials are the
-    # same ones used for refreshing and the transcode hold - there is no second
-    # set to keep in step.
-    library_source: str = "arr"
+    # One of: sonarr | plex | jellyfin. Films always come from the media
+    # server - Radarr was dropped, it knew nothing the server does not. The
+    # Plex and Jellyfin credentials are the same ones used for refreshing and
+    # the transcode hold - there is no second set to keep in step.
+    library_source: str = "sonarr"
 
     sonarr: ArrConfig = field(default_factory=ArrConfig)
-    radarr: ArrConfig = field(default_factory=ArrConfig)
 
     # Which categories are silenced. Set from the first-run questions.
     categories: list[str] = field(
@@ -157,9 +157,8 @@ class Settings:
     def public(self) -> dict:
         """For the UI: everything except the secrets themselves."""
         data = self.to_dict()
-        for section in ("sonarr", "radarr"):
-            if data[section].get("api_key"):
-                data[section]["api_key"] = "********"
+        if data["sonarr"].get("api_key"):
+            data["sonarr"]["api_key"] = "********"
         if data.get("plex_token"):
             data["plex_token"] = "********"
         if data.get("asr_api_key"):
@@ -196,8 +195,15 @@ def load() -> Settings:
     # switching it off.
     if "media_server" not in raw and raw.get("plex_url"):
         raw["media_server"] = "plex"
+    # Radarr was dropped: films come from the media server. "arr" meant Sonarr
+    # and Radarr, so it becomes Sonarr, and the Radarr section is forgotten on
+    # the next save. With no media server chosen, films will not show, and the
+    # setup checklist says so.
+    raw.pop("radarr", None)
+    if raw.get("library_source") == "arr":
+        raw["library_source"] = "sonarr"
     for key, value in raw.items():
-        if key in ("sonarr", "radarr") and isinstance(value, dict):
+        if key == "sonarr" and isinstance(value, dict):
             setattr(settings, key, ArrConfig(**value))
         elif hasattr(settings, key):
             setattr(settings, key, value)

@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from . import arr, words
 
 CHOICES = {
-    "library_source": ("arr", "plex", "jellyfin"),
+    "library_source": ("sonarr", "plex", "jellyfin"),
     "media_server": ("none", "plex", "jellyfin"),
     "asr_backend": ("builtin", "remote"),
     "device": ("auto", "cuda", "cpu"),
@@ -24,7 +24,6 @@ CHOICES = {
 
 URLS = {
     "sonarr.url": "Sonarr address",
-    "radarr.url": "Radarr address",
     "plex_url": "Plex address",
     "jellyfin_url": "Jellyfin address",
     "asr_url": "Whisper server address",
@@ -85,8 +84,11 @@ def check(payload: dict) -> tuple[dict, dict[str, str]]:
     clean = dict(payload)
     errors: dict[str, str] = {}
 
+    # A page loaded before Radarr was dropped still says "arr" for Sonarr.
+    if clean.get("library_source") == "arr":
+        clean["library_source"] = "sonarr"
     for key, allowed in CHOICES.items():
-        if key in payload and payload[key] not in allowed:
+        if key in clean and clean[key] not in allowed:
             errors[key] = f"{key} must be one of: {', '.join(allowed)}"
 
     for key, label in URLS.items():

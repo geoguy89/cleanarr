@@ -1,6 +1,6 @@
-"""Sonarr and Radarr, read-only.
+"""Sonarr, read-only, plus the media-server calls (refresh, sessions).
 
-Nothing here writes to either service. This is a browser: it asks what you
+Nothing here writes to Sonarr. This is a browser: it asks what you
 have and where the files are, and everything after that happens in our own
 queue. A bug in this file can waste time; it cannot rename your library.
 """
@@ -237,26 +237,6 @@ class Sonarr(Client):
                 "added": f.get("dateAdded", ""),
             })
         out.sort(key=lambda e: (e["season"], e["episode"]))
-        return out
-
-
-class Radarr(Client):
-    def movies(self) -> list[dict]:
-        out = []
-        for m in self._get("movie"):
-            f = m.get("movieFile") or {}
-            if not f.get("path"):
-                continue
-            out.append({
-                "id": m["id"], "title": m.get("title", ""), "year": m.get("year"),
-                "path": f.get("path", ""), "size": f.get("size", 0),
-                "quality": ((f.get("quality") or {}).get("quality") or {}).get("name", ""),
-                # When the file landed, not when the film was added to Radarr:
-                # a film wanted for two years and grabbed last night is new.
-                "added": f.get("dateAdded", ""),
-                "poster": _poster(m),
-            })
-        out.sort(key=lambda m: (m["title"] or "").lower())
         return out
 
 
@@ -504,7 +484,7 @@ def refresh_target(settings) -> str:
     chosen = getattr(settings, "media_server", "none")
     if chosen in ("plex", "jellyfin"):
         return chosen
-    source = getattr(settings, "library_source", "arr")
+    source = getattr(settings, "library_source", "sonarr")
     return source if source in ("plex", "jellyfin") else "none"
 
 

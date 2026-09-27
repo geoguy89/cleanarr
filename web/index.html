@@ -305,25 +305,26 @@
             <section class="panel" id="s-library" aria-labelledby="s-library-h">
               <header class="panel-head">
                 <h2 id="s-library-h"><span class="step">1</span>Your library</h2>
-                <p class="muted">Where the list of shows and films comes from.
-                  Read-only: Cleanarr never changes anything in it.</p>
+                <p class="muted">Where the list of shows comes from. Films always
+                  come from your media server (Media server, below). Read-only: Cleanarr never
+                  changes anything in either.</p>
               </header>
               <fieldset class="choices">
                 <legend class="sr-only">Library source</legend>
                 <label class="choice">
-                  <input type="radio" name="library_source" value="arr">
-                  <span><strong>Sonarr and Radarr</strong>
-                    <em>Knows the most. Needed for the Upcoming calendar.</em></span>
+                  <input type="radio" name="library_source" value="sonarr">
+                  <span><strong>Sonarr</strong>
+                    <em>Needed for the Upcoming calendar. Films still come from your media server.</em></span>
                 </label>
                 <label class="choice">
                   <input type="radio" name="library_source" value="plex">
                   <span><strong>Plex</strong>
-                    <em>No *arr apps needed. Artwork comes from Plex.</em></span>
+                    <em>Shows and films from Plex, nothing else needed.</em></span>
                 </label>
                 <label class="choice">
                   <input type="radio" name="library_source" value="jellyfin">
                   <span><strong>Jellyfin</strong>
-                    <em>No *arr apps needed. Artwork comes from Jellyfin.</em></span>
+                    <em>Shows and films from Jellyfin, nothing else needed.</em></span>
                 </label>
               </fieldset>
 
@@ -340,19 +341,6 @@
                   </div>
                   <div class="test-row"><button type="button" class="btn secondary sm" data-test="sonarr">Test Sonarr</button>
                     <span class="test-result" data-result="sonarr" role="status"></span></div>
-                </div>
-                <div class="service">
-                  <h3>Radarr <span class="muted small">films</span></h3>
-                  <div class="fields two">
-                    <div class="field"><label for="f-radarr-url">Address</label>
-                      <input id="f-radarr-url" name="radarr.url" inputmode="url" autocomplete="off" placeholder="http://radarr:7878">
-                      <p class="error-text" data-error-for="radarr.url"></p></div>
-                    <div class="field"><label for="f-radarr-key">API key</label>
-                      <input id="f-radarr-key" name="radarr.api_key" type="password" autocomplete="off">
-                      <p class="hint">Radarr → Settings → General.</p></div>
-                  </div>
-                  <div class="test-row"><button type="button" class="btn secondary sm" data-test="radarr">Test Radarr</button>
-                    <span class="test-result" data-result="radarr" role="status"></span></div>
                 </div>
               </div>
 
@@ -576,19 +564,20 @@
             <section class="panel" id="s-server" aria-labelledby="s-server-h">
               <header class="panel-head">
                 <h2 id="s-server-h"><span class="step">6</span>Media server <span class="tag-optional">optional</span></h2>
-                <p class="muted">Tells Plex or Jellyfin a file changed, so the
-                  cleaned track shows up at once, and can pause cleaning while
-                  the server transcodes on the same GPU. The cleaned track
-                  works in both either way: it is an ordinary extra audio
-                  stream with a name.</p>
+                <p class="muted">Where films come from, and where Cleanarr looks
+                  for subtitles a file does not carry itself. Also tells Plex or
+                  Jellyfin a file changed, so the cleaned track shows up at once,
+                  and can pause cleaning while the server transcodes on the same
+                  GPU. The cleaned track works in both either way: it is an
+                  ordinary extra audio stream with a name.</p>
               </header>
               <fieldset class="choices">
                 <legend class="sr-only">Media server</legend>
                 <label class="choice">
                   <input type="radio" name="media_server" value="none">
                   <span><strong>Neither</strong>
-                    <em>No transcode pause. A Plex or Jellyfin library is still
-                      told about changed files.</em></span>
+                    <em>No films, unless Plex or Jellyfin is your library above.
+                      No transcode pause.</em></span>
                 </label>
                 <label class="choice">
                   <input type="radio" name="media_server" value="plex">

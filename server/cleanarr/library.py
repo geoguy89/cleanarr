@@ -5,6 +5,11 @@ start - they know every file's path, which is the one thing this needs. But
 plenty of people run Plex or Jellyfin and nothing else, and telling them to
 install two more services to mute swearing is not a reasonable answer.
 
+Films always come from the media server. Radarr was dropped: it knew nothing
+about a film that the media server does not, and the media server also knows
+each film's other versions and any subtitles it downloaded. Shows come from
+Sonarr when it is set up, for its calendar, or else from the media server.
+
 So the library is a source with three implementations. All any of them has to
 do is answer four questions:
 
@@ -59,6 +64,18 @@ def _iso(epoch: int | float | None) -> str:
     if not epoch:
         return ""
     return _dt.datetime.fromtimestamp(float(epoch), _dt.timezone.utc).isoformat()
+
+
+_TEXT_CODECS = {"srt", "subrip", "vtt", "webvtt"}
+
+
+def _english(tag) -> bool:
+    return str(tag or "").strip().lower() in ("en", "eng", "english")
+
+
+def _forced(flag, title) -> bool:
+    """Forced subtitles carry only the foreign-language lines - useless here."""
+    return flag in (True, 1, "1", "true") or "forced" in str(title or "").lower()
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +252,35 @@ class PlexLibrary:
                                 "path": loc["path"]})
         return out
 
+    def versions(self, item_id: str) -> list[dict]:
+        """Every file of this item - a film can have several - with the
+        subtitles Plex holds for each: [{"path", "subtitles": [(label, url)]}].
+
+        Only subtitles Plex keeps outside the file are listed (downloaded ones,
+        or a sidecar Plex found); those inside a file are read from the file.
+        """
+        items = self._get(f"/library/metadata/{item_id}").get("Metadata") or []
+        out = []
+        for media in (items[0].get("Media") or []) if items else []:
+            for part in media.get("Part") or []:
+                subs = []
+                for st in part.get("Stream") or []:
+                    if (int(st.get("streamType") or 0) != 3 or not st.get("key")
+                            or _forced(st.get("forced"), st.get("title"))
+                            or not _english(st.get("languageCode") or st.get("language"))
+                            or str(st.get("codec", "")).lower() not in _TEXT_CODECS):
+                        continue
+                    subs.append((st.get("displayTitle") or "Plex subtitles",
+                                 f"{self.url.rstrip('/')}{st['key']}"))
+                if part.get("file"):
+                    out.append({"path": part["file"], "subtitles": subs})
+        return out
+
+    def download(self, url: str) -> str:
+        resp = httpx.get(url, params={"X-Plex-Token": self.token}, timeout=TIMEOUT)
+        resp.raise_for_status()
+        return resp.text
+
     def test(self) -> dict:
         container = self._get("/library/sections")
         kinds = [d.get("type") for d in (container.get("Directory") or [])]
@@ -388,6 +434,33 @@ class JellyfinLibrary:
                 out.append({"library": f.get("Name", ""), "kind": kind, "path": path})
         return out
 
+    def versions(self, item_id: str) -> list[dict]:
+        """As PlexLibrary.versions. Jellyfin lists a film's other versions as
+        further MediaSources of the same item, and converts any text subtitle
+        it holds to SRT on request."""
+        body = self._get("/Items", Ids=item_id, Fields="Path,MediaSources")
+        items = body.get("Items") or []
+        out = []
+        for source in (items[0].get("MediaSources") or []) if items else []:
+            subs = []
+            for st in source.get("MediaStreams") or []:
+                if (st.get("Type") != "Subtitle" or not st.get("IsExternal")
+                        or not st.get("IsTextSubtitleStream")
+                        or _forced(st.get("IsForced"), st.get("Title"))
+                        or not _english(st.get("Language"))):
+                    continue
+                subs.append((st.get("DisplayTitle") or "Jellyfin subtitles",
+                             f"{self.url.rstrip('/')}/Videos/{item_id}/{source.get('Id')}"
+                             f"/Subtitles/{st.get('Index')}/Stream.srt"))
+            if source.get("Path"):
+                out.append({"path": source["Path"], "subtitles": subs})
+        return out
+
+    def download(self, url: str) -> str:
+        resp = httpx.get(url, headers=jellyfin_headers(self.api_key), timeout=TIMEOUT)
+        resp.raise_for_status()
+        return resp.text
+
     def test(self) -> dict:
         info = self._get("/System/Info")
         return {"ok": True, "app": info.get("ServerName") or "Jellyfin",
@@ -395,21 +468,19 @@ class JellyfinLibrary:
 
 
 # ---------------------------------------------------------------------------
-#  Sonarr and Radarr, wearing the same interface
+#  Sonarr for shows, the media server for films
 # ---------------------------------------------------------------------------
 
 @dataclass
-class ArrLibrary:
-    """The original source. Kept as the default because it knows more.
-
-    Sonarr can say what has not aired yet, which neither media server can, so
-    this is the only source that can fill the Upcoming calendar.
-    """
+class SonarrLibrary:
+    """Sonarr can say what has not aired yet, which neither media server can,
+    so this is the only source that can fill the Upcoming calendar. Films come
+    from the media server either way."""
 
     sonarr: object
-    radarr: object
+    films: object          # a PlexLibrary / JellyfinLibrary, or None
 
-    name = "arr"
+    name = "sonarr"
     has_calendar = True
 
     def shows(self) -> list[dict]:
@@ -419,19 +490,21 @@ class ArrLibrary:
         return self.sonarr.episodes(int(show_id))
 
     def movies(self) -> list[dict]:
-        return self.radarr.movies()
+        if self.films is None:
+            raise LibraryError("they come from your media server - choose Plex "
+                               "or Jellyfin under Media server")
+        return self.films.movies()
 
     def recent_episodes(self, limit: int = 12) -> list[dict]:
         return self.sonarr.recent_imports(limit)
 
     def roots(self) -> list[dict]:
-        """Root folders, as each *arr app sees them."""
-        out = []
-        for app, kind in ((self.sonarr, "show"), (self.radarr, "movie")):
-            for r in (getattr(app, "root_folders", lambda: [])() or []):
-                if r.get("path"):
-                    out.append({"library": "Sonarr" if kind == "show" else "Radarr",
-                                "kind": kind, "path": r["path"]})
+        """TV folders as Sonarr sees them, film folders as the media server does."""
+        out = [{"library": "Sonarr", "kind": "show", "path": r["path"]}
+               for r in (getattr(self.sonarr, "root_folders", lambda: [])() or [])
+               if r.get("path")]
+        if self.films is not None:
+            out += [r for r in self.films.roots() if r.get("kind") == "movie"]
         return out
 
 
@@ -439,13 +512,37 @@ PlexLibrary.has_calendar = False
 JellyfinLibrary.has_calendar = False
 
 
+def source_name(settings) -> str:
+    """sonarr | plex | jellyfin. "arr" was Sonarr + Radarr, which is now Sonarr."""
+    source = getattr(settings, "library_source", "sonarr")
+    return source if source in ("plex", "jellyfin") else "sonarr"
+
+
+def server(settings, name: str = ""):
+    """The Plex or Jellyfin client by name - the media server's by default."""
+    name = name or getattr(settings, "media_server", "none")
+    if name == "plex":
+        return PlexLibrary(settings.plex_url, settings.plex_token)
+    if name == "jellyfin":
+        return JellyfinLibrary(settings.jellyfin_url, settings.jellyfin_api_key)
+    return None
+
+
+def film_source(settings) -> str:
+    """Which media server the films come from, or "" when there is none."""
+    source = source_name(settings)
+    if source in ("plex", "jellyfin"):
+        return source
+    chosen = getattr(settings, "media_server", "none")
+    return chosen if chosen in ("plex", "jellyfin") else ""
+
+
 def build(settings):
     """Whichever source the settings name."""
-    source = getattr(settings, "library_source", "arr")
-    if source == "plex":
-        return PlexLibrary(settings.plex_url, settings.plex_token)
-    if source == "jellyfin":
-        return JellyfinLibrary(settings.jellyfin_url, settings.jellyfin_api_key)
+    source = source_name(settings)
+    if source in ("plex", "jellyfin"):
+        return server(settings, source)
     from . import arr as _arr
-    return ArrLibrary(_arr.Sonarr(settings.sonarr.url, settings.sonarr.api_key),
-                      _arr.Radarr(settings.radarr.url, settings.radarr.api_key))
+    films = film_source(settings)
+    return SonarrLibrary(_arr.Sonarr(settings.sonarr.url, settings.sonarr.api_key),
+                         server(settings, films) if films else None)

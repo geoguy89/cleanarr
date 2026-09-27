@@ -23,8 +23,9 @@ CACHE_DIR = Path(os.environ.get("CLEANARR_CACHE", "/config/cache"))
 
 worker = Worker(CACHE_DIR)
 
-# For the pages that ask Sonarr and Radarr two slow questions at once. Both
-# are the remote service waiting on its own database, so they overlap cleanly.
+# For the pages that ask the library two slow questions at once (Sonarr and
+# the media server, say). Both are the remote service waiting on its own
+# database, so they overlap cleanly.
 POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="cleanarr-arr")
 
 
@@ -572,7 +573,7 @@ def put_settings(payload: dict):
         return _refuse(errors)
     settings = config.load()
     old_title = settings.track_title
-    for section in ("sonarr", "radarr"):
+    for section in ("sonarr",):
         if section in payload and isinstance(payload[section], dict):
             current = getattr(settings, section)
             for key, value in payload[section].items():
@@ -640,7 +641,6 @@ def test_service(service: str, payload: dict | None = None):
     payload = payload or {}
     saved = {
         "sonarr": (settings.sonarr.url, settings.sonarr.api_key),
-        "radarr": (settings.radarr.url, settings.radarr.api_key),
         "plex": (settings.plex_url, settings.plex_token),
         "jellyfin": (settings.jellyfin_url, settings.jellyfin_api_key),
     }
@@ -656,8 +656,6 @@ def test_service(service: str, payload: dict | None = None):
     try:
         if service == "sonarr":
             return arr.Sonarr(address, key).test()
-        if service == "radarr":
-            return arr.Radarr(address, key).test()
         if service == "plex":
             return library.PlexLibrary(address, key).test()
         return library.JellyfinLibrary(address, key).test()
@@ -713,7 +711,7 @@ def series():
     # Only Sonarr keeps an import history to sort by; a media server carries
     # the date on the item itself, which `added` already holds.
     landed = (_import_dates(source.sonarr)
-              if getattr(source, "name", "") == "arr" else {})
+              if getattr(source, "name", "") == "sonarr" else {})
     try:
         items = source.shows()
     except (arr.ArrError, library.LibraryError) as exc:
@@ -748,7 +746,7 @@ def series():
     threading.Thread(target=_warm_posters,
                      args=(source, [s["id"] for s in items]),
                      daemon=True).start()
-    return {"items": items, "library_source": settings.library_source}
+    return {"items": items, "library_source": library.source_name(settings)}
 
 
 def _attach_jobs(items: list[dict], known: dict[str, dict],
@@ -779,8 +777,8 @@ def home(limit: int = 12):
     # Asked at the same time: neither answer depends on the other, and this is
     # the page that opens first.
     source = library.build(settings)
-    shows_label = "Sonarr" if source.name == "arr" else source.name.title()
-    films_label = "Radarr" if source.name == "arr" else source.name.title()
+    shows_label = source.name.title()
+    films_label = (library.film_source(settings) or "films").title()
 
     recent = POOL.submit(source.recent_episodes, limit)
     all_films = POOL.submit(source.movies)
@@ -809,7 +807,7 @@ def home(limit: int = 12):
 
     counts = db.count_by_status()
     return {
-        "library_source": settings.library_source,
+        "library_source": library.source_name(settings),
         "episodes": episodes, "movies": films, "problems": problems,
         "stats": db.stats(), "monitors": len(db.monitors()),
         "queued": counts.get("queued", 0), "running": counts.get("running", 0),
@@ -829,7 +827,7 @@ def calendar(days: int = 21):
     settings = config.load()
     # Only Sonarr knows what has not aired yet - a media server can only see
     # what it already has - so this is empty rather than wrong for the others.
-    if settings.library_source != "arr":
+    if library.source_name(settings) != "sonarr":
         return {"items": [], "days": days, "unavailable": True}
     try:
         items = arr.Sonarr(settings.sonarr.url,
@@ -870,7 +868,7 @@ def movies():
     threading.Thread(target=_warm_posters,
                      args=(source, [m["id"] for m in items]),
                      daemon=True).start()
-    return {"items": items, "library_source": settings.library_source}
+    return {"items": items, "library_source": library.source_name(settings)}
 
 
 #  Artwork
@@ -900,10 +898,13 @@ def _poster_source(settings, kind: str) -> str:
 
     Namespaced so switching library source does not serve one service's
     artwork under another's ids - they number their items differently.
+    Films always come from the media server. Posters of films listed back when
+    Radarr was the source stay in the cache under "radarr" and are still
+    served from there.
     """
-    if settings.library_source in ("plex", "jellyfin"):
-        return settings.library_source
-    return "sonarr" if kind == "show" else "radarr"
+    if kind == "movie":
+        return library.film_source(settings) or "none"
+    return library.source_name(settings)
 
 
 def _fetch_poster(source: str, item_id: int | str, settings) -> bool:
@@ -914,8 +915,11 @@ def _fetch_poster(source: str, item_id: int | str, settings) -> bool:
     # A media server serves its own artwork, and has it for everything it
     # knows about - including files Sonarr never imported.
     if source in ("plex", "jellyfin"):
+        client = library.server(settings, source)
+        if client is None:
+            return False
         try:
-            data = library.build(settings).poster(str(item_id))
+            data = client.poster(str(item_id))
         except Exception:  # noqa: BLE001
             return False
         if not data:
@@ -925,11 +929,11 @@ def _fetch_poster(source: str, item_id: int | str, settings) -> bool:
         tmp.replace(cached)
         return True
 
-    arr_config = settings.sonarr if source == "sonarr" else settings.radarr
-    if not arr_config.url:
+    arr_config = settings.sonarr
+    if source != "sonarr" or not arr_config.url:
         return False
-    # Both Sonarr and Radarr serve artwork at /api/v3/mediacover/<id>/poster.jpg
-    # - with no "series" or "movie" segment, which 404s.
+    # Sonarr serves artwork at /api/v3/mediacover/<id>/poster.jpg - with no
+    # "series" segment, which 404s.
     url = f"{arr_config.url.rstrip('/')}/api/v3/mediacover/{item_id}/poster.jpg"
     try:
         with POSTER_FETCHES:
@@ -1116,7 +1120,7 @@ def path_report():
             row["elsewhere"] = found
         out.append(row)
     return {"roots": out, "visible": visible,
-            "source": getattr(settings, "library_source", "arr")}
+            "source": library.source_name(settings)}
 
 
 # ---------------------------------------------------------------------------
@@ -1127,16 +1131,25 @@ def path_report():
 #  it, so a new install is never a blank page with no hint of why.
 # ---------------------------------------------------------------------------
 
+def _server_configured(settings, name: str) -> bool:
+    if name == "plex":
+        return bool(settings.plex_url and settings.plex_token)
+    if name == "jellyfin":
+        return bool(settings.jellyfin_url and settings.jellyfin_api_key)
+    return False
+
+
 def _library_configured(settings) -> tuple[bool, str]:
-    source = settings.library_source
+    source = library.source_name(settings)
     if source == "plex":
-        return bool(settings.plex_url and settings.plex_token), "Plex address and token"
+        return _server_configured(settings, "plex"), "Plex address and token"
     if source == "jellyfin":
-        return (bool(settings.jellyfin_url and settings.jellyfin_api_key),
+        return (_server_configured(settings, "jellyfin"),
                 "Jellyfin address and API key")
+    films = library.film_source(settings)
     has_any = (settings.sonarr.url and settings.sonarr.api_key) or (
-        settings.radarr.url and settings.radarr.api_key)
-    return bool(has_any), "Sonarr or Radarr address and API key"
+        films and _server_configured(settings, films))
+    return bool(has_any), "Sonarr address and API key, or a media server"
 
 
 def _check_library(settings) -> dict:
@@ -1145,24 +1158,24 @@ def _check_library(settings) -> dict:
     if not configured:
         return {**item, "state": "todo", "detail": f"Add the {needs}."}
     try:
-        if settings.library_source == "plex":
-            result = library.PlexLibrary(settings.plex_url, settings.plex_token).test()
-        elif settings.library_source == "jellyfin":
-            result = library.JellyfinLibrary(settings.jellyfin_url,
-                                             settings.jellyfin_api_key).test()
+        source = library.source_name(settings)
+        if source in ("plex", "jellyfin"):
+            result = library.server(settings, source).test()
         else:
             answered = []
-            for name, cfg, client in (("Sonarr", settings.sonarr, arr.Sonarr),
-                                      ("Radarr", settings.radarr, arr.Radarr)):
-                if cfg.url and cfg.api_key:
-                    client(cfg.url, cfg.api_key).test()
-                    answered.append(name)
-            missing = [n for n in ("Sonarr", "Radarr") if n not in answered]
+            if settings.sonarr.url and settings.sonarr.api_key:
+                arr.Sonarr(settings.sonarr.url, settings.sonarr.api_key).test()
+                answered.append("Sonarr")
+            films = library.film_source(settings)
+            if films and _server_configured(settings, films):
+                library.server(settings, films).test()
+                answered.append(films.title())
             detail = f"{' and '.join(answered)} answered."
-            if missing:
-                detail += (" Radarr is not set, so films will not show."
-                           if missing == ["Radarr"]
-                           else " Sonarr is not set, so shows will not show.")
+            if "Sonarr" not in answered:
+                detail += " Sonarr is not set, so shows will not show."
+            elif len(answered) == 1:
+                detail += (" Films come from your media server - choose Plex or "
+                           "Jellyfin under Media server to see them.")
             return {**item, "state": "ok", "detail": detail}
     except (arr.ArrError, library.LibraryError) as exc:
         return {**item, "state": "problem", "detail": str(exc)}

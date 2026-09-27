@@ -190,10 +190,10 @@ def test_every_setting_saves_and_comes_back(desk, demo, tmp_path):
     form.wait_for()
     media_dir = str(tmp_path)
 
-    # Library: the *arr addresses, then switch to Jellyfin, which hides them
+    # Library: the Sonarr address, then switch to Jellyfin, which hides it
     # and moves the Jellyfin fields into this section.
     page.fill("[name='sonarr.url']", "http://sonarr.test:8989")
-    page.fill("[name='radarr.url']", "http://radarr.test:7878")
+    assert page.locator("[name='radarr.url']").count() == 0
     page.locator("input[name=library_source][value=jellyfin]").check()
     assert page.locator("[name='sonarr.url']").is_hidden()
     page.fill("[name=jellyfin_url]", "http://jellyfin.test:8096")
@@ -251,7 +251,6 @@ def test_every_setting_saves_and_comes_back(desk, demo, tmp_path):
     assert s.library_source == "jellyfin"
     assert (s.jellyfin_url, s.jellyfin_api_key) == ("http://jellyfin.test:8096", "jf-key")
     assert s.sonarr.url == "http://sonarr.test:8989" and s.sonarr.api_key == "demo-sonarr-key"
-    assert s.radarr.url == "http://radarr.test:7878"
     assert "mild" not in s.categories and "strong" in s.categories
     assert s.custom_words == ["muppet"] and s.allow_words == ["dickens"]
     assert s.check_in_context == ["cock", "christ", "prick"]
@@ -361,7 +360,7 @@ def test_a_fresh_install_gets_a_checklist(browser, demo):
         card = page.locator("#home-setup .setup")
         card.wait_for()
         assert "Finish setting up" in card.inner_text()
-        assert "Add the Sonarr or Radarr address and API key." in card.inner_text()
+        assert "Add the Sonarr address and API key, or a media server." in card.inner_text()
         assert page.locator("#settings-dot").is_visible()
         # Home says what went wrong rather than sitting on "Loading".
         assert page.locator("#home-problems .alert").is_visible()

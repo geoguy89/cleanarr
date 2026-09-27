@@ -29,7 +29,7 @@
   <Project>https://github.com/geoguy89/cleanarr</Project>
   <Overview>
     Adds a second audio track, "Cleaned - English", to shows and films from
-    Sonarr and Radarr, Plex or Jellyfin, with the profanity muted. One file,
+    Plex or Jellyfin (and Sonarr, if you use it), with the profanity muted. One file,
     one extra track: the original audio is untouched and stays the default,
     and the clean one is picked from the audio menu in Plex or Jellyfin.
 
@@ -50,7 +50,7 @@
 ### 1.0.0
 - First public release.
   </Changes>
-  <Requires>Sonarr and Radarr, Plex, or Jellyfin, with the media mounted at the paths it reports. An NVIDIA GPU and Ollama are optional.</Requires>
+  <Requires>Plex or Jellyfin (Sonarr optional, for shows), with the media mounted at the paths it reports. An NVIDIA GPU and Ollama are optional.</Requires>
   <Config Name="WebUI" Target="8477" Default="8477" Mode="tcp"
           Description="The Cleanarr web interface." Type="Port"
           Display="always" Required="true" Mask="false">8477</Config>
@@ -58,7 +58,7 @@
           Description="Settings, the job database and the cached transcripts."
           Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/cleanarr</Config>
   <Config Name="Media" Target="/data" Default="/mnt/user/data" Mode="rw"
-          Description="The CONTAINER PATH must be what your library reports. Sonarr, Radarr and Plex in containers usually report /data/media/..., so /data is right for them. Cleanarr opens those paths unchanged - there is no path rewriting."
+          Description="The CONTAINER PATH must be what your library reports. Sonarr and Plex in containers usually report /data/media/..., so /data is right for them. Cleanarr opens those paths unchanged - there is no path rewriting."
           Type="Path" Display="always" Required="true" Mask="false">/mnt/user/data</Config>
   <Config Name="TZ" Target="TZ" Default="America/New_York" Mode=""
           Description="Timezone." Type="Variable"

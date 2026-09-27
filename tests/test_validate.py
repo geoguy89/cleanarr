@@ -54,7 +54,7 @@ def test_a_good_payload_is_cleaned():
     ({"custom_words": 5}, "custom_words"),
     ({"track_title": "x" * 81}, "track_title"),
     ({"plex_url": "plex.local:32400"}, "plex_url"),
-    ({"radarr": {"url": "radarr"}}, "radarr.url"),
+    ({"sonarr": {"url": "sonarr"}}, "sonarr.url"),
 ])
 def test_bad_values_are_named(payload, field):
     _, errors = validate.check(payload)
@@ -94,3 +94,8 @@ def test_advanced_settings_save(client, settings):
     s = config.load()
     assert (s.compute_type, s.bitrate_surround, s.bitrate_stereo, s.ffmpeg_threads,
             s.judge_keep_alive) == ("int8", "448k", "160k", 4, "0")
+
+
+def test_the_old_sonarr_and_radarr_choice_means_sonarr():
+    clean, errors = validate.check({"library_source": "arr"})
+    assert not errors and clean["library_source"] == "sonarr"

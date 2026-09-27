@@ -101,7 +101,7 @@ About **2.5 minutes** for a 25-minute episode on an RTX 2070 Super, never above 
 | | |
 |---|---|
 | **GPU** | Optional. NVIDIA is much faster; CPU works with no configuration; an AMD card needs a separate Whisper server. |
-| **A library** | Sonarr + Radarr, **or** Plex, **or** Jellyfin. Read-only — Cleanarr never writes to any of them. |
+| **A library** | Plex or Jellyfin, optionally with Sonarr for shows. Read-only — Cleanarr never writes to any of them. |
 | **Media** | Mounted so the paths your library reports exist in the container. There is no path-rewriting setting. |
 | **Ollama** | Optional, off by default. Any OpenAI-compatible chat server works too. |
 

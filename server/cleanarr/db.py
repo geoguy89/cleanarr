@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS job (
   title       TEXT NOT NULL,             -- what a person would call it
   subtitle    TEXT DEFAULT '',           -- S02E04, or the year
   path        TEXT NOT NULL,
-  source      TEXT DEFAULT '',           -- sonarr | radarr | manual
+  source      TEXT DEFAULT '',           -- sonarr | plex | jellyfin | manual (radarr: older jobs)
   source_id   TEXT DEFAULT '',
   status      TEXT NOT NULL DEFAULT 'queued',
   stage       TEXT DEFAULT '',
@@ -83,7 +83,7 @@ CREATE INDEX IF NOT EXISTS detection_job ON detection (job_id, start);
 
 # The schema and the migrations are a WRITE, and they only need doing once per
 # process - but connections are per-thread, and this service has a lot of
-# threads: the worker, the poster warmers, the Sonarr/Radarr pool, and one per
+# threads: the worker, the poster warmers, the library pool, and one per
 # in-flight request. Running CREATE TABLE and ALTER TABLE on every one of them
 # meant every new thread grabbed the write lock just to say hello, competing
 # with a job that was busy recording detections. That is what "database is

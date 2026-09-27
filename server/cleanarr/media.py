@@ -279,6 +279,14 @@ def find_sidecar_subtitles(path: Path) -> Path | None:
     return (tagged or untagged or [None])[0]
 
 
+def extract_subtitles(path: Path, stream: SubtitleStream, dest: Path) -> bool:
+    """One text subtitle track as SRT. For another copy of a film, whose
+    subtitles are wanted but whose audio is not - so it is its own pass."""
+    out = _run([FFMPEG, "-nostdin", "-v", "error", "-y", *_threads(), "-i", str(path),
+                "-map", f"0:s:{stream.sub_index}", "-c:s", "srt", str(dest)])
+    return out.returncode == 0 and dest.exists() and dest.stat().st_size > 0
+
+
 def extract_for_asr(path: Path, track: AudioStream, dest: Path,
                     subtitles: SubtitleStream | None = None,
                     subtitle_dest: Path | None = None) -> Path:
