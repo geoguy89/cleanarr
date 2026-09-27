@@ -297,6 +297,15 @@ class Pipeline:
             settled, kept = [], []
             if settings.subtitle_opinion and not note:
                 settled, kept, matches = subtitles.decide(matches, context_words)
+            # With the subtitle opinion on, say so when it had nothing to go
+            # on - otherwise a job with no subtitles reads as though they were
+            # used and simply agreed with everything.
+            sub_note = ""
+            if settings.subtitle_opinion:
+                if source_file is None or not cues:
+                    sub_note = " · no subtitles in the file or beside it"
+                elif note:
+                    sub_note = " · subtitles set aside (another release?)"
             matches, judged = self._adjudicate(matches, transcript.words, settings)
             matches = sorted([*settled, *matches], key=lambda m: m.start)
             kept = sorted([*kept, *judged], key=lambda m: m.start)
@@ -305,7 +314,7 @@ class Pipeline:
 
             if not spans:
                 return {"status": "skipped", "muted": 0,
-                        "message": "nothing to mute - no profanity found",
+                        "message": "nothing to mute - no profanity found" + sub_note,
                         "cached_transcript": transcript.cached}
 
             self._stage(job_id, "muting",
@@ -330,7 +339,7 @@ class Pipeline:
             return {"status": "done", "muted": len(matches), "added_bytes": added,
                     "message": f"added “{settings.track_title}” · "
                                f"{len(matches)} muted · {added / 1e6:.0f} MB · "
-                               f"{note}",
+                               f"{note}{sub_note}",
                     "cached_transcript": transcript.cached}
         finally:
             shutil.rmtree(work, ignore_errors=True)

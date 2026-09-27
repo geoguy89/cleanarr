@@ -132,6 +132,17 @@ def test_history_stats_and_forgetting(home):
     assert not db.cleaned_before("/tv/a.mkv")
 
 
+def test_cleaning_again_lists_the_file_once(home):
+    first = q("a")
+    db.update(first, status="done", muted=3, added_bytes=1000, finished_at=5.0)
+    again = q("a", force=True)
+    db.update(again, status="done", muted=4, added_bytes=1200, finished_at=9.0)
+    rows = db.history()
+    assert [(r["id"], r["muted"]) for r in rows] == [(again, 4)]
+    assert db.stats() == {"cleaned_files": 1, "words_muted": 4, "waiting": 0,
+                          "added_bytes": 1200}
+
+
 def test_cleaned_paths_reports_latest(home):
     a = q("a")
     db.update(a, status="done", muted=2, finished_at=1.0)

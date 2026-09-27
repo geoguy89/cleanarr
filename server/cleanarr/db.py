@@ -425,6 +425,13 @@ def cleaned_paths(paths: list[str]) -> dict[str, dict]:
     return out
 
 
+# The newest finished clean of each file. Cleaning again replaces the track in
+# the file, so older jobs for the same path describe a track that is gone -
+# listing or summing them showed one file twice and counted its size twice.
+_LATEST_CLEAN = ("SELECT MAX(id) FROM job WHERE status IN ('done','skipped') "
+                 "AND COALESCE(action,'clean')='clean' GROUP BY path")
+
+
 def history(query: str = "", limit: int = 500) -> list[sqlite3.Row]:
     """Files that have a cleaned track right now, newest first.
 
@@ -437,8 +444,7 @@ def history(query: str = "", limit: int = 500) -> list[sqlite3.Row]:
     sql = ("SELECT job.*, (SELECT COUNT(*) FROM detection d WHERE d.job_id=job.id"
            f" AND (d.subtitle_state='differs' OR d.confidence < {LOW_CONFIDENCE}))"
            " AS to_check"
-           " FROM job WHERE status IN ('done','skipped') "
-           "AND COALESCE(action,'clean')='clean'")
+           f" FROM job WHERE id IN ({_LATEST_CLEAN})")
     args: list = []
     if query:
         sql += " AND (title LIKE ? OR subtitle LIKE ?)"
@@ -559,7 +565,7 @@ def stats() -> dict:
     row = conn.execute(
         "SELECT COUNT(*) AS jobs, COALESCE(SUM(muted),0) AS muted,"
         " COALESCE(SUM(added_bytes),0) AS bytes FROM job "
-        "WHERE status='done' AND COALESCE(action,'clean')='clean'").fetchone()
+        f"WHERE status='done' AND id IN ({_LATEST_CLEAN})").fetchone()
     # Counted rather than derived from the page of jobs the UI asked for - with
     # a few hundred queued, "100" would be the page size, not the truth.
     waiting = conn.execute(

@@ -316,6 +316,7 @@ def test_with_the_subtitle_opinion_on_no_subtitles_means_muted(home, settings, m
     plain = make_media(tmp_path / "plain.mkv", seconds=6.0, subtitles=False)
     job = run(plain, settings, home / "cache")
     assert job["status"] == "done" and job["muted"] == 2
+    assert "no subtitles in the file or beside it" in job["message"]
 
 
 def test_a_file_without_subtitles_still_cleans(home, settings, fake_asr, tmp_path):
@@ -323,6 +324,7 @@ def test_a_file_without_subtitles_still_cleans(home, settings, fake_asr, tmp_pat
     job = run(src, settings, home / "cache")
     assert job["status"] == "done"
     assert {r["subtitle_state"] for r in db.detections(job["id"])} == {""}
+    assert "subtitles" not in job["message"]       # the opinion is off: say nothing
 
 
 def test_a_per_show_exception_applies_to_that_show_only(home, settings, fake_asr, tmp_path):
