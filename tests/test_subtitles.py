@@ -420,3 +420,17 @@ def test_a_tv_dub_of_a_compound_is_muted(heard_text, line):
     state, _ = subtitles.evidence(m, line_at(heard, line, 9.8, 12.5),
                                   words.Matcher(context_words=frozenset()), heard)
     assert state != "soundalike"
+
+
+@pytest.mark.parametrize("heard_text, line, word", [
+    ("you little fucker get back here", "You little sucker, get back here!", "fucker"),
+    ("we are so fucked now", "We're so freaked now.", "fucked"),
+    ("snakes on this motherfucking plane", "Snakes on this monkey-fighting plane!", "motherfucking"),
+    ("you motherfucker", "You mother flipper!", "motherfucker"),
+    ("what a dickhead", "What a dipstick.", "dickhead"),
+])
+def test_a_known_dub_is_muted(heard_text, line, word):
+    heard = said(heard_text)
+    state, _ = subtitles.evidence(detection(heard, word), line_at(heard, line, 9.8, 12.5),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state != "soundalike"

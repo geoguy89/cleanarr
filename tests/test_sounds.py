@@ -41,3 +41,11 @@ def test_unknown_words_never_sound_alike():
 
 def test_a_dropped_g_sounds_the_same():
     assert sounds.sounds_alike("fucking", "fuckin'")
+
+
+@pytest.mark.parametrize("dub", ["sucker", "flipper", "flipped", "fudged", "freaked",
+                                 "trucker", "monkey", "dipstick"])
+def test_tv_dubs_that_sound_close_are_softenings(dub):
+    """Each came back as a sound-alike of the swear it stands in for - "sucker"
+    for "fucker" scored 0.88 - and the swear was left in."""
+    assert sounds.softened(dub)

@@ -46,6 +46,8 @@ MINCED = frozenset("""
     butt butthole jerk screw screwed screwing
     freak freakin flaming flamin peeved ticked teed
     mothertrucker motherfudger
+    sucker suckers flipper flippers flipped fudged fudger fudgers freaked frigged
+    effed frakked trucker truckers trucking truckin monkey dipstick dipsticks
 """.split())
 
 # Where each consonant is made: a swap within one place is a near miss.
