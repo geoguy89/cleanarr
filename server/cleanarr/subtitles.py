@@ -27,6 +27,7 @@ or timed for a different release. So:
 
 from __future__ import annotations
 
+import bisect
 import re
 from dataclasses import dataclass, replace
 
@@ -91,6 +92,66 @@ def _says_it(text: str, word: str, matcher: words.Matcher) -> bool:
     if any(words.normalize(t["word"]) == word for t in tokens):
         return True
     return bool(matcher.find(tokens))
+
+
+# Lining up subtitles borrowed from another copy of a film. A WEB-DL and a
+# WEBRip of the same film can differ by a studio logo or two at the start, which
+# shifts every line by the same few seconds. Measured on Trap House (2025): 3%
+# of the transcript's words matched the other copy's subtitles as they were,
+# 79% at -8.5 s, and 2% for subtitles of the wrong film at any shift.
+ALIGN_LIMIT = 180.0        # seconds either way
+ALIGN_MIN_SHARE = 0.4      # of sampled words found in the line at the new time
+ALIGN_MIN_GAIN = 0.15      # over leaving them where they are
+_WORD = re.compile(r"[a-z']+")
+
+
+def _share(cues: list[Cue], starts: list[float], vocab: list[set[str]],
+           sample: list[tuple[float, str]], offset: float) -> float:
+    """Share of sampled words that a line on screen at (their time + offset) contains."""
+    hit = 0
+    for at, word in sample:
+        at += offset
+        i = bisect.bisect_right(starts, at + 1.0) - 1
+        while i >= 0 and cues[i].end >= at - 1.0:
+            if word in vocab[i]:
+                hit += 1
+                break
+            i -= 1
+    return hit / len(sample)
+
+
+def align(cues: list[Cue], heard: list[dict]) -> tuple[list[Cue], float]:
+    """(the cues, moved to line up with what was heard; the shift in seconds).
+
+    The shift is kept only when it clearly helps - otherwise the cues come back
+    unmoved, and if they belong to another cut entirely the mismatch check in
+    annotate() sets them aside as before. One shift for the whole file: a copy
+    that drifts is not lined up, and is then set aside the same way.
+    """
+    ordered = sorted(cues, key=lambda c: c.start)
+    sample = [(float(w.get("start") or 0.0), words.normalize(w.get("word", "")))
+              for w in heard]
+    sample = [(t, w) for t, w in sample if len(w) >= 4][::2][:3000]
+    if not ordered or not sample:
+        return cues, 0.0
+    starts = [c.start for c in ordered]
+    vocab = [set(_WORD.findall(c.text.lower())) for c in ordered]
+    share = lambda off: _share(ordered, starts, vocab, sample, off)  # noqa: E731
+    here = share(0.0)
+    _best, rough = max((share(float(k)), float(k))
+                       for k in range(-int(ALIGN_LIMIT), int(ALIGN_LIMIT) + 1))
+    # Lines stay on screen for seconds, so a run of neighbouring shifts scores
+    # about the same; the middle of that run is the one that lines up, not
+    # whichever end max() happens to land on.
+    fine = [(rough + d / 4, share(rough + d / 4)) for d in range(-12, 13)]
+    best = max(v for _o, v in fine)
+    top = [o for o, v in fine if v >= best * 0.98]
+    offset = round((min(top) + max(top)) / 2 * 4) / 4
+    if best < ALIGN_MIN_SHARE or best - here < ALIGN_MIN_GAIN:
+        return cues, 0.0
+    # The cues are moved onto the transcript's clock: a word heard at t was
+    # shown at t + offset, so a line shown at s belongs at s - offset.
+    return [Cue(c.start - offset, c.end - offset, c.text) for c in cues], offset
 
 
 def evidence(match: words.Match, cues: list[Cue], matcher: words.Matcher) -> tuple[str, str]:

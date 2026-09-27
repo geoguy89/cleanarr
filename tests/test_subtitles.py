@@ -143,3 +143,45 @@ def test_no_line_nearby_leaves_the_word_open():
 def test_a_bleeped_line_agrees():
     muted, left, _ = decided([m("cock", 20.2)])
     assert [x.text for x in muted] == ["cock"] and left == []
+
+
+# ---------------------------------------------------------------- lining up another copy
+
+LINES = ["Nobody leaves this house tonight", "Where did you put the money",
+         "Somebody called the police already", "Get the truck around back now",
+         "Those windows were locked yesterday", "Listen carefully before answering",
+         "Nothing about this makes sense", "Grandma never trusted strangers",
+         "Pack everything into the basement", "Morning comes faster than planned"]
+
+
+def heard_and_cues(shift: float):
+    """Words heard at their true times, and lines shown `shift` seconds late."""
+    heard, cues = [], []
+    for n in range(60):
+        text = LINES[n % len(LINES)] + f" number{n}"
+        start = 10.0 + n * 7.0
+        for k, word in enumerate(text.split()):
+            heard.append({"word": " " + word, "start": start + k * 0.4, "end": start + k * 0.4 + 0.3})
+        cues.append(subtitles.Cue(start + shift - 0.2, start + shift + 3.0, text))
+    return heard, cues
+
+
+def test_subtitles_from_another_cut_are_moved_into_line():
+    heard, cues = heard_and_cues(-8.5)
+    moved, shift = subtitles.align(cues, heard)
+    assert abs(shift + 8.5) <= 0.5
+    assert abs(moved[0].start - cues[0].start + shift) < 1e-9
+    assert subtitles.align(moved, heard)[1] == 0.0          # and they stay put
+
+
+def test_subtitles_already_in_line_are_left_alone():
+    heard, cues = heard_and_cues(0.0)
+    moved, shift = subtitles.align(cues, heard)
+    assert shift == 0.0 and moved == cues
+
+
+def test_subtitles_of_something_else_are_not_forced_into_line():
+    heard, cues = heard_and_cues(0.0)
+    other = [subtitles.Cue(c.start, c.end, "Completely unrelated dialogue here") for c in cues]
+    assert subtitles.align(other, heard) == (other, 0.0)
+    assert subtitles.align([], heard) == ([], 0.0)

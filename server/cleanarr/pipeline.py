@@ -298,6 +298,10 @@ class Pipeline:
                 self._stage(job_id, "judging", "looking for subtitles elsewhere")
                 text, found_where = more_subtitles(work)
                 cues = subtitles.parse_srt(text) if text else []
+                # Borrowed subtitles may be for a slightly different cut.
+                cues, shift = subtitles.align(cues, transcript.words)
+                if shift:
+                    found_where += f", moved {abs(shift):g} s to line up"
             matches, note = subtitles.annotate(matches, cues)
             if note:
                 print(f"[cleanarr] job {job_id}: {note}", flush=True)

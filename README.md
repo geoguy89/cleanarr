@@ -443,8 +443,12 @@ Where the subtitles come from, first found wins:
    copy is only read, never changed.
 
 3 and 4 are only looked for with this switch on, since 4 means reading a
-second file. Another copy can be timed for a different cut; if so, its
-subtitles disagree with most detections and are set aside as above. The job
+second file. Another copy is often a slightly different cut — a studio logo more
+or less at the start shifts every line by the same few seconds — so borrowed
+subtitles are first moved to line up with what Whisper heard, when one shift
+clearly fits (up to three minutes either way). Subtitles that still disagree
+with most detections, from a copy that drifts or a different film, are set
+aside as above. The job
 says which it used — *subtitles from another copy (Film WEBDL-1080p.mkv)* — or
 *no subtitles found to check against*.
 
