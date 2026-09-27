@@ -453,6 +453,9 @@ def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[
     tokens = _script_tokens(cues, match.start)
     if not tokens:
         return None
+    # Words Whisper heard around the swear: in the line, they were said too,
+    # so they are not what the swear really was.
+    heard_here = _heard_stems(heard, match.start)
 
     def says(slot) -> bool:
         return any(_is_word(raw, word, matcher) or _BLEEP.search(raw)
@@ -474,7 +477,8 @@ def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[
         in_line = {t for t, _raw in slot}
         spoken = " ".join(w for w in bare[i - lgap:i + 1 + rgap]
                           if w == bare[i] or w not in in_line)
-        if _alike(spoken, " ".join(shown)) or any(_alike(word, raw) for raw in shown):
+        new = [raw for raw in shown if not _stems(words.normalize(raw)) & heard_here]
+        if new and (_alike(spoken, " ".join(new)) or any(_alike(word, raw) for raw in new)):
             return SOUNDALIKE, said
         return REPLACED, said
 
@@ -526,7 +530,8 @@ def _in_the_script(match: words.Match, word: str, heard: list[dict], cues: list[
                 t, raw = tokens[k]
                 if _is_word(raw, word, matcher) or _BLEEP.search(raw):
                     return AGREES, ""
-                if not _softens(raw, word, matcher) and _alike(word, raw):
+                if not _softens(raw, word, matcher) and not _stems(t) & heard_here \
+                        and _alike(word, raw):
                     return SOUNDALIKE, raw.strip(" ,.!?;:-")
     return None
 
@@ -578,6 +583,25 @@ def _alike(heard: str, shown: str) -> bool:
         if h and not first and y[-len(h):] == h:
             return sounds.phones_alike(sounds.phones(swear), y[:-len(h)])
     return sounds.sounds_alike(heard, shown)
+
+
+def _stems(bare: str) -> set[str]:
+    """A word and what it may be short for: "she's" -> she, "we're" -> we,
+    "gets" -> get. A caption contracts and inflects what was said."""
+    plain = _plain(bare)
+    out = {plain}
+    for end in ("s", "es", "d", "ed", "ing", "ll", "re", "ve", "nt"):
+        if plain.endswith(end) and len(plain) - len(end) >= 2:
+            out.add(plain[:-len(end)])
+    return out
+
+
+def _heard_stems(heard: list[dict], at: float, seconds: float = 3.0) -> set[str]:
+    out: set[str] = set()
+    for h in heard:
+        if abs(float(h.get("start") or 0.0) - at) <= seconds:
+            out |= _stems(words.normalize(h.get("word", "")))
+    return out
 
 
 def _softens(raw: str, word: str, matcher: words.Matcher) -> bool:
@@ -647,8 +671,7 @@ def _sounds_alike_on_screen(match: words.Match, word: str, cues: list[Cue],
     "hell". Nor does a word Whisper also heard close by: it was said as well,
     so it is not what the swear really was ("This is what you get." with the
     "Oh my god" after it left out)."""
-    said = {_plain(words.normalize(h.get("word", ""))) for h in heard
-            if abs(float(h.get("start") or 0.0) - match.start) <= 3.0}
+    said = _heard_stems(heard, match.start)
     for cue in cues:
         tokens = [r for r in _ASIDE.sub(" ", cue.text).split() if words.normalize(r)]
         if not tokens:
@@ -659,7 +682,7 @@ def _sounds_alike_on_screen(match: words.Match, word: str, cues: list[Cue],
             if abs(at - (match.start + match.end) / 2) > LINE_POSITION + step / 2:
                 continue
             bare = words.normalize(raw)
-            if _plain(bare) in said:
+            if _stems(bare) & said:
                 continue
             if _softens(raw, word, matcher):
                 continue

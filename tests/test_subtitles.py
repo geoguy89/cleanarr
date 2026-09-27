@@ -434,3 +434,20 @@ def test_a_known_dub_is_muted(heard_text, line, word):
     state, _ = subtitles.evidence(detection(heard, word), line_at(heard, line, 9.8, 12.5),
                                   words.Matcher(context_words=frozenset()), heard)
     assert state != "soundalike"
+
+
+@pytest.mark.parametrize("heard_text, line, word", [
+    ("oh shit she is here", "Oh, she's here.", "shit"),
+    ("because the at and get ass talk", "Because the get and at whoa talk.", "ass"),
+])
+def test_a_caption_word_whisper_heard_nearby_is_not_the_sound_alike(heard_text, line, word):
+    """Contracted ("she's" for "she is") or moved, it was said as well."""
+    heard = said(heard_text)
+    state, _ = subtitles.evidence(detection(heard, word), line_at(heard, line, 9.8, 13.0),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state != "soundalike"
+
+
+def test_stems():
+    assert {"she"} <= subtitles._stems("she's") and {"we"} <= subtitles._stems("we're")
+    assert subtitles._stems("caulk") == {"caulk"}
