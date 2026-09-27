@@ -494,3 +494,14 @@ def test_a_chant_on_screen_is_still_read():
     state, _ = subtitles.evidence(detection(heard, "shit"), line_at(heard, "City! City! City!", 9.9, 11.2),
                                   words.Matcher(context_words=frozenset()), heard)
     assert state == "soundalike"
+
+
+@pytest.mark.parametrize("heard_text, line, misheard", [
+    ("because about hail about back", "Because about hell about back.", "hail"),
+    ("get dan get party because back", "Get damn get party because back.", "dan"),
+    ("to can dig can talk", "To can dick can talk.", "dig"),
+])
+def test_a_missed_swear_between_repeated_words_is_still_placed(heard_text, line, misheard):
+    got, heard = placed(heard_text, line)
+    w = next(h for h in heard if h["word"].strip() == misheard)
+    assert len(got) == 1 and got[0].start <= w["start"] and got[0].end >= w["end"]

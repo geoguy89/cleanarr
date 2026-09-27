@@ -866,6 +866,31 @@ def _place(tokens, n, window) -> tuple[float, float, str] | None:
                 if tuple(bare[p:p + len(seq)]) == seq]
         return hits
 
+    def usable(seq, k) -> bool:
+        return len(seq) == k and all(seq) and (k == 2 or (seq[0] not in _ANCHOR_STOP
+                                                          and len(seq[0]) >= 3))
+
+    # Every place either side is found, paired nearest first: when the words
+    # either side repeat ("about hell about"), the last "about" before the
+    # swear and the first after it are not the pair that holds it.
+    lefts, rights = [], []
+    for k in (1, 2):
+        if n - k >= 0:
+            seq = tuple(t for t, _r in tokens[n - k:n])
+            if usable(seq, k):
+                lefts += [p + k - 1 for p in find(seq, True)]
+        seq = tuple(t for t, _r in tokens[n + 1:n + 1 + k])
+        if usable(seq, k):
+            rights += find(seq, False)
+    pairs = sorted((r - l, l, r) for l in lefts for r in rights if 0 < r - l <= 4)
+    if pairs:
+        _gap, left, right = pairs[0]
+        start, end = window[left][1], window[right][0]
+        between = " ".join(w[3] for w in window[left + 1:right])
+        if not PLACE_MIN <= end - start <= PLACE_MAX:
+            return None
+        return start, end, between
+
     left = right = None
     paired = False
     for k in (1, 2):                              # one distinctive word, or a pair
