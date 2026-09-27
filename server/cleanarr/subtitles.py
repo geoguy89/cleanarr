@@ -572,7 +572,11 @@ def _alike(heard: str, shown: str) -> bool:
     compound swear is compared on the other half alone: "mother-trucker" is
     trucker against fucker, "smarty" is -y against ass. The shared half made
     them score as sound-alikes (0.84, 0.84) and a dub was left in. With nothing
-    left once the shared half is taken off, the swear was cut short."""
+    left once the shared half is taken off, the swear was cut short. Nor is a
+    caption of only function words a sound-alike: see sounds.FUNCTION_WORDS."""
+    shown_words = _WORD.findall(str(shown or "").lower().replace("’", "'"))
+    if shown_words and all(sounds.function_word(w) for w in shown_words):
+        return False
     halves = _halves(heard)
     y = sounds.phones(shown)
     if halves and y:

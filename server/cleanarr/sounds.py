@@ -50,6 +50,34 @@ MINCED = frozenset("""
     effed frakked trucker truckers trucking truckin monkey dipstick dipsticks
 """.split())
 
+# The small words that hold a sentence together. They sound close to swears -
+# "its" and tits 0.9, "am" and damn 0.87, "can't" and cunt 0.82, "here" and
+# hell 0.77, "she" and shit 0.77 - but a caption that has one where the swear
+# was has reworded the line; it is not what Whisper misheard.
+FUNCTION_WORDS = frozenset("""
+    a an the this that these those some any each every no
+    i me my mine myself you your yours yourself he him his himself she her hers herself
+    it its itself we us our ours ourselves they them their theirs themselves
+    am is are was were be been being do does did have has had having
+    will would shall should can could may might must gonna gotta wanna
+    and or but nor so yet if than then as because though although while until unless since
+    at by for from in into of off on onto out over to up down with without about after
+    before under above around through between against among upon
+    not yes yeah oh uh um ah hey well here there where when what who whom whose which why how
+    too very just also only
+    i'm i've i'll i'd you're you've you'll you'd he's he'll he'd she's she'll she'd it's it'll
+    we're we've we'll we'd they're they've they'll they'd that's there's here's what's who's
+    where's let's don't doesn't didn't can't won't isn't aren't wasn't weren't hasn't
+    haven't hadn't couldn't wouldn't shouldn't mustn't
+""".split())
+_FUNCTION_PLAIN = frozenset(w.replace("'", "") for w in FUNCTION_WORDS)
+
+
+def function_word(word: str) -> bool:
+    w = str(word or "").lower().replace("’", "'").strip(" ,.!?;:-\"()")
+    return w in FUNCTION_WORDS or w.replace("'", "") in _FUNCTION_PLAIN
+
+
 # Where each consonant is made: a swap within one place is a near miss.
 _PLACE = {}
 for _place, _phones in {

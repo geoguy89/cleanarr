@@ -451,3 +451,20 @@ def test_a_caption_word_whisper_heard_nearby_is_not_the_sound_alike(heard_text, 
 def test_stems():
     assert {"she"} <= subtitles._stems("she's") and {"we"} <= subtitles._stems("we're")
     assert subtitles._stems("caulk") == {"caulk"}
+
+
+@pytest.mark.parametrize("heard, shown", [
+    ("tits", "it's"), ("damn", "am"), ("cunt", "can't"), ("hell", "here"), ("shit", "she"),
+    ("dick", "did"), ("whore", "or"), ("ass", "as"), ("bitch", "been"),
+])
+def test_a_function_word_is_never_a_sound_alike(heard, shown):
+    """They score 0.67-0.9 against the swear, but a caption with one in the
+    swear's place has reworded the line."""
+    assert not subtitles._alike(heard, shown)
+
+
+def test_tits_out_lads():
+    heard = said("tits out lads")
+    state, _ = subtitles.evidence(detection(heard, "tits"), line_at(heard, "It's out, lads.", 9.8, 11.5),
+                                  words.Matcher(context_words=frozenset()), heard)
+    assert state != "soundalike"
