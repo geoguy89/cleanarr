@@ -63,10 +63,6 @@ opinion let through can be made always muted.
 
 ![Job details](docs/images/details.jpg)
 
-**The queue** — one file at a time, reorderable, with what is running now.
-
-![Queue](docs/images/queue.jpg)
-
 **Cleaned** — searchable history, and what the extra tracks cost in disk.
 
 ![Cleaned](docs/images/cleaned.jpg)
