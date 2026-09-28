@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -14,6 +15,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from . import arr, auth, config, db, judge, library, media, validate, words
 from .worker import Worker
@@ -51,6 +53,27 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Cleanarr", docs_url="/api/docs", redoc_url=None, lifespan=_lifespan)
+
+
+class _Compress:
+    """Lists, scripts and the page, gzipped: a thousand-film list is half a
+    megabyte of JSON and a sixth of that compressed, which a phone on Wi-Fi
+    notices. Posters and icons are already compressed and are passed through."""
+
+    def __init__(self, app):
+        self.app = app
+        self.gzip = GZipMiddleware(app, minimum_size=1024, compresslevel=6)
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if path and not path.startswith("/api/poster") \
+                and not path.endswith((".png", ".jpg", ".jpeg", ".ico", ".gz")):
+            await self.gzip(scope, receive, send)
+        else:
+            await self.app(scope, receive, send)
+
+
+app.add_middleware(_Compress)
 
 
 # ---------------------------------------------------------------------------
@@ -710,6 +733,85 @@ def _import_dates(client: arr.Sonarr) -> dict[int, str]:
     return _IMPORT_DATES["value"]               # type: ignore[return-value]
 
 
+#  Library listings
+#  ----------------
+#  Asking Sonarr, Plex or Jellyfin for a whole library takes a second or more
+#  on a large one, and every page that shows it asked again. An answer is used
+#  as it is for LIST_FRESH seconds; after that it is still shown straight away
+#  while a new one is fetched behind it, so a page never waits on the library
+#  twice. Job statuses are not part of it - they are read from the database on
+#  every request - so a finished clean shows at once. Changing any library
+#  setting changes the key, and the next page asks afresh.
+
+LIST_FRESH = 60.0
+LIST_KEEP = 6 * 3600.0
+_LISTS: dict[tuple, tuple[float, list]] = {}
+_LISTS_LOCK = threading.Lock()
+_LISTS_REFRESHING: set[tuple] = set()
+
+
+def _library_key(settings) -> tuple:
+    return (library.source_name(settings), library.film_source(settings),
+            settings.sonarr.url, settings.sonarr.api_key, settings.plex_url,
+            settings.plex_token, settings.jellyfin_url, settings.jellyfin_api_key)
+
+
+def _listing(settings, what: str, fetch) -> list[dict]:
+    """fetch(), or a recent answer to it: see above. Each item is a copy, so a
+    caller may mark it up."""
+    key = (what, *_library_key(settings))
+    with _LISTS_LOCK:
+        hit = _LISTS.get(key)
+    age = time.time() - hit[0] if hit else None
+    if hit is None or age >= LIST_KEEP:
+        value = fetch()
+        with _LISTS_LOCK:
+            _LISTS[key] = (time.time(), value)
+    else:
+        value = hit[1]
+        if age >= LIST_FRESH:
+            _refresh_listing(key, fetch)
+    return [dict(item) for item in value]
+
+
+def _refresh_listing(key: tuple, fetch) -> None:
+    with _LISTS_LOCK:
+        if key in _LISTS_REFRESHING:
+            return
+        _LISTS_REFRESHING.add(key)
+
+    def run():
+        try:
+            value = fetch()
+            with _LISTS_LOCK:
+                _LISTS[key] = (time.time(), value)
+        except Exception:  # noqa: BLE001 - keep the answer we had
+            pass
+        finally:
+            with _LISTS_LOCK:
+                _LISTS_REFRESHING.discard(key)
+    POOL.submit(run)
+
+
+def forget_listings() -> None:
+    with _LISTS_LOCK:
+        _LISTS.clear()
+
+
+def _statuses_by_folder(known: dict[str, str]) -> dict[str, list[str]]:
+    """Each job's status under every folder above its file, so a show's jobs
+    are one lookup - rather than every job path checked against every show."""
+    out: dict[str, list[str]] = {}
+    for path, status in known.items():
+        folder = path
+        while "/" in folder:
+            folder = folder.rsplit("/", 1)[0]
+            if not folder:
+                break
+            out.setdefault(folder + "/", []).append(status)
+    return out
+
+
 @app.get("/api/series")
 def series():
     settings = config.load()
@@ -719,13 +821,13 @@ def series():
     landed = (_import_dates(source.sonarr)
               if getattr(source, "name", "") == "sonarr" else {})
     try:
-        items = source.shows()
+        items = _listing(settings, "shows", source.shows)
     except (arr.ArrError, library.LibraryError) as exc:
         raise HTTPException(502, str(exc))
 
     # Mark up each show from the job history, matching on the show's folder.
     # One pass over the jobs beats one query per show for a library this size.
-    known = db.job_paths()
+    under = _statuses_by_folder(db.job_paths())
     by_title = db.job_titles()
     watched = {row["source_id"] for row in db.monitors("sonarr")}
     for show in items:
@@ -733,7 +835,7 @@ def series():
         # show's name instead - which is what every episode job is titled.
         folder = (show.get("path") or "").rstrip("/") + "/"
         if folder != "/":
-            statuses = [s for p, s in known.items() if p.startswith(folder)]
+            statuses = under.get(folder, [])
         else:
             statuses = [s for _p, s in by_title.get(show.get("title", ""), [])]
         show["cleaned"] = sum(1 for s in statuses if s in ("done", "skipped"))
@@ -786,14 +888,25 @@ def home(limit: int = 12):
     shows_label = source.name.title()
     films_label = (library.film_source(settings) or "films").title()
 
-    recent = POOL.submit(source.recent_episodes, limit)
-    all_films = POOL.submit(source.movies)
+    recent = POOL.submit(_listing, settings, f"recent_episodes:{limit}",
+                         lambda: source.recent_episodes(limit))
+    # The films added last, asked for as such - not the whole library sorted,
+    # unless the server will not say.
+    def newest_films():
+        if hasattr(source, "recent_movies"):
+            try:
+                return _listing(settings, f"recent_movies:{limit}",
+                                lambda: source.recent_movies(limit))
+            except (arr.ArrError, library.LibraryError):
+                pass
+        return _listing(settings, "movies", source.movies)
+    latest = POOL.submit(newest_films)
     try:
         episodes = recent.result()
     except (arr.ArrError, library.LibraryError) as exc:
         problems.append(f"{shows_label}: {exc}")
     try:
-        films = sorted((m for m in all_films.result() if m.get("added")),
+        films = sorted((m for m in latest.result() if m.get("added")),
                        key=lambda m: m["added"], reverse=True)[:limit]
     except (arr.ArrError, library.LibraryError) as exc:
         problems.append(f"{films_label}: {exc}")
@@ -850,7 +963,9 @@ def calendar(days: int = 21):
 def episodes(series_id: str):
     settings = config.load()
     try:
-        items = library.build(settings).episodes(series_id)
+        source = library.build(settings)
+        items = _listing(settings, f"episodes:{series_id}",
+                         lambda: source.episodes(series_id))
     except (arr.ArrError, library.LibraryError) as exc:
         raise HTTPException(502, str(exc))
     _attach_jobs(items, db.cleaned_paths([e["path"] for e in items]), with_size=True)
@@ -861,7 +976,7 @@ def episodes(series_id: str):
 def movies():
     settings = config.load()
     try:
-        items = library.build(settings).movies()
+        items = _listing(settings, "movies", library.build(settings).movies)
     except (arr.ArrError, library.LibraryError) as exc:
         raise HTTPException(502, str(exc))
     _attach_jobs(items, db.cleaned_paths([m["path"] for m in items]), with_size=True)
@@ -885,10 +1000,18 @@ def movies():
 #  like anything.
 #
 #  A thousand shows means a thousand images the first time the page opens, so
-#  fetches are capped and the rest are warmed in the background. After the
-#  first pass every poster is served from disk.
+#  fetches are capped and the rest are warmed in the background, two at a time
+#  so the ones on screen are not kept waiting. After the first pass every
+#  poster is served from disk.
+#
+#  They are asked for at the size a poster wall shows them (library.py): a
+#  full-size original is several hundred KB, a phone's screenful of them
+#  megabytes. POSTER_SIZE names the cache files, so posters cached at the old
+#  size are fetched again, once, and the old file is removed.
 
-POSTER_FETCHES = threading.Semaphore(4)
+POSTER_FETCHES = threading.Semaphore(6)
+POSTER_SIZE = "w400"
+POSTER_WARMERS = ThreadPoolExecutor(max_workers=2, thread_name_prefix="cleanarr-posters")
 _warming: set[str] = set()
 _warm_lock = threading.Lock()
 
@@ -896,7 +1019,16 @@ _warm_lock = threading.Lock()
 def _poster_path(source: str, item_id: int | str) -> Path:
     folder = CACHE_DIR / "posters"
     folder.mkdir(parents=True, exist_ok=True)
-    return folder / f"{source}-{item_id}.jpg"
+    return folder / f"{source}-{item_id}.{POSTER_SIZE}.jpg"
+
+
+def _save_poster(cached: Path, data: bytes) -> None:
+    fd, name = tempfile.mkstemp(dir=cached.parent, suffix=".part")
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(data)
+    Path(name).replace(cached)
+    # The same poster at full size, cached before posters were scaled.
+    cached.with_name(cached.name.replace(f".{POSTER_SIZE}.jpg", ".jpg")).unlink(missing_ok=True)
 
 
 def _poster_source(settings, kind: str) -> str:
@@ -913,11 +1045,31 @@ def _poster_source(settings, kind: str) -> str:
     return library.source_name(settings)
 
 
+_poster_locks: dict[tuple, threading.Lock] = {}
+
+
 def _fetch_poster(source: str, item_id: int | str, settings) -> bool:
+    """Whether the poster is on disk, fetching it if not. One fetch per poster
+    at a time: the page and the warmers often want the same one at once, and
+    the second waits for the first rather than asking the library again."""
     cached = _poster_path(source, item_id)
     if cached.exists() and cached.stat().st_size > 0:
         return True
+    with _warm_lock:
+        lock = _poster_locks.setdefault((source, str(item_id)), threading.Lock())
+    with lock:
+        if cached.exists() and cached.stat().st_size > 0:
+            return True
+        try:
+            return _fetch_poster_now(source, item_id, settings, cached)
+        except OSError:
+            return cached.exists()
+        finally:
+            with _warm_lock:
+                _poster_locks.pop((source, str(item_id)), None)
 
+
+def _fetch_poster_now(source: str, item_id: int | str, settings, cached: Path) -> bool:
     # A media server serves its own artwork, and has it for everything it
     # knows about - including files Sonarr never imported.
     if source in ("plex", "jellyfin"):
@@ -925,35 +1077,33 @@ def _fetch_poster(source: str, item_id: int | str, settings) -> bool:
         if client is None:
             return False
         try:
-            data = client.poster(str(item_id))
+            with POSTER_FETCHES:
+                data = client.poster(str(item_id))
         except Exception:  # noqa: BLE001
             return False
         if not data:
             return False
-        tmp = cached.with_suffix(".part")
-        tmp.write_bytes(data)
-        tmp.replace(cached)
+        _save_poster(cached, data)
         return True
 
     arr_config = settings.sonarr
     if source != "sonarr" or not arr_config.url:
         return False
     # Sonarr serves artwork at /api/v3/mediacover/<id>/poster.jpg - with no
-    # "series" segment, which 404s.
-    url = f"{arr_config.url.rstrip('/')}/api/v3/mediacover/{item_id}/poster.jpg"
-    try:
-        with POSTER_FETCHES:
-            resp = httpx.get(url, headers={"X-Api-Key": arr_config.api_key},
-                             timeout=20.0, follow_redirects=True)
-        resp.raise_for_status()
-        if not resp.content:
-            return False
-        tmp = cached.with_suffix(".part")
-        tmp.write_bytes(resp.content)
-        tmp.replace(cached)
-        return True
-    except Exception:  # noqa: BLE001
-        return False
+    # "series" segment, which 404s - and keeps a 500px copy beside it as
+    # poster-500.jpg, which is the one to use; the original is the fallback.
+    base = f"{arr_config.url.rstrip('/')}/api/v3/mediacover/{item_id}"
+    for name in ("poster-500.jpg", "poster.jpg"):
+        try:
+            with POSTER_FETCHES:
+                resp = httpx.get(f"{base}/{name}", headers={"X-Api-Key": arr_config.api_key},
+                                 timeout=20.0, follow_redirects=True)
+            if resp.status_code == 200 and resp.content:
+                _save_poster(cached, resp.content)
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
 
 
 def _warm_posters(source: str, ids: list[int]) -> None:
@@ -963,9 +1113,9 @@ def _warm_posters(source: str, ids: list[int]) -> None:
             return
         _warming.add(source)
     try:
-        for item_id in ids:
-            if not _poster_path(source, item_id).exists():
-                _fetch_poster(source, item_id, config.load())
+        settings = config.load()
+        missing = [i for i in ids if not _poster_path(source, i).exists()]
+        list(POSTER_WARMERS.map(lambda i: _fetch_poster(source, i, settings), missing))
     finally:
         with _warm_lock:
             _warming.discard(source)
@@ -976,8 +1126,10 @@ def poster(source: str, id: str):
     # String, not int: Jellyfin item ids are 32-character hex.
     if not _fetch_poster(source, id, config.load()):
         raise HTTPException(404, "no poster")
+    # The page asks for a poster at a URL that names its size, so the image at
+    # a URL never changes: the browser can keep it without asking again.
     return FileResponse(str(_poster_path(source, id)), media_type="image/jpeg",
-                        headers={"Cache-Control": "public, max-age=604800"})
+                        headers={"Cache-Control": "public, max-age=2592000, immutable"})
 
 
 @app.get("/api/monitors")

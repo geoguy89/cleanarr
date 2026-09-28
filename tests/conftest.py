@@ -42,6 +42,9 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "_local", threading.local())
     monkeypatch.setattr(db, "_schema_ready", False)
     media.set_clean_title(media.DEFAULT_CLEAN_TITLE)
+    # Library lists are cached in the app for a minute; each test starts clean.
+    if "cleanarr.main" in sys.modules:
+        sys.modules["cleanarr.main"].forget_listings()
     yield tmp_path
     media.set_clean_title(media.DEFAULT_CLEAN_TITLE)
 

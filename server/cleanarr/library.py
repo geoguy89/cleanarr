@@ -232,28 +232,57 @@ class PlexLibrary:
         out.sort(key=lambda e: (e["season"], e["episode"]))
         return out
 
+    @staticmethod
+    def _movie(m: dict) -> dict | None:
+        part = (((m.get("Media") or [{}])[0].get("Part") or [{}])[0])
+        path = part.get("file") or ""
+        if not path:
+            return None
+        return {
+            "id": str(m.get("ratingKey")),
+            "title": m.get("title", ""),
+            "year": m.get("year"),
+            "path": path,
+            "size": int(part.get("size") or 0),
+            "quality": "",
+            "added": _iso(m.get("addedAt")),
+        }
+
     def movies(self) -> list[dict]:
-        out = []
-        for section in self._sections("movie"):
-            for m in self._all(section):
-                part = (((m.get("Media") or [{}])[0].get("Part") or [{}])[0])
-                path = part.get("file") or ""
-                if not path:
-                    continue
-                out.append({
-                    "id": str(m.get("ratingKey")),
-                    "title": m.get("title", ""),
-                    "year": m.get("year"),
-                    "path": path,
-                    "size": int(part.get("size") or 0),
-                    "quality": "",
-                    "added": _iso(m.get("addedAt")),
-                })
+        out = [f for section in self._sections("movie") for f in map(self._movie, self._all(section))
+               if f]
         out.sort(key=lambda m: (m["title"] or "").lower())
         return out
 
+    def recent_movies(self, limit: int = 12) -> list[dict]:
+        """The films added last, from Plex's own "recently added" - one short
+        answer, where sorting the whole library meant fetching all of it."""
+        out = []
+        for section in self._sections("movie"):
+            container = self._get(f"/library/sections/{section}/recentlyAdded",
+                                  **{"X-Plex-Container-Start": 0,
+                                     "X-Plex-Container-Size": limit})
+            out += [f for f in map(self._movie, container.get("Metadata") or []) if f]
+        out.sort(key=lambda m: m["added"], reverse=True)
+        return out[:limit]
+
+    # Posters are asked for at the size a poster wall shows them, three
+    # device pixels to the CSS pixel on a phone. Plex's original artwork is
+    # often 1000x1500 and several hundred KB; scaled, it is a tenth of that.
+    POSTER_WIDTH, POSTER_HEIGHT = 400, 600
+
     def poster(self, item_id: str) -> bytes:
-        """Artwork, already scaled - a poster wall does not need 2000px."""
+        """Artwork, scaled by Plex. Falls back to the original if Plex cannot."""
+        try:
+            resp = httpx.get(f"{self.url.rstrip('/')}/photo/:/transcode",
+                             params={"width": self.POSTER_WIDTH, "height": self.POSTER_HEIGHT,
+                                     "minSize": 1, "upscale": 1,
+                                     "url": f"/library/metadata/{item_id}/thumb",
+                                     "X-Plex-Token": self.token}, timeout=TIMEOUT)
+            if resp.status_code == 200 and resp.content:
+                return resp.content
+        except httpx.HTTPError:
+            pass
         meta = self._get(f"/library/metadata/{item_id}")
         items = meta.get("Metadata") or []
         thumb = items[0].get("thumb") if items else None
@@ -474,30 +503,40 @@ class JellyfinLibrary:
         out.sort(key=lambda e: (e["season"], e["episode"]))
         return out
 
+    @staticmethod
+    def _movie(m: dict) -> dict | None:
+        path = m.get("Path") or ""
+        if not path:
+            return None
+        sources = m.get("MediaSources") or [{}]
+        return {
+            "id": str(m.get("Id")),
+            "title": m.get("Name", ""),
+            "year": m.get("ProductionYear"),
+            "path": path,
+            "size": int(sources[0].get("Size") or 0),
+            "quality": "",
+            "added": (m.get("DateCreated") or "")[:19],
+        }
+
     def movies(self) -> list[dict]:
-        out = []
-        for m in self._items(IncludeItemTypes="Movie",
-                             Fields="Path,DateCreated,MediaSources"):
-            path = m.get("Path") or ""
-            if not path:
-                continue
-            sources = m.get("MediaSources") or [{}]
-            out.append({
-                "id": str(m.get("Id")),
-                "title": m.get("Name", ""),
-                "year": m.get("ProductionYear"),
-                "path": path,
-                "size": int(sources[0].get("Size") or 0),
-                "quality": "",
-                "added": (m.get("DateCreated") or "")[:19],
-            })
+        out = [f for f in map(self._movie, self._items(IncludeItemTypes="Movie",
+                                                       Fields="Path,DateCreated,MediaSources"))
+               if f]
         out.sort(key=lambda m: (m["title"] or "").lower())
         return out
+
+    def recent_movies(self, limit: int = 12) -> list[dict]:
+        """As PlexLibrary.recent_movies."""
+        rows = self._get("/Items", Recursive="true", IncludeItemTypes="Movie",
+                         SortBy="DateCreated", SortOrder="Descending", Limit=limit,
+                         Fields="Path,DateCreated,MediaSources")
+        return [f for f in map(self._movie, (rows or {}).get("Items") or []) if f][:limit]
 
     def poster(self, item_id: str) -> bytes:
         try:
             resp = httpx.get(f"{self.url.rstrip('/')}/Items/{item_id}/Images/Primary",
-                             params={"maxWidth": 400},
+                             params={"maxWidth": 400, "quality": 85},
                              headers=jellyfin_headers(self.api_key), timeout=TIMEOUT)
             resp.raise_for_status()
         except httpx.HTTPError as exc:
@@ -644,6 +683,12 @@ class SonarrLibrary:
 
     def recent_episodes(self, limit: int = 12) -> list[dict]:
         return self.sonarr.recent_imports(limit)
+
+    def recent_movies(self, limit: int = 12) -> list[dict]:
+        if self.films is None:
+            raise LibraryError("they come from your media server - choose Plex "
+                               "or Jellyfin under Media server")
+        return self.films.recent_movies(limit)
 
     def roots(self) -> list[dict]:
         """TV folders as Sonarr sees them, film folders as the media server does."""

@@ -120,16 +120,56 @@ def test_path_report(client, settings, stub, tmp_path, monkeypatch):
 # ---------------------------------------------------------------- posters
 
 def test_sonarr_poster_url(client, settings, stub):
-    stub.route("GET", "/api/v3/mediacover/42/poster.jpg", lambda req: (200, b"JPEGDATA"))
+    # Sonarr's 500px copy, not the original.
+    stub.route("GET", "/api/v3/mediacover/42/poster-500.jpg", lambda req: (200, b"JPEGDATA"))
     settings.sonarr = config.ArrConfig(url=stub.url, api_key="k")
     config.save(settings)
     r = client.get("/api/poster", params={"source": "sonarr", "id": "42"})
     assert r.status_code == 200 and r.content == b"JPEGDATA"
+    assert "immutable" in r.headers["cache-control"]
     assert stub.requests[0].headers["x-api-key"] == "k"
     # Served from disk the second time.
     client.get("/api/poster", params={"source": "sonarr", "id": "42"})
     assert len(stub.requests) == 1
     assert client.get("/api/poster", params={"source": "sonarr", "id": "43"}).status_code == 404
+
+
+def test_sonarr_poster_falls_back_to_the_original(client, settings, stub):
+    stub.route("GET", "/api/v3/mediacover/7/poster.jpg", lambda req: (200, b"FULLSIZE"))
+    settings.sonarr = config.ArrConfig(url=stub.url, api_key="k")
+    config.save(settings)
+    r = client.get("/api/poster", params={"source": "sonarr", "id": "7"})
+    assert r.content == b"FULLSIZE"
+    assert [q.path for q in stub.requests] == ["/api/v3/mediacover/7/poster-500.jpg",
+                                               "/api/v3/mediacover/7/poster.jpg"]
+
+
+def test_a_poster_asked_for_at_once_is_fetched_once(client, settings, stub):
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    def slow(req):
+        time.sleep(0.2)
+        return 200, b"JPEG"
+    stub.route("GET", "/api/v3/mediacover/5/poster-500.jpg", slow)
+    settings.sonarr = config.ArrConfig(url=stub.url, api_key="k")
+    config.save(settings)
+    with ThreadPoolExecutor(8) as pool:
+        got = list(pool.map(lambda _: main._fetch_poster("sonarr", 5, config.load()), range(8)))
+    assert got == [True] * 8
+    assert len(stub.requests) == 1
+    assert not list((main.CACHE_DIR / "posters").glob("*.part"))
+
+
+def test_a_poster_cached_at_full_size_is_replaced(client, settings, stub):
+    stub.route("GET", "/api/v3/mediacover/9/poster-500.jpg", lambda req: (200, b"SMALL"))
+    settings.sonarr = config.ArrConfig(url=stub.url, api_key="k")
+    config.save(settings)
+    old = main.CACHE_DIR / "posters" / "sonarr-9.jpg"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_bytes(b"BIG")
+    assert client.get("/api/poster", params={"source": "sonarr", "id": "9"}).content == b"SMALL"
+    assert not old.exists()
 
 
 # ---------------------------------------------------------------- jobs
@@ -394,3 +434,67 @@ def test_startup_requeues_interrupted_jobs(home, monkeypatch):
     with TestClient(main.app):
         assert db.get(job)["status"] == "queued"
         assert started == [True]
+
+
+# ---------------------------------------------------------------- speed
+
+def test_home_asks_for_recent_films_not_the_whole_library(client, arr_library, stub):
+    stub.route("GET", "/library/sections/2/recentlyAdded", {"MediaContainer": {"Metadata": [
+        {"ratingKey": "5", "title": "Film", "year": 2020, "addedAt": 1706745600,
+         "Media": [{"Part": [{"file": "/m/f.mkv"}]}]}]}})
+    home = client.get("/api/home").json()
+    assert home["problems"] == [] and home["movies"][0]["title"] == "Film"
+    assert stub.seen("/library/sections/2/all") == []
+
+
+def test_a_library_list_is_reused_and_refreshed_behind_the_page(client, arr_library, stub, monkeypatch):
+    first = client.get("/api/movies").json()["items"]
+    asked = len(stub.seen("/library/sections/2/all"))
+    again = client.get("/api/movies").json()["items"]
+    assert again == first and len(stub.seen("/library/sections/2/all")) == asked
+    # Past LIST_FRESH the old answer is still served, and a new one fetched.
+    monkeypatch.setattr(main, "LIST_FRESH", 0.0)
+    client.get("/api/movies")
+    main.POOL.submit(lambda: None).result()
+    import time
+    for _ in range(50):
+        if len(stub.seen("/library/sections/2/all")) > asked:
+            break
+        time.sleep(0.02)
+    assert len(stub.seen("/library/sections/2/all")) > asked
+
+
+def test_job_statuses_are_fresh_when_the_list_is_cached(client, arr_library):
+    assert client.get("/api/movies").json()["items"][0]["job_status"] == "queued"
+    [(movie_job,)] = db.connect().execute("SELECT id FROM job WHERE path='/m/f.mkv'").fetchall()
+    db.update(movie_job, status="done")
+    assert client.get("/api/movies").json()["items"][0]["job_status"] == "done"
+
+
+def test_changing_the_library_settings_asks_afresh(client, arr_library, stub, settings):
+    client.get("/api/movies")
+    asked = len(stub.seen("/library/sections/2/all"))
+    settings = config.load()
+    settings.plex_token = "another"
+    config.save(settings)
+    client.get("/api/movies")
+    assert len(stub.seen("/library/sections/2/all")) == asked + 1
+
+
+def test_statuses_by_folder():
+    under = main._statuses_by_folder({"/tv/Show/Season 01/a.mkv": "done",
+                                      "/tv/Show/Season 02/b.mkv": "failed",
+                                      "/tv/Other/c.mkv": "queued"})
+    assert sorted(under["/tv/Show/"]) == ["done", "failed"]
+    assert under["/tv/Other/"] == ["queued"] and len(under["/tv/"]) == 3
+
+
+def test_lists_are_compressed_and_posters_are_not(client, arr_library, stub):
+    r = client.get("/api/movies", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200
+    stub.route("GET", "/api/v3/mediacover/1/poster-500.jpg", lambda req: (200, b"J" * 5000))
+    p = client.get("/api/poster", params={"source": "sonarr", "id": "1"},
+                   headers={"Accept-Encoding": "gzip"})
+    assert p.headers.get("content-encoding") is None
+    big = client.get("/static/app.js", headers={"Accept-Encoding": "gzip"})
+    assert big.headers.get("content-encoding") == "gzip"
