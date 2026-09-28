@@ -337,3 +337,37 @@ def test_jellyfin_search_waits_longer_than_a_listing(stub, monkeypatch):
     stub.route("GET", "/Items/5/RemoteSearch/Subtitles/eng", [])
     assert library.JellyfinLibrary(stub.url, "k").search_subtitles("5") == ""
     assert seen[0][1] == library.SEARCH_TIMEOUT
+
+
+def test_plex_posters_are_scaled_by_plex(stub):
+    stub.route("GET", "/photo/:/transcode", lambda req: (200, b"SMALL"))
+    assert library.PlexLibrary(stub.url, "t").poster("72") == b"SMALL"
+    asked = stub.seen("/photo/:/transcode")[0].query
+    assert asked["url"] == ["/library/metadata/72/thumb"] and asked["width"] == ["400"]
+
+
+def test_plex_poster_falls_back_to_the_original(stub):
+    stub.route("GET", "/library/metadata/72", {"MediaContainer": {"Metadata": [{"thumb": "/t/72"}]}})
+    stub.route("GET", "/t/72", lambda req: (200, b"FULL"))
+    assert library.PlexLibrary(stub.url, "t").poster("72") == b"FULL"
+
+
+def test_plex_recent_films(stub):
+    stub.route("GET", "/library/sections", {"MediaContainer": {"Directory": [
+        {"key": "2", "type": "movie", "title": "Films"}]}})
+    stub.route("GET", "/library/sections/2/recentlyAdded", {"MediaContainer": {"Metadata": [
+        {"ratingKey": "5", "title": "Old", "addedAt": 100, "Media": [{"Part": [{"file": "/m/a.mkv"}]}]},
+        {"ratingKey": "6", "title": "New", "addedAt": 200, "Media": [{"Part": [{"file": "/m/b.mkv"}]}]},
+        {"ratingKey": "7", "title": "No file", "addedAt": 300}]}})
+    got = library.PlexLibrary(stub.url, "t").recent_movies(2)
+    assert [m["title"] for m in got] == ["New", "Old"]
+    assert stub.seen("/library/sections/2/recentlyAdded")[0].query["X-Plex-Container-Size"] == ["2"]
+
+
+def test_jellyfin_recent_films(stub):
+    stub.route("GET", "/Items", {"Items": [
+        {"Id": "a", "Name": "New", "Path": "/m/a.mkv", "DateCreated": "2024-02-01T00:00:00Z"}]})
+    got = library.JellyfinLibrary(stub.url, "k").recent_movies(5)
+    assert [m["title"] for m in got] == ["New"]
+    q = stub.seen("/Items")[0].query
+    assert q["SortBy"] == ["DateCreated"] and q["SortOrder"] == ["Descending"] and q["Limit"] == ["5"]

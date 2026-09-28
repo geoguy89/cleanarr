@@ -200,7 +200,9 @@ const trackName = () => state.settings?.track_title || 'Cleaned - English';
 function posterUrl(item, kind) {
   const src = item.source || (kind === 'movie' ? (state.settings?.media_server || 'none') : state.libSource);
   const id = item.id !== undefined && kind !== 'episode' ? item.id : item.series_id;
-  return `/api/poster?source=${encodeURIComponent(src)}&id=${encodeURIComponent(id)}`;
+  // The size is part of the address, so a poster the browser holds is never
+  // stale and never asked for again (see _poster_path on the server).
+  return `/api/poster?source=${encodeURIComponent(src)}&id=${encodeURIComponent(id)}&w=400`;
 }
 
 /* The same rule as subtitles.worth_checking on the server. */
@@ -291,7 +293,7 @@ function posterCard(item, kind, index) {
     chips.map((c) => c.replace(/<[^>]+>/g, '')).join(', ')}` : ''}`;
   return `<article class="poster">
     <div class="art"><span class="initial" aria-hidden="true">${esc((item.title || '?').trim()[0] || '?')}</span>
-      <img loading="lazy" alt="" src="${posterUrl(item, kind)}" onerror="this.remove()"></div>
+      <img loading="lazy" decoding="async" alt="" src="${posterUrl(item, kind)}" onerror="this.remove()"></div>
     <div class="chips" aria-hidden="true">${chips.join('')}</div>
     <div class="meta">
       <button type="button" class="open" data-action="${action}" ${data}
@@ -642,8 +644,21 @@ async function loadHome() {
   noteSource(data);
   state.home = data;
   renderHome();
+  prefetchLibrary();
 }
 ACTIONS['reload-home'] = () => { state.home = null; return loadHome(); };
+
+/* With Home drawn, the show and film lists are fetched quietly, so opening
+   either tab shows them at once rather than waiting on the library. */
+function prefetchLibrary() {
+  if (state.prefetched) return;
+  state.prefetched = true;
+  const later = window.requestIdleCallback || ((fn) => setTimeout(fn, 800));
+  later(() => {
+    if (!state.shows) loadShows();
+    if (!state.movies) loadMovies();
+  });
+}
 
 function renderHome() {
   const data = state.home;
@@ -673,7 +688,7 @@ function renderHome() {
   $('#home-episodes').innerHTML = data.episodes.length
     ? `<div class="rows">${data.episodes.map((e, i) => `
       <div class="row">
-        <img class="thumb" loading="lazy" alt="" src="${posterUrl(e, 'episode')}" onerror="this.classList.add('none')">
+        <img class="thumb" loading="lazy" decoding="async" alt="" src="${posterUrl(e, 'episode')}" onerror="this.classList.add('none')">
         <div class="grow">
           <div class="title">${esc(e.series)} <span class="muted">${epCode(e.season, e.episode)}${
             e.title ? ` · ${esc(e.title)}` : ''}</span></div>
@@ -718,7 +733,15 @@ ACTIONS['clean-home-episode'] = async (el) => {
 const byRecent = (a, b) => String(b.latest || '').localeCompare(String(a.latest || ''));
 const byTitle = (a, b) => (a.title || '').toLowerCase().localeCompare((b.title || '').toLowerCase());
 
-async function loadShows() {
+/* One request at a time per list: the quiet fetch from Home and a click on
+   the tab share it. */
+const inFlight = {};
+const once = (name, fn) => () => {
+  inFlight[name] ||= fn().finally(() => { inFlight[name] = null; });
+  return inFlight[name];
+};
+
+const loadShows = once('shows', async () => {
   $('#show-grid').innerHTML = loading(`Asking ${sourceName('show')}…`, skeletonPosters(18));
   $('#show-count').textContent = '';
   try {
@@ -731,7 +754,7 @@ async function loadShows() {
     state.shows = null;
     $('#show-grid').innerHTML = problem(`Could not list your shows`, err.message, 'reload-shows');
   }
-}
+});
 ACTIONS['reload-shows'] = loadShows;
 
 function renderShows() {
@@ -766,7 +789,7 @@ $('#show-search').addEventListener('input', debounce(renderShows, 120));
 $('#show-filter').addEventListener('change', renderShows);
 $('#show-sort').addEventListener('change', renderShows);
 
-async function loadMovies() {
+const loadMovies = once('movies', async () => {
   $('#movie-grid').innerHTML = loading(`Asking ${sourceName('movie')}…`, skeletonPosters(18));
   $('#movie-count').textContent = '';
   try {
@@ -779,7 +802,7 @@ async function loadMovies() {
     state.movies = null;
     $('#movie-grid').innerHTML = problem('Could not list your films', err.message, 'reload-movies');
   }
-}
+});
 ACTIONS['reload-movies'] = loadMovies;
 
 function renderMovies() {
@@ -1292,7 +1315,7 @@ function renderCalendar() {
     <h2 class="day-head">${esc(dayHeading(key))}</h2>
     <div class="rows">${byDay.get(key).map((e) => `
       <div class="row">
-        <img class="thumb" loading="lazy" alt="" src="${posterUrl(e, 'episode')}" onerror="this.classList.add('none')">
+        <img class="thumb" loading="lazy" decoding="async" alt="" src="${posterUrl(e, 'episode')}" onerror="this.classList.add('none')">
         <div class="grow">
           <div class="title">${esc(e.series)} <span class="muted">${epCode(e.season, e.episode)}${e.title ? ` · ${esc(e.title)}` : ''}</span></div>
           <div class="sub">${esc([`airs ${airTime(e.airs)}`, e.network, e.runtime ? `${e.runtime} min` : ''].filter(Boolean).join(' · '))}</div>
