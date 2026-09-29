@@ -324,7 +324,7 @@ def plex_sessions(plex_url: str, token: str) -> list[PlexSession]:
 # simply was not there - the behaviour was always server-agnostic, only the
 # wording was not.
 HOLD_POLICIES = {
-    "never": "Never wait - clean whenever there is work",
+    "never": "Never wait - censor whenever there is work",
     "video_transcode": "Wait only while {server} is transcoding video (it needs the GPU)",
     "any_transcode": "Wait while {server} is transcoding anything",
     "playing": "Wait while anything at all is playing",

@@ -1,13 +1,13 @@
-# Cleanarr
+# Cens-arr
 
 <img src="web/logo.svg" alt="" width="112" align="right">
 
-Cleanarr is an \*arr-inspired, *vibe-coded* application that mutes profanity in your 
+Cens-arr is an \*arr-inspired, *vibe-coded* application that mutes profanity in your 
 media.
 
-It adds a second audio track, **“Cleaned - English”** by default, with the swearing
+It adds a second audio track, **“Censored - English”** by default, with the swearing
 silenced. The original is untouched and stays the default — in Plex or Jellyfin
-you pick the clean one from the audio menu. **One file, two tracks, not two
+you pick the censored one from the audio menu. **One file, two tracks, not two
 copies.**
 
 Built for a household with a small child in the room, so when anything is
@@ -29,7 +29,7 @@ uncertain the word gets muted.
   online, and are lined up with the speech first.
 * **One click to fix a wrong call**, per show or everywhere, and every mute is
   listed with its evidence.
-* **Shows that clean themselves** as new episodes arrive, from Sonarr, Plex or
+* **Shows that censor themselves** as new episodes arrive, from Sonarr, Plex or
   Jellyfin.
 
 ---
@@ -40,18 +40,18 @@ The screenshots are of a made-up demo library (`python tools/screenshots.py`
 regenerates them), in the dark theme. The page follows the system's light or
 dark setting.
 
-**Home** — what is being cleaned, what landed lately, and what it has cost so
+**Home** — what is being censored, what landed lately, and what it has cost so
 far. On a new install it opens with a checklist of what is left to set up.
 
 ![Home](docs/images/home.jpg)
 
-**Your library**, with badges for cleaned, queued, auto-cleaning, or nothing on
+**Your library**, with badges for censored, queued, auto-censoring, or nothing on
 disk yet.
 
 ![Shows](docs/images/shows.jpg)
 
-**Inside a show** — clean one episode, a season, everything outstanding, or
-from one episode to the end. Removing a cleaned track is just as easy.
+**Inside a show** — censor one episode, a season, everything outstanding, or
+from one episode to the end. Removing a censored track is just as easy.
 
 ![Episodes](docs/images/episodes.jpg)
 
@@ -63,9 +63,9 @@ opinion let through can be made always muted.
 
 ![Job details](docs/images/details.jpg)
 
-**Cleaned** — searchable history, and what the extra tracks cost in disk.
+**Censored** — searchable history, and what the extra tracks cost in disk.
 
-![Cleaned](docs/images/cleaned.jpg)
+![Censored](docs/images/cleaned.jpg)
 
 **Upcoming** — Sonarr's calendar without leaving the app. Sonarr only; the tab
 hides itself otherwise.
@@ -91,7 +91,7 @@ until you press Save. Each Test button tries what is typed, before it is saved.
 | **Media** | Mounted so the paths your library reports exist in this container; see [Paths](#paths). |
 | **Subtitles** | Optional, and used when there: in the file, a `.srt` beside it, or found by Plex or Jellyfin. |
 | **GPU** | Optional. NVIDIA is much faster; CPU works. See [Hardware](#hardware). |
-| **Disk** | ~1.5 GB for the speech model, plus ~90 MB per cleaned 25-minute episode. |
+| **Disk** | ~1.5 GB for the speech model, plus ~90 MB per censored 25-minute episode. |
 | **Ollama** | Optional, off by default. See [Subtitles and Whisper](#subtitles-and-whisper). |
 
 ---
@@ -102,15 +102,15 @@ until you press Save. Each Test button tries what is typed, before it is saved.
 
 ```yaml
 services:
-  cleanarr:
-    image: ghcr.io/geoguy89/cleanarr:latest
-    container_name: cleanarr
+  censarr:
+    image: ghcr.io/geoguy89/censarr:latest
+    container_name: censarr
     restart: unless-stopped
     stop_grace_period: 45s
     ports:
       - "8477:8477"
     volumes:
-      - /path/to/appdata/cleanarr:/config
+      - /path/to/appdata/censarr:/config
       # The right-hand side must be the path your library reports.
       # If Plex or Sonarr says /data/media/tv/..., mount it as /data.
       - /path/to/media:/data
@@ -139,25 +139,25 @@ docker compose up -d
 
 > Add it **only** if you have one. Docker will not start a container whose
 > device reservation cannot be met, so on a machine with no NVIDIA card these
-> lines stop Cleanarr running at all, with an error that says nothing about
-> Cleanarr.
+> lines stop Cens-arr running at all, with an error that says nothing about
+> Cens-arr.
 
-> Also on Docker Hub as `geoguy89/cleanarr:latest`. GHCR is the better
+> Also on Docker Hub as `geoguy89/censarr:latest`. GHCR is the better
 > default — Docker Hub rate-limits anonymous pulls.
 
 ### docker run
 
 ```bash
 # The container side of the media volume must be the path your library
-# reports: Cleanarr opens those paths unchanged.
+# reports: censarr opens those paths unchanged.
 docker run -d \
-  --name cleanarr \
+  --name censarr \
   --restart unless-stopped \
   -e TZ=America/New_York \
   -p 8477:8477 \
-  -v /path/to/appdata/cleanarr:/config \
+  -v /path/to/appdata/censarr:/config \
   -v /path/to/media:/data \
-  ghcr.io/geoguy89/cleanarr:latest
+  ghcr.io/geoguy89/censarr:latest
 ```
 
 With an NVIDIA GPU, add `--runtime nvidia -e NVIDIA_VISIBLE_DEVICES=all -e
@@ -165,9 +165,9 @@ NVIDIA_DRIVER_CAPABILITIES=compute,utility`.
 
 ### Unraid
 
-Copy `docker/my-Cleanarr.xml` to
+Copy `docker/my-Censarr.xml` to
 `/boot/config/plugins/dockerMan/templates-user/`, then **Docker → Add
-Container** and pick *cleanarr* from the template dropdown. That gives you the
+Container** and pick *Cens-arr* from the template dropdown. That gives you the
 icon, a WebUI link and a working Edit dialog. Updates work normally — the
 template pulls from ghcr.io.
 
@@ -176,8 +176,8 @@ template pulls from ghcr.io.
 The published image is `linux/amd64` only; its CUDA base has no arm64 build.
 
 ```bash
-git clone https://github.com/geoguy89/cleanarr.git
-cd cleanarr/docker && docker compose up -d --build
+git clone https://github.com/geoguy89/censarr.git
+cd censarr/docker && docker compose up -d --build
 ```
 
 ### Hardware
@@ -190,16 +190,16 @@ Listening is the only demanding part.
 | **CPU only** | Several times slower. Queue it overnight. |
 | **AMD GPU** | Runs, but on the CPU — see below |
 
-Cleanarr picks GPU or CPU on its own. **Settings → Listening** shows which it
+Cens-arr picks GPU or CPU on its own. **Settings → Listening** shows which it
 found and lets you force either.
 
 faster-whisper runs on CTranslate2, which has CPU and CUDA backends and **no
 ROCm**, so an AMD card sits idle. To use one, run something that supports it —
 [whisper.cpp](https://github.com/ggml-org/whisper.cpp) has Vulkan and ROCm
-backends — and point Cleanarr at it under **Settings → Listening → Use my own
+backends — and point Cens-arr at it under **Settings → Listening → Use my own
 Whisper server**. Anything exposing the OpenAI transcription API works.
 
-> A remote server must return **word-level** timestamps. Cleanarr mutes half a
+> A remote server must return **word-level** timestamps. Cens-arr mutes half a
 > second around one word; with only line-level timings it would have to blank
 > four seconds of dialogue to catch one syllable. The **Test** button checks
 > for this.
@@ -218,7 +218,7 @@ numbered in the order things need doing:
 2. **What gets silenced** — four switchable lists, plus your own always/never
    words.
 3. **Listening** — download the speech model here rather than during your first
-   clean.
+   censor run.
 4. **Muting** — padding, fade and the new track's name. The defaults are fine.
 5. **Second opinion** — optional: another Whisper server, or your own model,
    to check a sound-alike before it is left in. The subtitles themselves are
@@ -229,14 +229,14 @@ numbered in the order things need doing:
 8. **Who can use this** — set a password if this is reachable from outside your
    network.
 
-A value Cleanarr cannot use — an address without `http://`, a padding of 9
+A value Cens-arr cannot use — an address without `http://`, a padding of 9
 seconds — is refused when you save, with the reason next to the field.
 
-Then clean one episode before turning it loose on a season.
+Then censor one episode before turning it loose on a season.
 
 ### Where the library comes from
 
-Cleanarr needs one thing: what you own, and where each file is.
+Cens-arr needs one thing: what you own, and where each file is.
 
 **Films always come from your media server** (Settings → Media server). It
 knows every version of a film and the subtitles it downloaded, which a
@@ -251,14 +251,14 @@ downloader does not. **Shows** come from whichever you pick:
 Radarr is not used. An older setup that listed films from Radarr keeps its
 history; its films are listed from the media server from now on.
 
-Everything else works the same whichever you pick, including cleaning new
+Everything else works the same whichever you pick, including censoring new
 episodes automatically. The Plex and Jellyfin credentials are the same ones
 used for refreshing and transcode pauses — there is no second set to keep in
 step.
 
 ### Paths
 
-Your library reports where each file is **as it sees it**, and Cleanarr opens
+Your library reports where each file is **as it sees it**, and Cens-arr opens
 that exact path. So mount your media so that **the path your library reports
 exists inside this container**:
 
@@ -276,7 +276,7 @@ is the library browsing perfectly while every job fails with *“not found from
 this container”*.
 
 **Settings → Your library** shows a check for each library folder: what it
-reports and whether Cleanarr can open it. When it cannot, it also says where
+reports and whether Cens-arr can open it. When it cannot, it also says where
 that folder looks to be mounted instead, so the fix is usually one line of the
 compose file.
 
@@ -289,7 +289,7 @@ the library reports costs nothing and leaves one fewer thing to get wrong.
 
 ## How it works
 
-1. **Probe** — ffprobe reads the file. One already carrying a cleaned track is
+1. **Probe** — ffprobe reads the file. One already carrying a censored track is
    skipped unless you ask again.
 2. **Extract** — the English audio, as 16 kHz mono. Times are then counted
    from the start of the file, not of the audio: TV recordings often start the
@@ -308,7 +308,7 @@ the library reports costs nothing and leaves one fewer thing to get wrong.
    duration, correctly interleaved.
 
 Transcripts are cached against the audio, so changing a word list and
-re-cleaning skips the slow part.
+re-censoring skips the slow part.
 
 ---
 
@@ -344,7 +344,7 @@ lists in the first place, and make the rare wrong call quick to find and fix.
   real innocent meaning — *caulk* heard as the other word — from the file's
   subtitles, your own model, or both.
 
-**After a clean: what is worth a listen**
+**After a censor run: what is worth a listen**
 
 Each detection records two pieces of evidence. Unless the subtitle second
 opinion is on, neither changes the muting:
@@ -352,7 +352,7 @@ opinion is on, neither changes the muting:
 * **How sure Whisper was** of the word. Below 50%, it is flagged. The
   built-in Whisper always reports this; a remote server only if it adds it to
   the OpenAI response. Transcripts saved before this version have none, and
-  are reused on a re-clean; deleting `/config/cache` makes files be heard
+  are reused on a re-censor; deleting `/config/cache` makes files be heard
   again.
 * **What the subtitles say** at that moment, when the file has English text
   subtitles (SRT, ASS, MP4 text; picture subtitles cannot be read), or else an
@@ -365,15 +365,15 @@ opinion is on, neither changes the muting:
   file rather than flagging everything.
 
 Flagged words are marked **Worth a listen** in the job's details, and the
-Cleaned page can show only the files that have one. **That was wrong** on the
-word fixes it for next time; **Clean again** applies it now, and reuses the
+Censored page can show only the files that have one. **That was wrong** on the
+word fixes it for next time; **Censor again** applies it now, and reuses the
 saved transcript, so the slow listening step is skipped.
 
 ---
 
 ## Where things are kept
 
-**The cleaned track is inside the media file itself**, as one more audio
+**The censored track is inside the media file itself**, as one more audio
 stream next to the original. There is no second copy of the episode and no
 separate audio file: Plex or Jellyfin simply shows one more entry in the
 episode's audio menu. The original audio stream is copied across untouched and
@@ -382,7 +382,7 @@ stays the default.
 How a file gets there:
 
 1. The new file is built in a scratch folder **beside the original**, named
-   `cleanarr-` plus a random suffix (e.g. `Show/Season 01/cleanarr-x1y2z3/`).
+   `censarr-` plus a random suffix (e.g. `Show/Season 01/censarr-x1y2z3/`).
    It sits on the same disk so the finished file can be moved into place
    without copying. That needs free space of about the file's size plus
    512 MB; a job that does not have it stops before starting.
@@ -393,31 +393,31 @@ How a file gets there:
    container killed mid-job is swept up the next time a job runs in that
    folder, once it is six hours old.
 
-The file grows by the size of the cleaned track, about 90 MB for a 25-minute
-episode; the Cleaned page shows the running total. **Remove** rewrites the file
+The file grows by the size of the censored track, about 90 MB for a 25-minute
+episode; the Censored page shows the running total. **Remove** rewrites the file
 without that track and gives the space back.
 
 **Keep a copy of each original** (Settings → Advanced, off by default) also
-leaves `<file name>.cleanarr-backup` beside each file, doubling what it takes
+leaves `<file name>.censarr-backup` beside each file, doubling what it takes
 on disk. The copy is refreshed each time the file is changed, so after a second
-clean or a removal it holds the file as it was just before that change.
+censor or a removal it holds the file as it was just before that change.
 
 Everything else lives in `/config`:
 
 | Path | What |
 |---|---|
 | `/config/config.yaml` | Settings, including API keys and the login's password hash |
-| `/config/cleanarr.sqlite` | Job history, every detection, shows set to clean new episodes, second-opinion answers |
+| `/config/censarr.sqlite` | Job history, every detection, shows set to censor new episodes, second-opinion answers |
 | `/config/cache/models/` | The speech model, about 1.5 GB |
-| `/config/cache/*.json` | Transcripts, so a re-clean after a word-list change skips listening |
+| `/config/cache/*.json` | Transcripts, so a re-censor after a word-list change skips listening |
 | `/config/cache/posters/` | Artwork, fetched once |
 | `/config/cache/subtitles/` | Subtitles borrowed for a file with none of its own, one per job |
 | `/config/cache/huggingface/` | Hugging Face's own download cache |
 
 Deleting `/config/cache` is safe: the model downloads again and files are
-listened to again. Deleting `cleanarr.sqlite` loses the history and the list
-of shows cleaning new episodes; the tracks in your files stay, and ones written
-by this version are still recognised as Cleanarr's from the file alone.
+listened to again. Deleting `censarr.sqlite` loses the history and the list
+of shows censoring new episodes; the tracks in your files stay, and ones written
+by this version are still recognised as Cens-arr's from the file alone.
 
 ---
 
@@ -426,7 +426,7 @@ by this version are still recognised as Cleanarr's from the file alone.
 Speech recognition writes homophones. A scene about drywall produced nine mutes
 of *“cock”* — the word was *“caulk”*. No word list fixes that, because the
 transcript genuinely contains the rude one. The subtitles were written by
-someone who knew what was said, so every clean reads them against what Whisper
+someone who knew what was said, so every censor run reads them against what Whisper
 heard, word by word, both ways:
 
 | The subtitles, at that spot | Whisper heard | Result |
@@ -489,7 +489,7 @@ Where the subtitles come from, first found wins:
 5. a search by Plex or Jellyfin, which attaches the best English match to the
    item exactly as its own *Search subtitles* does. Those subtitles stay on the
    item in your media server. Jellyfin needs its Open Subtitles plugin; without
-   one, the job says so, Home points to it, and the file is cleaned by
+   one, the job says so, Home points to it, and the file is censored by
    listening alone.
 
 3 to 5 need a media server chosen under **Media server**. The file is found in the media server by its
@@ -533,13 +533,13 @@ checks on a real library it changed the outcome **twice**, at 30–100 s each.
 
 ---
 
-## Shows that clean themselves
+## Shows that censor themselves
 
-Marking a show cleans **episodes downloaded from now on**. Nothing already on
+Marking a show censors **episodes downloaded from now on**. Nothing already on
 disk is touched; catching up is a separate button. A show with no files yet can
-be marked, so a new series arrives clean.
+be marked, so a new series arrives censored.
 
-Checked every 10 minutes. For instant cleaning, point a Sonarr **Connect →
+Checked every 10 minutes. For instant censoring, point a Sonarr **Connect →
 Webhook** (*On Import*) at `http://<host>:8477/api/webhook/sonarr`. If you
 have set a login, put the same username and password in the webhook's
 Username and Password fields.
@@ -553,7 +553,7 @@ Username and Password fields.
 * **Whisper's silence filter is off.** On one 43-minute episode it skipped 19
   real profanities and saved no measurable time.
 * **Nothing is written until it verifies.** An early build produced a file Plex
-  hung on, because the cleaned audio landed 485 MB from the picture inside the
+  hung on, because the censored audio landed 485 MB from the picture inside the
   container. The interleave check exists because of that episode.
 * **One job at a time**, on purpose — the GPU is shared.
 
@@ -562,7 +562,7 @@ Username and Password fields.
 ## Development
 
 ```
-server/cleanarr/
+server/censarr/
   words.py      word lists and whole-word matching
   subtitles.py  reads Whisper against the subtitles, both ways; lines them up
   sounds.py     whether two words sound alike (CMU Pronouncing Dictionary)
@@ -586,7 +586,7 @@ download Whisper `tiny.en` (~75 MB) the first time.
 ```bash
 pip install -r server/requirements.txt -r tests/requirements.txt
 python -m pytest -m "not e2e and not ui"   # words, queue, API, real ffmpeg
-python -m pytest -m e2e                     # speech -> Whisper -> cleaned MKV and MP4
+python -m pytest -m e2e                     # speech -> Whisper -> censored MKV and MP4
 python -m pytest -m ui                      # the page in Chromium
 python tests/demo.py                        # the demo library on :8477
 ```
@@ -594,7 +594,7 @@ python tests/demo.py                        # the demo library on :8477
 The UI tests also need Chromium for Playwright:
 `python -m playwright install chromium`.
 
-Set `CLEANARR_TEST_MODELS` to a folder to keep the model between runs. No
+Set `CENSARR_TEST_MODELS` to a folder to keep the model between runs. No
 Sonarr, Plex, Jellyfin or Ollama is needed: the tests start small local
 stand-ins for them.
 

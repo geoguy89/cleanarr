@@ -1,4 +1,4 @@
-/* Cleanarr's page: the library, the queue, what has been cleaned, settings.
+/* Cens-arr's page: the library, the queue, what has been censored, settings.
 
    No framework and no build step. Views are plain functions that write HTML
    into their section; every button carries a data-action that one listener
@@ -83,7 +83,7 @@ async function api(path, { method = 'GET', body } = {}) {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch (err) {
-    throw new ApiError('Cannot reach Cleanarr. Is the container running?');
+    throw new ApiError('Cannot reach Cens-arr. Is the container running?');
   }
   if (res.status === 401 && !path.startsWith('/api/auth/')) {
     // The session expired, or a login was just turned on elsewhere.
@@ -174,7 +174,7 @@ const state = {
   sheet: null, labels: {},
 };
 
-try { state.libSource = localStorage.getItem('cleanarr.library_source') || 'sonarr'; } catch (e) { /* private window */ }
+try { state.libSource = localStorage.getItem('censarr.library_source') || localStorage.getItem('cleanarr.library_source') || 'sonarr'; } catch (e) { /* private window */ }
 if (state.libSource === 'arr') state.libSource = 'sonarr';   // Sonarr + Radarr, before Radarr was dropped
 
 function noteSource(data) {
@@ -182,7 +182,7 @@ function noteSource(data) {
   if (s === 'arr') s = 'sonarr';
   if (!['sonarr', 'plex', 'jellyfin'].includes(s)) return;
   state.libSource = s;
-  try { localStorage.setItem('cleanarr.library_source', s); } catch (e) { /* ignore */ }
+  try { localStorage.setItem('censarr.library_source', s); } catch (e) { /* ignore */ }
   $('#nav-upcoming').hidden = s !== 'sonarr';
   $('#more-upcoming').parentElement.hidden = s !== 'sonarr';
 }
@@ -195,7 +195,7 @@ function sourceName(kind) {
   if (state.libSource === 'jellyfin') return 'Jellyfin';
   return kind === 'movie' ? serverName() : 'Sonarr';
 }
-const trackName = () => state.settings?.track_title || 'Cleaned - English';
+const trackName = () => state.settings?.track_title || 'Censored - English';
 
 function posterUrl(item, kind) {
   const src = item.source || (kind === 'movie' ? (state.settings?.media_server || 'none') : state.libSource);
@@ -214,7 +214,7 @@ const worthChecking = (d) => ['soundalike', 'subtitle_only'].includes(d.subtitle
 const DONE = ['done', 'skipped'];
 const isDone = (status) => DONE.includes(status);
 const STATUS = {
-  done: ['done', 'Cleaned'], skipped: ['done', 'Nothing to mute'], running: ['running', 'Cleaning'],
+  done: ['done', 'Censored'], skipped: ['done', 'Nothing to mute'], running: ['running', 'Censoring'],
   queued: ['queued', 'Queued'], failed: ['failed', 'Failed'], cancelled: ['cancelled', 'Cancelled'],
 };
 const badge = (status) => {
@@ -277,7 +277,7 @@ function posterCard(item, kind, index) {
     if (item.monitored) chips.push('<span class="badge auto">Auto</span>');
     if (item.pending) chips.push(`<span class="badge queued">${item.pending} queued</span>`);
     if (item.failed) chips.push(`<span class="badge failed">${item.failed} failed</span>`);
-    if (item.cleaned) chips.push(`<span class="badge done">${item.cleaned}/${item.episodes} clean</span>`);
+    if (item.cleaned) chips.push(`<span class="badge done">${item.cleaned}/${item.episodes} censored</span>`);
     if (!item.episodes) chips.push('<span class="badge">No files</span>');
   } else if (item.job_status) {
     chips.push(badge(item.job_status));
@@ -343,7 +343,7 @@ async function route() {
     else a.removeAttribute('aria-current');
   });
   const title = $(`#view-${view}`).dataset.title;
-  document.title = view === 'home' ? 'Cleanarr' : `${title} · Cleanarr`;
+  document.title = view === 'home' ? 'Cens-arr' : `${title} · Cens-arr`;
   if ($('#more-sheet').open) $('#more-sheet').close();
 
   if (!firstRoute && leaving !== view) {
@@ -449,21 +449,21 @@ async function queue(items, { monitor } = {}) {
   return result;
 }
 
-/* Anything already cleaned is said out loud before it is cleaned again. */
+/* Anything already censored is said out loud before it is censored again. */
 async function confirmRedo(items) {
   const done = items.filter((i) => isDone(i.job_status));
   if (!done.length) return items;
   if (items.length === 1) {
     const one = done[0];
-    const detail = [one.cleaned_at && `cleaned ${when(one.cleaned_at)}`,
+    const detail = [one.cleaned_at && `censored ${when(one.cleaned_at)}`,
       one.muted ? plural(one.muted, 'word') + ' muted' : 'nothing found to mute'].filter(Boolean).join(', ');
-    const answer = await ask('Already cleaned',
-      `${one.label} was done before (${detail}). Cleaning it again replaces its cleaned track.`,
-      [{ label: 'Clean it again', value: 'all', primary: true }]);
+    const answer = await ask('Already censored',
+      `${one.label} was done before (${detail}). Censoring it again replaces its censored track.`,
+      [{ label: 'Censor it again', value: 'all', primary: true }]);
     return answer === 'all' ? items : [];
   }
-  const answer = await ask('Some of these are already cleaned',
-    `${done.length} of ${items.length} already have a cleaned track. Cleaning them again replaces it.`,
+  const answer = await ask('Some of these are already censored',
+    `${done.length} of ${items.length} already have a censored track. Censoring them again replaces it.`,
     [{ label: 'All of them again', value: 'all' },
       { label: `Only the other ${items.length - done.length}`, value: 'rest', primary: true }]);
   if (answer === 'all') return items;
@@ -479,10 +479,10 @@ const episodeJob = (e, showTitle, extra = {}) => ({
 
 async function removeTracks(items, label, toJob) {
   const cleaned = items.filter((e) => isDone(e.job_status));
-  if (!cleaned.length) { toast('None of those have a cleaned track'); return; }
+  if (!cleaned.length) { toast('None of those have a censored track'); return; }
   const freed = cleaned.reduce((sum, e) => sum + (e.added_bytes || 0), 0);
   const answer = await ask(
-    `Remove the cleaned track from ${plural(cleaned.length, 'file')}?`,
+    `Remove the censored track from ${plural(cleaned.length, 'file')}?`,
     `${label}. Only the “${trackName()}” track is taken out; the original audio is untouched`
     + `${freed ? `, and about ${size(freed)} comes back` : ''}.`,
     [{ label: 'Remove', value: 'yes', primary: true }], { danger: true });
@@ -521,7 +521,7 @@ function renderSideStatus() {
     html = `<strong><span class="pulse hold"></span>Waiting for ${esc(serverName())}</strong>
       <span>${esc(data.holding)}</span>`;
   } else if (job) {
-    html = `<strong><span class="pulse busy"></span>Cleaning ${Math.round(job.progress * 100)}%</strong>
+    html = `<strong><span class="pulse busy"></span>Censoring ${Math.round(job.progress * 100)}%</strong>
       <span>${esc(job.title)} ${esc(job.subtitle || '')}</span>`;
   } else {
     const waiting = data.stats.waiting || 0;
@@ -539,7 +539,7 @@ function nowCard({ withCancel = false } = {}) {
     return `<div class="card now hold" role="status">${icon('pause', 'i big')}
       <div class="grow"><div class="title">Waiting while ${esc(serverName())} is busy</div>
         <div class="sub">${esc(data.holding)}. The queue carries on when it stops.</div></div>
-      <button type="button" class="btn secondary sm" data-action="clean-anyway" data-key="anyway">Clean anyway</button></div>`;
+      <button type="button" class="btn secondary sm" data-action="clean-anyway" data-key="anyway">Censor anyway</button></div>`;
   }
   if (!job) return '';
   const pct = Math.round((job.progress || 0) * 100);
@@ -668,11 +668,11 @@ function renderHome() {
     ? `<a class="stat" href="${href}"><b>${value}</b><span>${label}</span></a>`
     : `<div class="stat"><b>${value}</b><span>${label}</span></div>`);
   $('#home-stats').innerHTML =
-    tile(stats.cleaned_files, stats.cleaned_files === 1 ? 'file cleaned' : 'files cleaned', '#/cleaned')
+    tile(stats.cleaned_files, stats.cleaned_files === 1 ? 'file censored' : 'files censored', '#/cleaned')
     + tile(stats.words_muted, stats.words_muted === 1 ? 'word muted' : 'words muted')
-    + tile(size(stats.added_bytes) || '0 MB', 'of cleaned audio', '#/cleaned')
+    + tile(size(stats.added_bytes) || '0 MB', 'of censored audio', '#/cleaned')
     + tile(data.queued + data.running, 'in the queue', '#/queue')
-    + tile(data.monitors, data.monitors === 1 ? 'show cleaning new episodes' : 'shows cleaning new episodes', '#/shows')
+    + tile(data.monitors, data.monitors === 1 ? 'show censoring new episodes' : 'shows censoring new episodes', '#/shows')
     + (data.failed ? tile(data.failed, 'failed', '#/queue') : '');
 
   $('#home-problems').innerHTML = data.problems.length
@@ -700,8 +700,8 @@ function renderHome() {
           <button type="button" class="btn ghost sm" data-action="open-show" data-id="${esc(e.series_id)}"
             data-title="${esc(e.series)}">Open show</button>
           <button type="button" class="btn sm" data-action="clean-home-episode" data-index="${i}"
-            aria-label="${isDone(e.job_status) ? 'Clean again' : 'Clean'}: ${esc(e.series)} ${epCode(e.season, e.episode)}"
-            ${['queued', 'running'].includes(e.job_status) ? 'disabled' : ''}>${isDone(e.job_status) ? 'Clean again' : 'Clean'}</button>
+            aria-label="${isDone(e.job_status) ? 'Censor again' : 'Censor'}: ${esc(e.series)} ${epCode(e.season, e.episode)}"
+            ${['queued', 'running'].includes(e.job_status) ? 'disabled' : ''}>${isDone(e.job_status) ? 'Censor again' : 'Censor'}</button>
         </div>
       </div>`).join('')}</div>`
     : empty({ icon: 'tv', title: 'Nothing new lately',
@@ -897,15 +897,15 @@ async function renderShowActions() {
   const outstanding = eps.filter((e) => !isDone(e.job_status) && !['queued', 'running'].includes(e.job_status));
   const cleaned = eps.filter((e) => isDone(e.job_status));
   $('#sheet-sub').textContent = sheet.episodes
-    ? `${plural(eps.length, 'episode')} on disk · ${cleaned.length} cleaned` : '';
+    ? `${plural(eps.length, 'episode')} on disk · ${cleaned.length} censored` : '';
   $('#sheet-actions').innerHTML = `
-    <label class="switch" title="Episodes downloaded from now on are cleaned when they arrive. Nothing already on disk is touched.">
+    <label class="switch" title="Episodes downloaded from now on are censored when they arrive. Nothing already on disk is touched.">
       <input type="checkbox" role="switch" data-change="watch" data-id="${esc(sheet.id)}"
         data-title="${esc(sheet.title)}" ${isWatched(sheet.id) ? 'checked' : ''}>
-      <span class="track" aria-hidden="true"></span><span>Clean new episodes automatically</span></label>
+      <span class="track" aria-hidden="true"></span><span>Censor new episodes automatically</span></label>
     ${outstanding.length ? `<button type="button" class="btn sm" data-action="clean-outstanding">
-      Clean ${outstanding.length === eps.length ? 'all' : `${outstanding.length} not cleaned yet`}</button>` : ''}
-    ${cleaned.length ? `<button type="button" class="btn ghost sm" data-action="remove-show">Remove cleaned tracks</button>` : ''}`;
+      Censor ${outstanding.length === eps.length ? 'all' : `${outstanding.length} not censored yet`}</button>` : ''}
+    ${cleaned.length ? `<button type="button" class="btn ghost sm" data-action="remove-show">Remove censored tracks</button>` : ''}`;
 }
 
 function renderShow() {
@@ -915,8 +915,8 @@ function renderShow() {
   const eps = sheet.episodes || [];
   if (!eps.length) {
     $('#sheet-body').innerHTML = empty({ icon: 'tv', title: 'Nothing on disk yet',
-      text: `${esc(sourceName('show'))} has no episode files for this show, so there is nothing to clean today.
-        Switch on <strong>Clean new episodes automatically</strong> and each one is cleaned as it arrives.` });
+      text: `${esc(sourceName('show'))} has no episode files for this show, so there is nothing to censor today.
+        Switch on <strong>Censor new episodes automatically</strong> and each one is censored as it arrives.` });
     return;
   }
   const seasons = [...new Set(eps.map((e) => e.season))].sort((a, b) => a - b);
@@ -930,11 +930,11 @@ function renderShow() {
       <div class="season-head">
         <button type="button" class="season-toggle" aria-expanded="${open}" aria-controls="season-${season}"
           data-action="toggle-season" data-season="${season}">${icon('right')}
-          <strong>${name}</strong><span>${clean} of ${list.length} cleaned${busy ? ` · ${busy} queued` : ''}</span></button>
+          <strong>${name}</strong><span>${clean} of ${list.length} censored${busy ? ` · ${busy} queued` : ''}</span></button>
         <button type="button" class="btn secondary sm" data-action="clean-season" data-season="${season}"
-          aria-label="Clean ${name}">Clean season</button>
+          aria-label="Censor ${name}">Censor season</button>
         ${clean ? `<button type="button" class="btn ghost sm" data-action="remove-season" data-season="${season}"
-          aria-label="Remove cleaned tracks from ${name}">Remove cleaned</button>` : ''}
+          aria-label="Remove censored tracks from ${name}">Remove censored</button>` : ''}
       </div>
       <div class="season-body" id="season-${season}" ${open ? '' : 'hidden'}>
         ${list.map((e) => episodeRow(e)).join('')}
@@ -954,14 +954,14 @@ function episodeRow(e) {
     <div class="actions">
       ${badge(e.job_status)}
       <button type="button" class="btn sm${isDone(e.job_status) ? ' secondary' : ''}" data-action="clean-episode"
-        data-id="${esc(e.id)}" aria-label="${isDone(e.job_status) ? 'Clean again' : 'Clean'}: ${esc(label)}" ${busy ? 'disabled' : ''}>
-        ${isDone(e.job_status) ? 'Clean again' : 'Clean'}</button>
+        data-id="${esc(e.id)}" aria-label="${isDone(e.job_status) ? 'Censor again' : 'Censor'}: ${esc(label)}" ${busy ? 'disabled' : ''}>
+        ${isDone(e.job_status) ? 'Censor again' : 'Censor'}</button>
       <details class="menu">
         <summary class="icon-btn" aria-label="More for ${esc(label)}">${icon('more')}</summary>
         <div class="menu-list">
-          <button type="button" data-action="clean-from" data-id="${esc(e.id)}">${icon('arrow')}Clean this and every one after it</button>
+          <button type="button" data-action="clean-from" data-id="${esc(e.id)}">${icon('arrow')}Censor this and every one after it</button>
           ${e.job_id ? `<button type="button" data-action="open-job" data-id="${e.job_id}">${icon('info')}What was muted</button>` : ''}
-          ${isDone(e.job_status) ? `<button type="button" data-action="remove-episode" data-id="${esc(e.id)}">${icon('trash')}Remove the cleaned track</button>` : ''}
+          ${isDone(e.job_status) ? `<button type="button" data-action="remove-episode" data-id="${esc(e.id)}">${icon('trash')}Remove the censored track</button>` : ''}
         </div>
       </details>
     </div></div>`;
@@ -987,7 +987,7 @@ async function cleanEpisodes(list) {
     const found = sheet.episodes.find((e) => e.id === w.id);
     if (found) found.job_status = 'queued';
   });
-  // Cleaning a season marks the show to clean what arrives from now on.
+  // Censoring a season marks the show to censor what arrives from now on.
   const show = (state.shows || []).find((s) => String(s.id) === String(sheet.id));
   if (show) show.monitored = true;
   sheet.monitored = true;
@@ -1005,8 +1005,8 @@ ACTIONS['clean-from'] = (el) => {
 ACTIONS['clean-outstanding'] = async () => {
   const outstanding = state.sheet.episodes.filter((e) => !isDone(e.job_status) && !['queued', 'running'].includes(e.job_status));
   const minutes = outstanding.length * 2.5;
-  const answer = await ask(`Clean ${plural(outstanding.length, 'episode')}?`,
-    `Everything on disk for ${state.sheet.title} that is not cleaned yet. Roughly ${
+  const answer = await ask(`Censor ${plural(outstanding.length, 'episode')}?`,
+    `Everything on disk for ${state.sheet.title} that is not censored yet. Roughly ${
       minutes < 60 ? `${Math.round(minutes)} minutes` : `${(minutes / 60).toFixed(1)} hours`} with a GPU; longer on a CPU.`,
     [{ label: 'Queue them', value: 'yes', primary: true }]);
   if (answer === 'yes') await cleanEpisodes(outstanding);
@@ -1023,9 +1023,9 @@ ACTIONS['remove-season'] = (el) => {
     `${state.sheet.title}, season ${season}`, removeEpisodeJob);
 };
 ACTIONS['remove-show'] = () => removeTracks(state.sheet.episodes,
-  `Every cleaned episode of ${state.sheet.title}`, removeEpisodeJob);
+  `Every censored episode of ${state.sheet.title}`, removeEpisodeJob);
 
-/* The switch that marks a show to clean what arrives. Same wherever it is. */
+/* The switch that marks a show to censor what arrives. Same wherever it is. */
 ACTIONS.watch = async (box) => {
   const { id, title } = box.dataset;
   const on = box.checked;
@@ -1034,10 +1034,10 @@ ACTIONS.watch = async (box) => {
     if (on) {
       await api('/api/monitors', { method: 'POST',
         body: { source: 'sonarr', source_id: String(id), title, mode: 'new_only' } });
-      toast(`${title}: new episodes will be cleaned as they arrive`);
+      toast(`${title}: new episodes will be censored as they arrive`);
     } else {
       await api(`/api/monitors/sonarr/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      toast(`${title}: new episodes no longer cleaned automatically`);
+      toast(`${title}: new episodes no longer censored automatically`);
     }
   } catch (err) {
     box.checked = !on;
@@ -1067,14 +1067,14 @@ function openMovie(m) {
   const busy = ['queued', 'running'].includes(m.job_status);
   $('#sheet-actions').innerHTML = `
     <button type="button" class="btn sm" data-action="clean-movie" ${busy ? 'disabled' : ''}>
-      ${isDone(m.job_status) ? 'Clean again' : 'Clean this film'}</button>
+      ${isDone(m.job_status) ? 'Censor again' : 'Censor this film'}</button>
     ${m.job_id ? '<button type="button" class="btn secondary sm" data-action="open-job" data-id="' + m.job_id + '">What was muted</button>' : ''}
-    ${isDone(m.job_status) ? '<button type="button" class="btn ghost sm" data-action="remove-movie">Remove the cleaned track</button>' : ''}`;
+    ${isDone(m.job_status) ? '<button type="button" class="btn ghost sm" data-action="remove-movie">Remove the censored track</button>' : ''}`;
   const status = {
-    done: `Cleaned ${when(m.cleaned_at)}, ${plural(m.muted || 0, 'word')} muted.`,
+    done: `Censored ${when(m.cleaned_at)}, ${plural(m.muted || 0, 'word')} muted.`,
     skipped: `Checked ${when(m.cleaned_at)}: nothing to mute.`,
-    queued: 'Waiting in the queue.', running: 'Being cleaned now.', failed: 'The last attempt failed. See the queue for why.',
-  }[m.job_status] || 'Not cleaned yet.';
+    queued: 'Waiting in the queue.', running: 'Being censored now.', failed: 'The last attempt failed. See the queue for why.',
+  }[m.job_status] || 'Not censored yet.';
   $('#sheet-body').innerHTML = `<p>${esc(status)}</p>
     <p class="muted small" style="margin-top:12px">File: <code>${esc(m.path)}</code></p>`;
 }
@@ -1127,10 +1127,10 @@ function renderJob() {
   $('#sheet-sub').textContent = job.subtitle || '';
   const busy = ['queued', 'running'].includes(job.status);
   $('#sheet-actions').innerHTML = `${badge(job.status)}
-    ${!busy && (job.action || 'clean') === 'clean' ? `<button type="button" class="btn sm" data-action="job-again">Clean again</button>` : ''}
+    ${!busy && (job.action || 'clean') === 'clean' ? `<button type="button" class="btn sm" data-action="job-again">Censor again</button>` : ''}
     ${['failed', 'cancelled'].includes(job.status) ? `<button type="button" class="btn secondary sm" data-action="retry" data-id="${job.id}">Retry</button>` : ''}
     ${busy ? `<button type="button" class="btn ghost sm" data-action="cancel-job" data-id="${job.id}">Cancel</button>` : ''}
-    ${job.status === 'done' && (job.action || 'clean') === 'clean' ? `<button type="button" class="btn ghost sm" data-action="job-remove">Remove the cleaned track</button>` : ''}`;
+    ${job.status === 'done' && (job.action || 'clean') === 'clean' ? `<button type="button" class="btn ghost sm" data-action="job-remove">Remove the censored track</button>` : ''}`;
 
   const left = detections.filter((d) => !d.muted);
   const judge = true;   // every word is read against the subtitles
@@ -1140,13 +1140,13 @@ function renderJob() {
   const meta = `<div class="job-meta">
     <div><b>${job.muted || 0}</b><span>muted</span></div>
     ${left.length ? `<div><b>${left.length}</b><span>found but left in</span></div>` : ''}
-    ${job.added_bytes ? `<div><b>${size(job.added_bytes)}</b><span>cleaned track</span></div>` : ''}
+    ${job.added_bytes ? `<div><b>${size(job.added_bytes)}</b><span>censored track</span></div>` : ''}
     ${job.duration ? `<div><b>${stamp(job.duration)}</b><span>long</span></div>` : ''}
     ${job.finished_at ? `<div><b>${when(job.finished_at)}</b><span>finished</span></div>` : ''}
   </div>`;
   const banner = changed ? `<div class="alert info" role="status">${icon('info')}<div class="grow">
-      <strong>Word lists changed</strong>Clean this file again to apply them.
-      <div class="actions"><button type="button" class="btn sm" data-action="job-again">Clean again now</button></div></div></div>` : '';
+      <strong>Word lists changed</strong>Censor this file again to apply them.
+      <div class="actions"><button type="button" class="btn sm" data-action="job-again">Censor again now</button></div></div></div>` : '';
 
   const rows = detections.map((d) => {
     const word = esc(d.text.replace(/^[^\w']+|[^\w']+$/g, '') || d.text);
@@ -1326,7 +1326,7 @@ function renderCalendar() {
           ${e.has_file ? '' : (e.wanted ? '<span class="badge queued">Wanted</span>' : '<span class="badge">Not wanted</span>')}
           <label class="switch"><input type="checkbox" role="switch" data-change="watch" data-id="${esc(e.series_id)}"
             data-title="${esc(e.series)}" ${e.monitored ? 'checked' : ''}>
-            <span class="track" aria-hidden="true"></span><span>Clean new episodes<span class="sr-only"> of ${esc(e.series)}</span></span></label>
+            <span class="track" aria-hidden="true"></span><span>Censor new episodes<span class="sr-only"> of ${esc(e.series)}</span></span></label>
           <button type="button" class="btn ghost sm" data-action="open-show" data-id="${esc(e.series_id)}" data-title="${esc(e.series)}">Open</button>
         </div>
       </div>`).join('')}</div>`).join('')
@@ -1356,7 +1356,7 @@ function renderQueue() {
   $('#clear-queue').hidden = !queued.length;
   const ago = data.last_check ? Math.max(0, Math.round((Date.now() / 1000 - data.last_check) / 60)) : null;
   $('#monitor-status').textContent = data.monitors
-    ? `${plural(data.monitors, 'show')} cleaning new episodes. Checked every 10 minutes${
+    ? `${plural(data.monitors, 'show')} censoring new episodes. Checked every 10 minutes${
       ago === null ? '' : `, last ${ago === 0 ? 'just now' : `${ago} min ago`}`}.`
     : '';
   renderSelection();
@@ -1372,7 +1372,7 @@ function renderQueue() {
           data-key="show-${j.id}" title="Select every queued episode of this show">${esc(j.title)}</button>
           <span class="muted">${esc(j.subtitle || '')}</span></div>
         <div class="sub">${i === 0 && !runningJob() ? 'Next up' : `#${i + 1} in line`}${
-          j.action === 'remove' ? ' · removing the cleaned track' : ''}${j.force ? ' · cleaning again' : ''}${
+          j.action === 'remove' ? ' · removing the censored track' : ''}${j.force ? ' · censoring again' : ''}${
           j.message && j.message !== 'retrying' ? ` · ${esc(j.message)}` : ''}</div>
       </div>
       <div class="actions">
@@ -1415,7 +1415,7 @@ function renderQueue() {
   }
   if (!html && !runningJob()) {
     html = empty({ icon: 'queue', title: 'Nothing waiting',
-      text: 'Pick a show or a film to clean. Shows set to clean new episodes add them here as they arrive.',
+      text: 'Pick a show or a film to censor. Shows set to censor new episodes add them here as they arrive.',
       actions: `<a class="btn sm" href="#/shows">Browse shows</a><a class="btn secondary sm" href="#/movies">Browse films</a>` });
   }
   morph($('#job-list'), html);
@@ -1492,7 +1492,7 @@ $('#selection-bar').addEventListener('click', async (event) => {
       return;
     } else if (el.dataset.bulk === 'cancel') {
       const answer = await ask(`Cancel ${plural(ids.length, 'job')}?`,
-        'They come out of the queue. Nothing already cleaned is affected.',
+        'They come out of the queue. Nothing already censored is affected.',
         [{ label: 'Cancel them', value: 'yes', primary: true }]);
       if (answer !== 'yes') return;
       const { cancelled } = await api('/api/jobs/cancel', { method: 'POST', body: { ids } });
@@ -1510,13 +1510,13 @@ $('#check-new').addEventListener('click', async (event) => {
   setBusy(btn, true);
   try {
     const { queued } = await api('/api/monitors/check', { method: 'POST' });
-    toast(queued ? `Queued ${plural(queued, 'new episode')}` : 'Nothing new to clean');
+    toast(queued ? `Queued ${plural(queued, 'new episode')}` : 'Nothing new to censor');
     poll();
   } catch (err) { fail(err); } finally { setBusy(btn, false); }
 });
 $('#clear-queue').addEventListener('click', async () => {
   const answer = await ask('Empty the queue?',
-    'Everything waiting is cancelled. A file being cleaned right now finishes.',
+    'Everything waiting is cancelled. A file being censored right now finishes.',
     [{ label: 'Empty it', value: 'yes', primary: true }], { danger: true });
   if (answer !== 'yes') return;
   try {
@@ -1527,7 +1527,7 @@ $('#clear-queue').addEventListener('click', async () => {
 });
 
 /* ======================================================================
-   Cleaned
+   Censored
    ====================================================================== */
 
 async function loadCleaned() {
@@ -1538,7 +1538,7 @@ async function loadCleaned() {
     data = await api(`/api/history?q=${encodeURIComponent(query)}`);
   } catch (err) {
     if (err.status === 401) return;
-    $('#cleaned-list').innerHTML = problem('Could not load what has been cleaned', err.message, 'reload-cleaned', { settings: false });
+    $('#cleaned-list').innerHTML = problem('Could not load what has been censored', err.message, 'reload-cleaned', { settings: false });
     return;
   }
   const onlyCheck = $('#cleaned-filter').value === 'check';
@@ -1546,9 +1546,9 @@ async function loadCleaned() {
   const { stats } = data;
   const unknown = data.items.filter((j) => !j.added_bytes && j.status === 'done').length;
   $('#cleaned-stats').innerHTML = `
-    <div class="stat"><b>${stats.cleaned_files}</b><span>${stats.cleaned_files === 1 ? 'file' : 'files'} with a cleaned track</span></div>
+    <div class="stat"><b>${stats.cleaned_files}</b><span>${stats.cleaned_files === 1 ? 'file' : 'files'} with a censored track</span></div>
     <div class="stat"><b>${stats.words_muted}</b><span>words muted</span></div>
-    <div class="stat"><b>${size(stats.added_bytes) || '0 MB'}</b><span>of cleaned audio${unknown ? ' (some older files not counted)' : ''}</span></div>`;
+    <div class="stat"><b>${size(stats.added_bytes) || '0 MB'}</b><span>of censored audio${unknown ? ' (some older files not counted)' : ''}</span></div>`;
   const items = state.history;
   $('#cleaned-count-note').textContent = query || onlyCheck ? plural(items.length, 'match', 'matches') : '';
   $('#remove-all-zone').hidden = !stats.cleaned_files;
@@ -1564,13 +1564,13 @@ async function loadCleaned() {
           ${j.to_check ? `<span class="badge queued">${j.to_check} worth a listen</span>` : ''}
           <button type="button" class="btn ghost sm" data-action="open-job" data-id="${j.id}" aria-label="Details for ${esc(j.title)} ${esc(j.subtitle || '')}">Details</button>
           ${j.status === 'done' ? `<button type="button" class="btn ghost sm" data-action="remove-history" data-index="${i}"
-            aria-label="Remove the cleaned track from ${esc(j.title)} ${esc(j.subtitle || '')}">Remove</button>` : ''}
+            aria-label="Remove the censored track from ${esc(j.title)} ${esc(j.subtitle || '')}">Remove</button>` : ''}
         </div></div>`).join('')}</div>`
     : (onlyCheck && !query ? empty({ icon: 'check', title: 'Nothing to check',
-        text: 'No cleaned file has a word Whisper was unsure of, or one its subtitles disagree with.' })
-      : query ? empty({ icon: 'search', title: 'Nothing matches', text: `No cleaned file matches “${esc(query)}”.` })
-      : empty({ icon: 'done', title: 'Nothing cleaned yet',
-        text: 'Files you clean show up here, with what was muted and what the extra track costs.',
+        text: 'No censored file has a word Whisper was unsure of, or one its subtitles disagree with.' })
+      : query ? empty({ icon: 'search', title: 'Nothing matches', text: `No censored file matches “${esc(query)}”.` })
+      : empty({ icon: 'done', title: 'Nothing censored yet',
+        text: 'Files you censor show up here, with what was muted and what the extra track costs.',
         actions: '<a class="btn sm" href="#/shows">Pick a show</a>' }));
 }
 ACTIONS['reload-cleaned'] = loadCleaned;
@@ -1588,8 +1588,8 @@ ACTIONS['remove-history'] = async (el) => {
 $('#remove-all').addEventListener('click', async () => {
   try {
     const { stats } = await api('/api/history?limit=1');
-    const first = await ask(`Remove the cleaned track from all ${stats.cleaned_files} files?`,
-      `Every “${trackName()}” track goes, giving back ${size(stats.added_bytes) || 'its space'}. The original audio is untouched. Putting them back means cleaning everything again.`,
+    const first = await ask(`Remove the censored track from all ${stats.cleaned_files} files?`,
+      `Every “${trackName()}” track goes, giving back ${size(stats.added_bytes) || 'its space'}. The original audio is untouched. Putting them back means censoring everything again.`,
       [{ label: 'Continue', value: 'go', primary: true }], { danger: true });
     if (first !== 'go') return;
     const second = await ask('Are you sure?', `This queues ${plural(stats.cleaned_files, 'removal')}.`,
@@ -1864,7 +1864,7 @@ function renderMediaServer() {
   const select = F('hold_policy');
   const keep = select.value || state.settings?.hold_policy || 'video_transcode';
   select.innerHTML = [
-    ['never', 'Never wait: clean whenever there is work'],
+    ['never', 'Never wait: censor whenever there is work'],
     ['video_transcode', `Wait while ${name} transcodes video (it needs the GPU)`],
     ['any_transcode', `Wait while ${name} transcodes anything`],
     ['playing', 'Wait while anything at all is playing'],
@@ -2087,7 +2087,7 @@ async function loadModels() {
           : `<button type="button" class="btn sm" data-action="download-model" data-name="${esc(m.name)}">${icon('download')}${m.error ? 'Try again' : 'Download'}</button>`)}
     </div>`).join('')
     + `<p class="hint">Kept in <code>${esc(data.folder)}</code>, so it survives updating the container.
-       Downloading it now saves a long wait on the first clean.</p>`;
+       Downloading it now saves a long wait on the first censor run.</p>`;
   clearTimeout(loadModels._t);
   if (data.items.some((m) => m.downloading)) loadModels._t = setTimeout(loadModels, 1500);
   else if (loadModels._was) loadSetup();
@@ -2109,7 +2109,7 @@ function renderHardwareNote() {
   const note = $('#hardware-note');
   if (cudaPresent === null) return;
   const chosen = F('device').value;
-  const amd = 'An AMD card cannot be used here; point Cleanarr at your own Whisper server instead.';
+  const amd = 'An AMD card cannot be used here; point Cens-arr at your own Whisper server instead.';
   let msg; let bad = false;
   if (chosen === 'cuda' && !cudaPresent) {
     msg = `No NVIDIA GPU is visible to this container, so every job would fail. Choose CPU or "whatever is available". ${amd}`;
@@ -2169,7 +2169,7 @@ $('#path-recheck').addEventListener('click', () => { refreshPathReport(); loadSe
 function renderSecurity() {
   const auth = window.__auth || {};
   $('#security').innerHTML = auth.configured ? `
-    <p>Signed in as <strong>${esc(auth.username)}</strong>. Everyone who opens Cleanarr needs this password.</p>
+    <p>Signed in as <strong>${esc(auth.username)}</strong>. Everyone who opens Cens-arr needs this password.</p>
     <form id="sec-form" class="fields two" novalidate>
       <div class="field"><label for="sec-current">Current password</label>
         <input id="sec-current" type="password" autocomplete="current-password"></div>
@@ -2261,7 +2261,7 @@ function showGate(mode) {
   gateMode = mode;
   const setup = mode === 'setup';
   $('#gate-blurb').textContent = setup
-    ? 'Pick a username and password. You will need them each time you open Cleanarr.'
+    ? 'Pick a username and password. You will need them each time you open Cens-arr.'
     : 'Sign in to continue.';
   $('#gate-submit').textContent = setup ? 'Create account' : 'Sign in';
   $('#gate-confirm-row').hidden = !setup;
@@ -2324,7 +2324,7 @@ async function checkAuth() {
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/static/sw.js', { scope: '/' })
-      .catch((err) => console.info('[cleanarr] no service worker:', err.message));
+      .catch((err) => console.info('[Cens-arr] no service worker:', err.message));
   });
 }
 

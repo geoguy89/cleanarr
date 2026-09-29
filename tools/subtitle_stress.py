@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
 
-from cleanarr import sounds, subtitles, words  # noqa: E402
+from censarr import sounds, subtitles, words  # noqa: E402
 
 M = words.Matcher(context_words=frozenset())
 ROWS: list[tuple[str, str, str, str, str]] = []     # category, heard, caption, expected, got

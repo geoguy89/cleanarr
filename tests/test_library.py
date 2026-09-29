@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from cleanarr import arr, config, library
+from censarr import arr, config, library
 
 
 # ---------------------------------------------------------------- Sonarr

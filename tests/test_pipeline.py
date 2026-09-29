@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from cleanarr import asr, config, db, judge, media, pipeline
+from censarr import asr, config, db, judge, media, pipeline
 from mediakit import make_media, rms, samples
 
 pytestmark = pytest.mark.ffmpeg
@@ -196,7 +196,7 @@ def test_every_muting_setting_reaches_ffmpeg(home, settings, fake_asr, episode, 
 def test_keep_backup_leaves_the_original_beside_it(home, settings, fake_asr, episode):
     settings.keep_backup = True
     run(episode, settings, home / "cache")
-    backup = episode.with_suffix(episode.suffix + ".cleanarr-backup")
+    backup = episode.with_suffix(episode.suffix + ".censarr-backup")
     assert backup.exists()
     assert media.probe(backup).cleaned_track is None
 

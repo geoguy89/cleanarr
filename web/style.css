@@ -1,4 +1,4 @@
-/* Cleanarr. One stylesheet, tokens first, then layout, then components.
+/* Cens-arr. One stylesheet, tokens first, then layout, then components.
 
    Dark by default and light when the system asks for it. Every colour pair
    used for text is checked for contrast (tests/test_ui.py): 4.5:1 for body

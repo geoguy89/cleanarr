@@ -1,6 +1,6 @@
 """Speech in, cleaned track out: espeak-ng, real Whisper (tiny.en on CPU), real ffmpeg.
 
-Slow the first time (downloads tiny.en, ~75 MB). Set CLEANARR_TEST_MODELS to a
+Slow the first time (downloads tiny.en, ~75 MB). Set CENSARR_TEST_MODELS to a
 folder to keep the model between runs.
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from cleanarr import config, db, media, pipeline, words
+from censarr import config, db, media, pipeline, words
 from mediakit import audio_tags, make_media, rms, samples, srt, streams
 
 pytestmark = [pytest.mark.e2e, pytest.mark.ffmpeg]
@@ -38,7 +38,7 @@ def speech(tmp_path_factory) -> Path:
 
 @pytest.fixture(scope="module")
 def models(tmp_path_factory) -> Path:
-    keep = os.environ.get("CLEANARR_TEST_MODELS")
+    keep = os.environ.get("CENSARR_TEST_MODELS")
     folder = Path(keep) if keep else tmp_path_factory.mktemp("models")
     folder.mkdir(parents=True, exist_ok=True)
     return folder

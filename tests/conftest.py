@@ -15,13 +15,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
 
 # Module-level paths in the app are read from the environment at import time.
-_BOOT = Path(tempfile.mkdtemp(prefix="cleanarr-test-"))
-os.environ.setdefault("CLEANARR_CONFIG", str(_BOOT))
-os.environ.setdefault("CLEANARR_DB", str(_BOOT / "cleanarr.sqlite"))
-os.environ.setdefault("CLEANARR_CACHE", str(_BOOT / "cache"))
-os.environ.setdefault("CLEANARR_WEB", str(ROOT / "web"))
+_BOOT = Path(tempfile.mkdtemp(prefix="censarr-test-"))
+os.environ.setdefault("CENSARR_CONFIG", str(_BOOT))
+os.environ.setdefault("CENSARR_DB", str(_BOOT / "censarr.sqlite"))
+os.environ.setdefault("CENSARR_CACHE", str(_BOOT / "cache"))
+os.environ.setdefault("CENSARR_WEB", str(ROOT / "web"))
 
-from cleanarr import config, db, media  # noqa: E402
+from censarr import config, db, media  # noqa: E402
 
 HAVE_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 
@@ -38,13 +38,13 @@ def home(tmp_path, monkeypatch):
     """A fresh /config: settings file, database and cache, all empty."""
     monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.yaml")
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "cleanarr.sqlite")
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "censarr.sqlite")
     monkeypatch.setattr(db, "_local", threading.local())
     monkeypatch.setattr(db, "_schema_ready", False)
     media.set_clean_title(media.DEFAULT_CLEAN_TITLE)
     # Library lists are cached in the app for a minute; each test starts clean.
-    if "cleanarr.main" in sys.modules:
-        sys.modules["cleanarr.main"].forget_listings()
+    if "censarr.main" in sys.modules:
+        sys.modules["censarr.main"].forget_listings()
     yield tmp_path
     media.set_clean_title(media.DEFAULT_CLEAN_TITLE)
 
@@ -70,7 +70,7 @@ def client(home, monkeypatch):
     """The API, with no worker thread running and the cache in the temp dir."""
     from fastapi.testclient import TestClient
 
-    from cleanarr import main
+    from censarr import main
     monkeypatch.setattr(main, "CACHE_DIR", home / "cache")
     (home / "cache").mkdir(exist_ok=True)
     return TestClient(main.app)

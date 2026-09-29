@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-<title>Cleanarr</title>
+<title>Cens-arr</title>
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#232a38"/><stop offset="1" stop-color="#11141b"/></linearGradient>
   <radialGradient id="glow" cx=".45" cy=".62" r=".5"><stop offset="0" stop-color="#4ec98a" stop-opacity=".22"/><stop offset="1" stop-color="#4ec98a" stop-opacity="0"/></radialGradient>

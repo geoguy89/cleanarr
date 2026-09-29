@@ -3,14 +3,14 @@
 For each file, the English text subtitles inside it are the answer key. They
 are damaged the ways borrowed subtitles go wrong - a steady offset, drift at
 advert breaks, another frame rate, another film's text - lined up again with
-Cleanarr's own code, and compared with the key: where each line lands, and what
+Cens-arr's own code, and compared with the key: where each line lands, and what
 each detection is judged to be. "risky" counts detections the key does not call
 "differs" but the damaged copy does: the verdict that can leave a word unmuted.
 
 Nothing is written to the media. Run it in a throwaway container with the media
 read-only and this install's config (for its settings and cached transcripts):
 
-    docker run --rm --gpus all --entrypoint python3       -v /mnt/user/data:/data:ro -v /mnt/user/appdata/cleanarr:/config       -v "$PWD/tools:/tools" cleanarr:latest /tools/subtitle_audit.py files.txt out.json
+    docker run --rm --gpus all --entrypoint python3       -v /mnt/user/data:/data:ro -v /mnt/user/appdata/censarr:/config       -v "$PWD/tools:/tools" cleanarr:latest /tools/subtitle_audit.py files.txt out.json
 
 files.txt lists one media path per line, as the container sees it.
 """
@@ -23,7 +23,7 @@ from dataclasses import replace
 from pathlib import Path
 
 sys.path.insert(0, "/app")
-from cleanarr import asr, config, media, subtitles, words  # noqa
+from censarr import asr, config, media, subtitles, words  # noqa
 
 FILES = [l.strip() for l in open(sys.argv[1], encoding="utf8") if l.strip()]
 OUT = sys.argv[2] if len(sys.argv) > 2 else "subtitle_audit.json"

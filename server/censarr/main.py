@@ -17,18 +17,19 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
+from . import env
 from . import arr, auth, config, db, judge, library, media, validate, words
 from .worker import Worker
 
-WEB_DIR = Path(os.environ.get("CLEANARR_WEB", "/app/web"))
-CACHE_DIR = Path(os.environ.get("CLEANARR_CACHE", "/config/cache"))
+WEB_DIR = Path(env.get("WEB", "/app/web"))
+CACHE_DIR = Path(env.get("CACHE", "/config/cache"))
 
 worker = Worker(CACHE_DIR)
 
 # For the pages that ask the library two slow questions at once (Sonarr and
 # the media server, say). Both are the remote service waiting on its own
 # database, so they overlap cleanly.
-POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="cleanarr-arr")
+POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="censarr-arr")
 
 
 def _startup() -> None:
@@ -36,7 +37,7 @@ def _startup() -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     resumed = db.requeue_interrupted()
     if resumed:
-        print(f"[cleanarr] re-queued {resumed} job(s) interrupted by a restart",
+        print(f"[censarr] re-queued {resumed} job(s) interrupted by a restart",
               flush=True)
     worker.start()
     # Learn the import dates now, so the first person to sort by "recently
@@ -52,7 +53,7 @@ async def _lifespan(_app: FastAPI):
     worker.stop()
 
 
-app = FastAPI(title="Cleanarr", docs_url="/api/docs", redoc_url=None, lifespan=_lifespan)
+app = FastAPI(title="Cens-arr", docs_url="/api/docs", redoc_url=None, lifespan=_lifespan)
 
 
 class _Compress:
@@ -93,7 +94,7 @@ async def _require_login(request: Request, call_next):
     if not settings.auth_user or auth.is_open(request.url.path):
         return await call_next(request)
 
-    token = request.cookies.get(auth.COOKIE, "")
+    token = request.cookies.get(auth.COOKIE) or request.cookies.get(auth.OLD_COOKIE, "")
     if auth.verify(token, settings.auth_secret, settings.auth_user):
         return await call_next(request)
     if request.url.path.startswith(auth.WEBHOOK_PATHS):
@@ -102,8 +103,8 @@ async def _require_login(request: Request, call_next):
                 and auth.check_password(given[1], settings.auth_hash, settings.auth_salt)):
             return await call_next(request)
         return JSONResponse(
-            {"error": "set the webhook's username and password to the Cleanarr login"},
-            status_code=401, headers={"WWW-Authenticate": 'Basic realm="Cleanarr"'})
+            {"error": "set the webhook's username and password to the Cens-arr login"},
+            status_code=401, headers={"WWW-Authenticate": 'Basic realm="Cens-arr"'})
     return JSONResponse({"error": "not signed in"}, status_code=401)
 
 
@@ -371,12 +372,12 @@ def download_model(name: str):
         _download_errors.pop(name, None)
         try:
             _pull_model(name, str(CACHE_DIR / "models"))
-            print(f"[cleanarr] downloaded speech model {name}", flush=True)
+            print(f"[censarr] downloaded speech model {name}", flush=True)
         except Exception as exc:  # noqa: BLE001
             _download_errors[name] = (
                 f"could not download {name}: {exc}. The container needs to reach "
                 f"huggingface.co")
-            print(f"[cleanarr] could not download {name}: {exc}", flush=True)
+            print(f"[censarr] could not download {name}: {exc}", flush=True)
         finally:
             _downloading.pop(name, None)
 
@@ -552,10 +553,10 @@ def judge_pull():
                 for line in resp.iter_lines():
                     if '"error"' in line:
                         _download_errors["__ollama__"] = line[:300]
-            print(f"[cleanarr] Ollama pulled {settings.judge_model}", flush=True)
+            print(f"[censarr] Ollama pulled {settings.judge_model}", flush=True)
         except Exception as exc:  # noqa: BLE001
             _download_errors["__ollama__"] = str(exc)
-            print(f"[cleanarr] Ollama pull failed: {exc}", flush=True)
+            print(f"[censarr] Ollama pull failed: {exc}", flush=True)
         finally:
             _downloading.pop("__ollama__", None)
 
@@ -1011,7 +1012,7 @@ def movies():
 
 POSTER_FETCHES = threading.Semaphore(6)
 POSTER_SIZE = "w400"
-POSTER_WARMERS = ThreadPoolExecutor(max_workers=2, thread_name_prefix="cleanarr-posters")
+POSTER_WARMERS = ThreadPoolExecutor(max_workers=2, thread_name_prefix="censarr-posters")
 _warming: set[str] = set()
 _warm_lock = threading.Lock()
 
@@ -1179,7 +1180,7 @@ async def sonarr_webhook(request: Request):
         payload = {}
     event = str(payload.get("eventType", ""))
     if event in ("Test", "test"):
-        return {"ok": True, "message": "Cleanarr heard you"}
+        return {"ok": True, "message": "Cens-arr heard you"}
     threading.Thread(target=_webhook_check, daemon=True).start()
     return {"ok": True, "event": event}
 
@@ -1189,7 +1190,7 @@ def _webhook_check() -> None:
         worker.check_monitored()
         worker.nudge()
     except Exception as exc:  # noqa: BLE001
-        print(f"[cleanarr] webhook check failed: {exc}", flush=True)
+        print(f"[censarr] webhook check failed: {exc}", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1382,12 +1383,12 @@ def _check_listening(settings) -> dict:
         return {**item, "state": "problem", "detail": _download_errors[name]}
     if not _is_complete(name):
         return {**item, "state": "todo",
-                "detail": f"Download {name} now, rather than during the first clean."}
+                "detail": f"Download {name} now, rather than during the first censor run."}
     return {**item, "state": "ok", "detail": f"{name} is downloaded."}
 
 
 def _check_first_clean() -> dict:
-    item = {"key": "first_clean", "title": "Clean one episode", "section": "shows"}
+    item = {"key": "first_clean", "title": "Censor one episode", "section": "shows"}
     counts = db.count_by_status()
     if counts.get("done") or counts.get("skipped"):
         return {**item, "state": "ok", "detail": "Done at least once."}
@@ -1420,7 +1421,7 @@ def setup_status():
                 "key": "subtitle_plugin", "title": "Let Jellyfin find subtitles",
                 "section": "server", "state": "todo",
                 "detail": "Jellyfin has no subtitle plugin, so files without subtitles are "
-                          "cleaned by listening alone. In Jellyfin: Dashboard > Plugins > "
+                          "censored by listening alone. In Jellyfin: Dashboard > Plugins > "
                           "Catalog > Open Subtitles, then add your OpenSubtitles account.",
             })
     return {"required": required, "optional": optional,

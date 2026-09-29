@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cleanarr import sounds
+from censarr import sounds
 
 
 @pytest.mark.parametrize("heard, shown", [

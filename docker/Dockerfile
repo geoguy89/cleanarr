@@ -7,9 +7,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     HF_HOME=/config/cache/huggingface \
-    CLEANARR_CONFIG=/config \
-    CLEANARR_CACHE=/config/cache \
-    CLEANARR_WEB=/app/web
+    CENSARR_CONFIG=/config \
+    CENSARR_CACHE=/config/cache \
+    CENSARR_WEB=/app/web
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip ffmpeg tini ca-certificates \
@@ -22,9 +22,9 @@ COPY server/requirements.txt /app/requirements.txt
 RUN pip3 install --no-cache-dir --upgrade "pip>=24" \
     && pip3 install --no-cache-dir -r /app/requirements.txt
 
-COPY server/cleanarr /app/cleanarr
+COPY server/censarr /app/censarr
 COPY web /app/web
 
 EXPOSE 8477
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["python3", "-m", "uvicorn", "cleanarr.main:app", "--host", "0.0.0.0", "--port", "8477"]
+CMD ["python3", "-m", "uvicorn", "censarr.main:app", "--host", "0.0.0.0", "--port", "8477"]

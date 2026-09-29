@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from cleanarr import config, db, worker
+from censarr import config, db, worker
 
 
 def iso(epoch: float) -> str:

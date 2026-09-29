@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from cleanarr import db, judge
+from censarr import db, judge
 
 
 @pytest.mark.parametrize("word", ["Christ", "nuts", "spade", "tit", "prick", "shag"])

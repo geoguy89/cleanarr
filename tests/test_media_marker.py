@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cleanarr import media
+from censarr import media
 
 
 @pytest.fixture(autouse=True)
@@ -192,3 +192,9 @@ def test_filter_script_mutes_each_span(tmp_path):
         assert empty.read_text() == "[0:a:0]anull[clean]"
     finally:
         empty.unlink()
+
+
+def test_tracks_named_before_the_rename_are_still_ours():
+    """Cens-arr was Cleanarr, and its default track name was "Cleaned - English"."""
+    media.set_clean_title("Censored - English")
+    assert track(1, title="Cleaned - English").is_cleaned

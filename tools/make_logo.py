@@ -1,4 +1,4 @@
-"""Draw the Cleanarr mark: a mouth with a bar of soap in it, and the swear it
+"""Draw the Cens-arr mark: a mouth with a bar of soap in it, and the swear it
 was about to say in a speech bubble.
 
 The drawing is one SVG, built here and written to web/logo.svg - which is also
@@ -91,7 +91,7 @@ def svg(size: int | None = None, rounded: bool = True, scale: float = 1.0) -> st
                     for x, w, h in ((50, 24, 38), (76, 21, 41), (99, 20, 43),
                                     (121, 20, 43), (143, 21, 41), (166, 24, 38)))
     return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"{dims}>
-<title>Cleanarr</title>
+<title>Cens-arr</title>
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{BG_TOP}"/><stop offset="1" stop-color="{BG_BOTTOM}"/></linearGradient>
   <radialGradient id="glow" cx=".45" cy=".62" r=".5"><stop offset="0" stop-color="#4ec98a" stop-opacity=".22"/><stop offset="1" stop-color="#4ec98a" stop-opacity="0"/></radialGradient>

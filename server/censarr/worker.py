@@ -64,7 +64,7 @@ class Worker:
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
-        self._thread = threading.Thread(target=self._loop, name="cleanarr-worker",
+        self._thread = threading.Thread(target=self._loop, name="censarr-worker",
                                         daemon=True)
         self._thread.start()
         # Watching for new episodes runs on its own thread, because the worker
@@ -72,7 +72,7 @@ class Worker:
         # meant an episode that landed during a long queue waited for the whole
         # queue before anyone noticed it - the opposite of "new episodes first".
         self._watch_thread = threading.Thread(target=self._watch_loop,
-                                              name="cleanarr-monitor", daemon=True)
+                                              name="censarr-monitor", daemon=True)
         self._watch_thread.start()
 
     def _watch_loop(self) -> None:
@@ -81,7 +81,7 @@ class Worker:
                 if self.check_monitored():
                     self.nudge()
             except Exception as exc:  # noqa: BLE001
-                print(f"[cleanarr] monitor check failed: {exc}", flush=True)
+                print(f"[censarr] monitor check failed: {exc}", flush=True)
             self._stop.wait(timeout=MONITOR_INTERVAL_SECONDS)
 
     def stop(self) -> None:
@@ -147,7 +147,7 @@ class Worker:
             db.monitor_touch("sonarr", row["source_id"])
         self.last_monitor_queued = queued
         if queued:
-            print(f"[cleanarr] queued {queued} new episode(s) from monitored shows",
+            print(f"[censarr] queued {queued} new episode(s) from monitored shows",
                   flush=True)
         return queued
 

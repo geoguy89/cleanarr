@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cleanarr import config, db, main, pipeline
+from censarr import config, db, main, pipeline
 
 
 # ---------------------------------------------------------------- settings
@@ -33,9 +33,16 @@ def test_renaming_the_track_remembers_the_old_name(client, settings):
     client.put("/api/settings", json={"track_title": "Family"})
     s = config.load()
     assert s.track_title == "Family"
-    assert s.known_track_titles == ["Cleaned - English", "English - Censored"]
+    assert s.known_track_titles == ["Censored - English", "English - Censored"]
     client.put("/api/settings", json={"track_title": "  "})
-    assert config.load().track_title == "Cleaned - English"
+    assert config.load().track_title == "Censored - English"
+
+
+def test_a_config_from_before_the_rename_keeps_its_tracks_recognised(home):
+    config.CONFIG_FILE.write_text("track_title: Cleaned - English\n", encoding="utf8")
+    s = config.load()
+    assert s.track_title == "Censored - English"
+    assert "Cleaned - English" in s.known_track_titles
 
 
 def test_old_config_keys_are_migrated(home):
@@ -205,7 +212,7 @@ def test_queue_endpoints(client, settings):
 
 
 def test_job_detail_lists_detections(client, settings):
-    from cleanarr import words
+    from censarr import words
     job = db.enqueue(kind="file", title="x", path="/tv/x.mkv")
     db.save_detections(job, [words.Match(1.0, 1.2, "shit", "strong")])
     got = client.get(f"/api/jobs/{job}").json()
@@ -224,7 +231,7 @@ def test_remove_all_needs_the_phrase(client, settings):
 
 def test_webhook_test_event(client, settings):
     r = client.post("/api/webhook/sonarr", json={"eventType": "Test"})
-    assert r.json()["message"] == "Cleanarr heard you"
+    assert r.json()["message"] == "Cens-arr heard you"
 
 
 def test_file_info(client, settings, tmp_path):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cleanarr import config, db, main
+from censarr import config, db, main
 
 
 def states(client) -> dict:
@@ -52,7 +52,7 @@ def test_problems_are_named(client, settings, stub, monkeypatch):
     settings.sonarr = config.ArrConfig(url=stub.url, api_key="bad")
     settings.device = "cuda"
     config.save(settings)
-    monkeypatch.setattr("cleanarr.asr._cuda_available", lambda: False)
+    monkeypatch.setattr("censarr.asr._cuda_available", lambda: False)
     got = states(client)
     assert got["library"] == ("problem", "Sonarr rejected the API key")
     assert got["listening"][0] == "problem"

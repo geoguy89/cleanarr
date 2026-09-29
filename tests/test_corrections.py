@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cleanarr import config, db, words
+from censarr import config, db, words
 
 
 @pytest.fixture

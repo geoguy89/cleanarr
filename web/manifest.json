@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Cleanarr",
-  "short_name": "Cleanarr",
-  "description": "A cleaned audio track for the shows you already own.",
+  "name": "Cens-arr",
+  "short_name": "Cens-arr",
+  "description": "A censored audio track for the shows you already own.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

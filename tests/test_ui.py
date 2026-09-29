@@ -10,7 +10,7 @@ import re
 
 import pytest
 
-from cleanarr import auth, config, db
+from censarr import auth, config, db
 
 pytestmark = pytest.mark.ui
 sync_api = pytest.importorskip("playwright.sync_api")
@@ -23,7 +23,7 @@ PHONE = {"width": 390, "height": 844}
 @pytest.fixture(scope="module")
 def demo():
     from demo import Demo
-    from cleanarr import main
+    from censarr import main
     saved = {(mod, name): getattr(mod, name) for mod, name in (
         (config, "CONFIG_DIR"), (config, "CONFIG_FILE"), (db, "DB_PATH"),
         (db, "_local"), (db, "_schema_ready"), (main, "CACHE_DIR"))}
@@ -262,7 +262,7 @@ def test_every_setting_saves_and_comes_back(desk, demo, tmp_path):
     assert (s.recheck_url, s.recheck_model, s.recheck_api_key) == (
         "http://speaches.test:8000", "Systran/faster-whisper-large-v3", "again-key")
     assert (s.pad_start, s.pad_end, s.fade, s.track_title) == (0.2, 0.3, 0.05, "Family Friendly")
-    assert "Cleaned - English" in s.known_track_titles
+    assert "Censored - English" in s.known_track_titles
     assert (s.judge_url, s.judge_model, s.judge_threads) == ("http://ollama.test:11434", "qwen3.5:4b", 4)
     assert (s.media_server, s.plex_url, s.plex_token, s.hold_policy) == (
         "plex", "http://plex.test:32400", "plex-token", "playing")
@@ -322,7 +322,7 @@ def test_leaving_with_unsaved_changes_asks(desk):
     page.locator(".sidebar [data-nav=home]").click()
     page.locator("#ask").get_by_role("button", name="Discard changes").click()
     page.locator("#view-home").wait_for()
-    assert config.load().track_title == "Cleaned - English"
+    assert config.load().track_title == "Censored - English"
 
 
 # ---------------------------------------------------------------- that was wrong

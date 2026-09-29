@@ -98,7 +98,7 @@ class Demo:
     """Everything a UI test needs: stub services, files, settings, jobs, the app."""
 
     def __init__(self, root: Path | None = None):
-        self.root = Path(root or tempfile.mkdtemp(prefix="cleanarr-demo-"))
+        self.root = Path(root or tempfile.mkdtemp(prefix="censarr-demo-"))
         self.config = self.root / "config"
         self.media = self.root / "media"
         self.art = self.root / "art"
@@ -213,7 +213,7 @@ class Demo:
 
     # ------------------------------------------------------------ the app
     def configure(self, **overrides):
-        from cleanarr import config
+        from censarr import config
         settings = config.Settings()
         settings.sonarr = config.ArrConfig(url=self.sonarr.url, api_key="demo-sonarr-key")
         settings.media_server = "plex"
@@ -227,10 +227,10 @@ class Demo:
 
     def point_app_here(self):
         """Aim the app's module-level paths at this demo's folders."""
-        from cleanarr import config, db, main
+        from censarr import config, db, main
         config.CONFIG_DIR = self.config
         config.CONFIG_FILE = self.config / "config.yaml"
-        db.DB_PATH = self.config / "cleanarr.sqlite"
+        db.DB_PATH = self.config / "censarr.sqlite"
         db._local = threading.local()
         db._schema_ready = False
         main.CACHE_DIR = self.config / "cache"
@@ -241,7 +241,7 @@ class Demo:
         (model / "model.bin").write_bytes(b"\0" * 1024)
 
     def seed_jobs(self):
-        from cleanarr import db, words
+        from censarr import db, words
         now = time.time()
 
         def job(show_idx, season, number, status, muted=0, message="", size=0, ago=0.0):
@@ -280,11 +280,11 @@ class Demo:
                             confidence=0.62, subtitle="More caulk here.", subtitle_state="soundalike")]
         for n in range(1, 9):
             j = job(0, 1, n, "done", muted=5 + n, size=88_000_000 + n * 1_000_000,
-                    message=f"added “Cleaned - English” · {5 + n} muted", ago=86400 * (10 - n))
+                    message=f"added “Censored - English” · {5 + n} muted", ago=86400 * (10 - n))
             db.save_detections(j, detections[: 2 + n % 4], left if n == 2 else [])
         for n in range(1, 4):
             job(1, 1, n, "done", muted=3 * n, size=92_000_000, ago=3600 * n,
-                message=f"added “Cleaned - English” · {3 * n} muted")
+                message=f"added “Censored - English” · {3 * n} muted")
         job(2, 1, 1, "skipped", message="nothing to mute - no profanity found", ago=7200)
         self.running = job(1, 1, 4, "running", ago=0)
         db.update(self.running, stage="listening", progress=0.38, message="listening for profanity")
@@ -298,7 +298,7 @@ class Demo:
     def serve(self, port: int | None = None):
         import uvicorn
 
-        from cleanarr import main
+        from censarr import main
         port = port or free_port()
         # No lifespan: the worker must not start, or it would run the queued
         # demo jobs against empty files.
@@ -330,7 +330,7 @@ class Demo:
 
 
 if __name__ == "__main__":
-    os.environ.setdefault("CLEANARR_WEB", str(HERE.parent / "web"))
+    os.environ.setdefault("CENSARR_WEB", str(HERE.parent / "web"))
     demo = Demo()
     url = demo.up(port=int(os.environ.get("PORT", "8477")))
     print(f"demo running at {url} (Ctrl+C to stop)")

@@ -1,12 +1,12 @@
 """What has actually been muted, so the word lists can be judged on evidence.
 
-Every word Cleanarr has silenced across the library, with how often, in how
+Every word Cens-arr has silenced across the library, with how often, in how
 many episodes, and where to find examples. The point is to answer "is this
 word worth muting, always or never?" by looking rather than guessing.
 
 Run on Tower:
-    docker exec cleanarr python3 /config/word_report.py
-    docker exec cleanarr python3 /config/word_report.py --word hell
+    docker exec censarr python3 /config/word_report.py
+    docker exec censarr python3 /config/word_report.py --word hell
 """
 
 from __future__ import annotations
@@ -17,7 +17,8 @@ import re
 import sqlite3
 from collections import defaultdict
 
-DB = os.environ.get("CLEANARR_DB", "/config/cleanarr.sqlite")
+DB = os.environ.get("CENSARR_DB") or os.environ.get("CLEANARR_DB") or (
+    "/config/cleanarr.sqlite" if os.path.exists("/config/cleanarr.sqlite") else "/config/censarr.sqlite")
 
 
 def normalise(text: str) -> str:

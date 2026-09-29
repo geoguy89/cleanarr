@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-os.environ.setdefault("CLEANARR_WEB", str(ROOT / "web"))
+os.environ.setdefault("CENSARR_WEB", str(ROOT / "web"))
 sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "server"))
 
@@ -57,7 +57,7 @@ def main() -> None:
             page.keyboard.press("Escape")
             go("cleaned")
             shot(page, "cleaned")
-            page.locator("#view-cleaned .row", has_text=re.compile("The Quiet Harbour.*S01E07")).locator(
+            page.locator("#view-cleaned .row", has_text=re.compile("The Quiet Harbour.*S01E02")).locator(
                 "[data-action=open-job]").click()
             page.locator(".detection").first.wait_for()
             flagged = page.locator(".detection", has_text="caulk")

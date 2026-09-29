@@ -2,7 +2,7 @@ name: Build and publish the image
 
 # Publishes to GitHub's own container registry, so the compose example in the
 # README actually works for someone who has not cloned the repository. Without
-# this, `image: cleanarr:latest` means "a local image called cleanarr" and
+# this, `image: censarr:latest` means "a local image called censarr" and
 # `docker compose up` fails with "pull access denied" - which is not an obvious
 # error to read.
 #
@@ -86,9 +86,13 @@ jobs:
         with:
           # Both registries get the same tags. docker/metadata-action takes a
           # list, and build-push-action pushes to every name it produces.
+          # The project was called Cleanarr: installs pulling the old name
+          # keep getting updates, under the same tags.
           images: |
             ghcr.io/${{ env.IMAGE_NAME }}
+            ghcr.io/${{ github.repository_owner }}/cleanarr
             name=docker.io/${{ env.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }},enable=${{ steps.dockerhub.outcome == 'success' }}
+            name=docker.io/${{ env.DOCKERHUB_USERNAME }}/cleanarr,enable=${{ steps.dockerhub.outcome == 'success' }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}

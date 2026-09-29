@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Cleanarr</title>
+<title>Cens-arr</title>
 <link rel="icon" href="/static/logo.svg?v=5" type="image/svg+xml">
 <link rel="alternate icon" href="/static/icon.png?v=5" type="image/png">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=5">
-<meta name="application-name" content="Cleanarr">
+<meta name="application-name" content="Cens-arr">
 <link rel="manifest" href="/static/manifest.json" crossorigin="use-credentials">
 <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
@@ -15,7 +15,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Cleanarr">
+<meta name="apple-mobile-web-app-title" content="Cens-arr">
 <link rel="stylesheet" href="/static/style.css?v=6">
 </head>
 <body>
@@ -65,7 +65,7 @@
 <div id="gate" class="gate" hidden>
   <form id="gate-form" class="gate-box" novalidate>
     <img src="/static/logo.svg?v=5" alt="" class="gate-logo" width="88" height="88">
-    <h1 class="gate-title">Cleanarr</h1>
+    <h1 class="gate-title">Cens-arr</h1>
     <p id="gate-blurb" class="muted"></p>
     <div class="field">
       <label for="gate-user">Username</label>
@@ -90,7 +90,7 @@
   <nav class="sidebar" aria-label="Main">
     <a class="brand" href="#/home">
       <img src="/static/logo.svg?v=5" alt="" width="40" height="40">
-      <span>Cleanarr</span>
+      <span>Cens-arr</span>
     </a>
     <ul class="nav">
       <li><a href="#/home" data-nav="home"><svg class="i"><use href="#i-home"/></svg><span>Home</span></a></li>
@@ -98,7 +98,7 @@
       <li><a href="#/movies" data-nav="movies"><svg class="i"><use href="#i-film"/></svg><span>Movies</span></a></li>
       <li class="secondary" id="nav-upcoming"><a href="#/upcoming" data-nav="upcoming"><svg class="i"><use href="#i-calendar"/></svg><span>Upcoming</span></a></li>
       <li><a href="#/queue" data-nav="queue"><svg class="i"><use href="#i-queue"/></svg><span>Queue</span><span class="count" id="queue-count" aria-label="waiting"></span></a></li>
-      <li class="secondary"><a href="#/cleaned" data-nav="cleaned"><svg class="i"><use href="#i-done"/></svg><span>Cleaned</span><span class="count subtle" id="cleaned-count"></span></a></li>
+      <li class="secondary"><a href="#/cleaned" data-nav="cleaned"><svg class="i"><use href="#i-done"/></svg><span>Censored</span><span class="count subtle" id="cleaned-count"></span></a></li>
       <li class="secondary"><a href="#/settings" data-nav="settings"><svg class="i"><use href="#i-settings"/></svg><span>Settings</span><span class="dot" id="settings-dot" hidden title="Setup is not finished"></span></a></li>
       <li class="more-item"><button type="button" id="more-button" aria-haspopup="dialog" aria-controls="more-sheet"><svg class="i"><use href="#i-more"/></svg><span>More</span><span class="dot" id="more-dot" hidden></span></button></li>
     </ul>
@@ -110,7 +110,7 @@
     <section class="view" id="view-home" data-title="Home" hidden>
       <header class="page-head">
         <h1 tabindex="-1">Home</h1>
-        <p class="lede muted" id="home-lede">What landed lately, and what cleaning has cost so far.</p>
+        <p class="lede muted" id="home-lede">What landed lately, and what censoring has cost so far.</p>
       </header>
       <div id="home-setup"></div>
       <div id="home-now"></div>
@@ -146,9 +146,9 @@
         <label class="select-inline"><span class="sr-only">Show</span>
           <select id="show-filter">
             <option value="all">All shows</option>
-            <option value="cleaned">Has cleaned episodes</option>
-            <option value="monitored">Cleaning new episodes</option>
-            <option value="untouched">Not cleaned yet</option>
+            <option value="cleaned">Has censored episodes</option>
+            <option value="monitored">Censoring new episodes</option>
+            <option value="untouched">Not censored yet</option>
             <option value="nofiles">Nothing on disk yet</option>
           </select></label>
         <label class="select-inline"><span class="sr-only">Sort</span>
@@ -175,8 +175,8 @@
         <label class="select-inline"><span class="sr-only">Show</span>
           <select id="movie-filter">
             <option value="all">All movies</option>
-            <option value="cleaned">Cleaned</option>
-            <option value="untouched">Not cleaned yet</option>
+            <option value="cleaned">Censored</option>
+            <option value="untouched">Not censored yet</option>
           </select></label>
         <label class="select-inline"><span class="sr-only">Sort</span>
           <select id="movie-sort">
@@ -192,8 +192,8 @@
     <section class="view" id="view-upcoming" data-title="Upcoming" hidden>
       <header class="page-head">
         <h1 tabindex="-1">Upcoming</h1>
-        <p class="lede muted">Sonarr's calendar. Switch on <strong>Clean new
-          episodes</strong> for a show and each episode is cleaned as it
+        <p class="lede muted">Sonarr's calendar. Switch on <strong>Censor new
+          episodes</strong> for a show and each episode is censored as it
           downloads.</p>
       </header>
       <div class="toolbar">
@@ -208,8 +208,8 @@
           <select id="calendar-filter">
             <option value="all">Everything airing</option>
             <option value="missing">Not downloaded yet</option>
-            <option value="monitored">Shows I clean</option>
-            <option value="unmonitored">Shows I don't clean</option>
+            <option value="monitored">Shows I censor</option>
+            <option value="unmonitored">Shows I don't censor</option>
           </select></label>
         <span id="calendar-count" class="muted count-note" aria-live="polite"></span>
       </div>
@@ -243,23 +243,23 @@
       <div id="job-list"></div>
     </section>
 
-    <!-- ============================================================= cleaned -->
-    <section class="view" id="view-cleaned" data-title="Cleaned" hidden>
+    <!-- ============================================================= censored -->
+    <section class="view" id="view-cleaned" data-title="Censored" hidden>
       <header class="page-head">
-        <h1 tabindex="-1">Cleaned</h1>
-        <p class="lede muted">Every file with a cleaned track right now, and
+        <h1 tabindex="-1">Censored</h1>
+        <p class="lede muted">Every file with a censored track right now, and
           what the extra tracks cost in disk.</p>
       </header>
       <div id="cleaned-stats" class="stats"></div>
       <div class="toolbar" role="search">
         <label class="search">
           <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
-          <span class="sr-only">Search what has been cleaned</span>
-          <input id="cleaned-search" type="search" placeholder="Search what's been cleaned" autocomplete="off">
+          <span class="sr-only">Search what has been censored</span>
+          <input id="cleaned-search" type="search" placeholder="Search what's been censored" autocomplete="off">
         </label>
         <label class="select-inline"><span class="sr-only">Show</span>
           <select id="cleaned-filter">
-            <option value="all">Everything cleaned</option>
+            <option value="all">Everything censored</option>
             <option value="check">Worth a listen</option>
           </select></label>
         <span id="cleaned-count-note" class="muted count-note" aria-live="polite"></span>
@@ -267,10 +267,10 @@
       <div id="cleaned-list"></div>
       <div class="danger-zone" id="remove-all-zone" hidden>
         <div>
-          <h2>Remove every cleaned track</h2>
-          <p class="muted">Takes the cleaned track out of every file. The
+          <h2>Remove every censored track</h2>
+          <p class="muted">Takes the censored track out of every file. The
             original audio is never touched, but putting them back means
-            cleaning everything again.</p>
+            censoring everything again.</p>
         </div>
         <button type="button" class="btn danger sm" id="remove-all">Remove all</button>
       </div>
@@ -306,7 +306,7 @@
               <header class="panel-head">
                 <h2 id="s-library-h"><span class="step">1</span>Your library</h2>
                 <p class="muted">Where the list of shows comes from. Films always
-                  come from your media server (Media server, below). Read-only: Cleanarr never
+                  come from your media server (Media server, below). Read-only: Cens-arr never
                   changes anything in either.</p>
               </header>
               <fieldset class="choices">
@@ -349,9 +349,9 @@
               <div id="lib-server" hidden></div>
 
               <div class="paths">
-                <h3>Can Cleanarr open the files?</h3>
+                <h3>Can Cens-arr open the files?</h3>
                 <p class="muted small">Your library says where each file is and
-                  Cleanarr opens that exact path, so mount the media into this
+                  Cens-arr opens that exact path, so mount the media into this
                   container at the paths the library reports.
                   <span id="path-note"></span></p>
                 <div id="path-report" aria-live="polite"></div>
@@ -434,7 +434,7 @@
               <div id="asr-remote" hidden>
                 <div class="callout"><svg class="i"><use href="#i-info"/></svg>
                   <p>The server must return <strong>word-level</strong>
-                  timestamps. Cleanarr mutes half a second around one word;
+                  timestamps. Cens-arr mutes half a second around one word;
                   with line timings it would blank four seconds to catch one
                   syllable. The test checks for this.</p></div>
                 <div class="fields two">
@@ -499,7 +499,7 @@
                 <div class="field"><label for="f-title">Name of the new track</label>
                   <input id="f-title" name="track_title" maxlength="80" autocomplete="off">
                   <p class="hint">Applies to tracks written from now on. Files
-                    cleaned under an older name are still recognised. Don't
+                    censored under an older name are still recognised. Don't
                     reuse a name your files' own tracks already have.</p>
                   <p class="error-text" data-error-for="track_title"></p></div>
               </div>
@@ -509,7 +509,7 @@
             <section class="panel" id="s-judge" aria-labelledby="s-judge-h">
               <header class="panel-head">
                 <h2 id="s-judge-h"><span class="step">5</span>Second opinion <span class="tag-optional">optional</span></h2>
-                <p class="muted">Every clean reads the subtitles first: the file's
+                <p class="muted">Every censor run reads the subtitles first: the file's
                   own, an <code>.srt</code> beside it, the media server's, another
                   copy's, or ones the media server searches for. A swear they have
                   is muted even where Whisper missed it; a swear they soften
@@ -575,11 +575,11 @@
             <section class="panel" id="s-server" aria-labelledby="s-server-h">
               <header class="panel-head">
                 <h2 id="s-server-h"><span class="step">6</span>Media server <span class="tag-optional">optional</span></h2>
-                <p class="muted">Where films come from, and where Cleanarr looks
+                <p class="muted">Where films come from, and where Cens-arr looks
                   for subtitles a file does not carry itself. Also tells Plex or
-                  Jellyfin a file changed, so the cleaned track shows up at once,
-                  and can pause cleaning while the server transcodes on the same
-                  GPU. The cleaned track works in both either way: it is an
+                  Jellyfin a file changed, so the censored track shows up at once,
+                  and can pause censoring while the server transcodes on the same
+                  GPU. The censored track works in both either way: it is an
                   ordinary extra audio stream with a name.</p>
               </header>
               <fieldset class="choices">
@@ -674,8 +674,8 @@
                 <input type="checkbox" name="keep_backup" role="switch">
                 <span class="track" aria-hidden="true"></span>
                 <span>Keep a copy of each original</span></label>
-                <p class="hint">Saved beside the file as <code>.cleanarr-backup</code>.
-                  Doubles the disk each cleaned file takes.</p></div>
+                <p class="hint">Saved beside the file as <code>.censarr-backup</code>.
+                  Doubles the disk each censored file takes.</p></div>
             </section>
           </form>
 
@@ -725,7 +725,7 @@
 <dialog id="more-sheet" class="menu-sheet" aria-label="More">
   <ul>
     <li><a href="#/upcoming" data-nav="upcoming" id="more-upcoming"><svg class="i"><use href="#i-calendar"/></svg>Upcoming</a></li>
-    <li><a href="#/cleaned" data-nav="cleaned"><svg class="i"><use href="#i-done"/></svg>Cleaned<span class="count subtle" id="more-cleaned-count"></span></a></li>
+    <li><a href="#/cleaned" data-nav="cleaned"><svg class="i"><use href="#i-done"/></svg>Censored<span class="count subtle" id="more-cleaned-count"></span></a></li>
     <li><a href="#/settings" data-nav="settings"><svg class="i"><use href="#i-settings"/></svg>Settings<span class="dot" id="more-settings-dot" hidden></span></a></li>
     <li id="more-signout" hidden><button type="button" data-signout><svg class="i"><use href="#i-signout"/></svg>Sign out</button></li>
   </ul>

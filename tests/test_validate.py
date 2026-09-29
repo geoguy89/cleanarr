@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cleanarr import config, validate
+from censarr import config, validate
 
 
 @pytest.mark.parametrize("value, want, problem", [

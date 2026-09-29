@@ -187,7 +187,7 @@ class Pipeline:
                 again = asr.transcribe_remote(clip, settings.recheck_url, settings.recheck_model,
                                               settings.recheck_api_key, timeout=120.0)
             except Exception as exc:  # noqa: BLE001
-                print(f"[cleanarr] second listen failed: {exc}", flush=True)
+                print(f"[censarr] second listen failed: {exc}", flush=True)
                 kept.append(replace(m, needs_review=True))
                 continue
             said = " ".join(str(w.get("word", "")).strip() for w in again.words)
@@ -215,7 +215,7 @@ class Pipeline:
                                         threads=settings.judge_threads,
                                         keep_alive=settings.judge_keep_alive)
         except Exception as exc:  # noqa: BLE001
-            print(f"[cleanarr] second opinion failed: {exc}", flush=True)
+            print(f"[censarr] second opinion failed: {exc}", flush=True)
             verdicts = {}
         muted, kept = [], []
         profane = {i for g in groups if verdicts.get(g.n, ("",))[0] == "PROFANE"
@@ -252,7 +252,7 @@ class Pipeline:
         original = media.probe(path)
         if original.cleaned_track is None:
             db.forget_cleaned(str(path))
-            return {"status": "skipped", "message": "there was no cleaned track to remove"}
+            return {"status": "skipped", "message": "there was no censored track to remove"}
         drop = self._ours(original, path, job_id)
         if not drop:
             raise RuntimeError(
@@ -261,9 +261,9 @@ class Pipeline:
                 f"the tool that made it")
 
         before = path.stat().st_size
-        work = Path(tempfile.mkdtemp(prefix="cleanarr-", dir=str(path.parent)))
+        work = Path(tempfile.mkdtemp(prefix="censarr-", dir=str(path.parent)))
         try:
-            self._stage(job_id, "remuxing", "removing the cleaned track")
+            self._stage(job_id, "remuxing", "removing the censored track")
             candidate = work / f"remux{path.suffix}"
             dropped = media.remove_cleaned_track(
                 original, candidate, drop=drop,
@@ -281,7 +281,7 @@ class Pipeline:
         db.forget_cleaned(str(path))
         note = arr.refresh_for(settings, str(path))
         return {"status": "done", "muted": 0, "added_bytes": 0,
-                "message": f"removed the cleaned track · {freed / 1e6:.0f} MB back · "
+                "message": f"removed the censored track · {freed / 1e6:.0f} MB back · "
                            f"{note}"}
 
     # -- the work ---------------------------------------------------------
@@ -302,7 +302,7 @@ class Pipeline:
             raise RuntimeError(
                 f"this file already has an audio track named "
                 f"“{settings.track_title}”, and nothing in the file says "
-                f"Cleanarr wrote it - pick a different name for the new track "
+                f"Cens-arr wrote it - pick a different name for the new track "
                 f"in Settings, so an existing track is never replaced by mistake")
         if existing and not force:
             return {"status": "skipped",
@@ -318,7 +318,7 @@ class Pipeline:
                 f"{needed / 1e9:.1f} GB")
 
         _sweep_stale_work(path.parent)
-        work = Path(tempfile.mkdtemp(prefix="cleanarr-", dir=str(path.parent)))
+        work = Path(tempfile.mkdtemp(prefix="censarr-", dir=str(path.parent)))
         try:
             self._stage(job_id, "extracting", "pulling out the audio")
             subtitle_file = work / "subtitles.srt"
@@ -406,7 +406,7 @@ class Pipeline:
                 cues = []
             matches, note = subtitles.annotate(matches, cues, transcript.words)
             if note:
-                print(f"[cleanarr] job {job_id}: {note}", flush=True)
+                print(f"[censarr] job {job_id}: {note}", flush=True)
                 cues = []
             # The subtitles first: muted where they have the word, soften it or
             # leave it out; left in where their word only sounds like it.
@@ -482,7 +482,7 @@ def _sweep_stale_work(folder: Path, older_than: float = 6 * 3600) -> None:
     where it is both confusing and expensive.
     """
     now = time.time()
-    for leftover in folder.glob("cleanarr-*"):
+    for leftover in [*folder.glob("censarr-*"), *folder.glob("cleanarr-*")]:
         try:
             if leftover.is_dir() and now - leftover.stat().st_mtime > older_than:
                 shutil.rmtree(leftover, ignore_errors=True)
@@ -513,7 +513,7 @@ def more_subtitles(settings, kind: str, source: str, source_id: str, path: Path,
                    else client.find(kind, here, title))
         versions = client.versions(item_id) if item_id else []
     except Exception as exc:  # noqa: BLE001
-        print(f"[cleanarr] subtitles from {name}: {exc}", flush=True)
+        print(f"[censarr] subtitles from {name}: {exc}", flush=True)
         return "", "", ""
 
     def fetch(v) -> tuple[str, str]:
@@ -564,7 +564,7 @@ def more_subtitles(settings, kind: str, source: str, source_id: str, path: Path,
     try:
         attached = client.search_subtitles(item_id)
     except Exception as exc:  # noqa: BLE001
-        print(f"[cleanarr] {name} subtitle search: {exc}", flush=True)
+        print(f"[censarr] {name} subtitle search: {exc}", flush=True)
         return "", "", ""
     if not attached:
         return "", "", ""
@@ -582,7 +582,7 @@ def more_subtitles(settings, kind: str, source: str, source_id: str, path: Path,
                 return text, f"a {name.title()} search ({attached})", ""
         if attempt + 1 < SEARCH_POLLS:
             time.sleep(SEARCH_WAIT)
-    print(f"[cleanarr] {name} attached {attached!r} but it never appeared on the file",
+    print(f"[censarr] {name} attached {attached!r} but it never appeared on the file",
           flush=True)
     return "", "", ""
 

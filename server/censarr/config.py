@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from . import env
+
 import os
 import threading
 from dataclasses import asdict, dataclass, field
@@ -16,7 +18,7 @@ DEFAULT_CHECK_IN_CONTEXT = {
     "faggot", "jesus", "christ",
 }
 
-CONFIG_DIR = Path(os.environ.get("CLEANARR_CONFIG", "/config"))
+CONFIG_DIR = Path(env.get("CONFIG", "/config"))
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 _lock = threading.Lock()
 
@@ -121,7 +123,7 @@ class Settings:
     keep_backup: bool = False
     # What the added track is called. Changing it names the tracks written
     # from then on; the ones already written keep the name they were given.
-    track_title: str = "Cleaned - English"
+    track_title: str = "Censored - English"
     # Every name this install has used before the current one. Kept so a file
     # cleaned under an older name is still recognised - otherwise renaming the
     # track would mean re-cleaning adds a second one and removing finds none.
@@ -209,6 +211,14 @@ def load() -> Settings:
     raw.pop("radarr", None)
     if raw.get("library_source") == "arr":
         raw["library_source"] = "sonarr"
+    # The default track name changed with the rename. A config that saved the
+    # old default switches to the new one; the old name stays recognised, so a
+    # re-censor replaces that track rather than adding a second.
+    if raw.get("track_title") == "Cleaned - English":
+        raw["track_title"] = "Censored - English"
+        known = list(raw.get("known_track_titles") or [])
+        if "Cleaned - English" not in known:
+            raw["known_track_titles"] = [*known, "Cleaned - English"]
     for key, value in raw.items():
         if key == "sonarr" and isinstance(value, dict):
             setattr(settings, key, ArrConfig(**value))

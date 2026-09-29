@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from cleanarr import auth, config
+from censarr import auth, config
 
 
 def test_password_hashing():
@@ -88,7 +88,7 @@ def test_settings_never_leak_the_hash(client):
 
 def test_password_change_ends_other_sessions(client):
     from fastapi.testclient import TestClient
-    from cleanarr import main
+    from censarr import main
 
     client.post("/api/auth/setup", json={"username": "amy", "password": "long enough"})
     other = TestClient(main.app)
@@ -128,7 +128,7 @@ def test_basic_credentials():
 
 def test_webhook_takes_the_login_as_basic_auth(client):
     from fastapi.testclient import TestClient
-    from cleanarr import main
+    from censarr import main
 
     client.post("/api/auth/setup", json={"username": "amy", "password": "long enough"})
     sonarr = TestClient(main.app)          # no cookie, like Sonarr

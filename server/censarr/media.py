@@ -8,6 +8,8 @@ be clever with.
 
 from __future__ import annotations
 
+from . import env
+
 import json
 import os
 import shutil
@@ -22,7 +24,7 @@ FFPROBE = os.environ.get("FFPROBE", "ffprobe")
 # Thread cap for every ffmpeg call. Audio work is nearly single-threaded
 # anyway, and leaving the rest of the cores alone is what keeps Plex playing
 # while a file is being cleaned. Set by the pipeline from settings.
-THREADS = int(os.environ.get("CLEANARR_FFMPEG_THREADS", "2"))
+THREADS = int(env.get("FFMPEG_THREADS", "2"))
 
 
 def _threads() -> list[str]:
@@ -31,15 +33,19 @@ def _threads() -> list[str]:
 # What the added track is called, and what marks a track as ours. The name is
 # a setting, so the pipeline calls set_clean_title() before every job. Only
 # CLEAN_TITLE is written; every name in KNOWN_TITLES is recognised.
-DEFAULT_CLEAN_TITLE = "Cleaned - English"
+DEFAULT_CLEAN_TITLE = "Censored - English"
 CLEAN_TITLE = DEFAULT_CLEAN_TITLE
-KNOWN_TITLES = {DEFAULT_CLEAN_TITLE.lower()}
+KNOWN_TITLES = {DEFAULT_CLEAN_TITLE.lower(), "cleaned - english"}
 
 # A mark that does not depend on the name at all. Matroska keeps arbitrary
 # stream tags, so an MKV track stays ours through any number of renames; MP4
 # drops them, which is why the names are still matched as well.
-MARK_KEY = "cleanarr"
+MARK_KEY = "censarr"
 MARK_VALUE = "1"
+# Written by the same app under its old name, Cleanarr: still ours.
+OLD_MARK_KEYS = ("cleanarr",)
+# Tracks it named by default before the rename.
+OLD_DEFAULT_TITLES = ("Cleaned - English",)
 
 
 def set_clean_title(title: str, also_known=()) -> None:
@@ -50,6 +56,7 @@ def set_clean_title(title: str, also_known=()) -> None:
     global CLEAN_TITLE, KNOWN_TITLES
     CLEAN_TITLE = (title or "").strip() or DEFAULT_CLEAN_TITLE
     KNOWN_TITLES = {CLEAN_TITLE.lower(), DEFAULT_CLEAN_TITLE.lower()}
+    KNOWN_TITLES |= {t.lower() for t in OLD_DEFAULT_TITLES}
     KNOWN_TITLES |= {t.strip().lower() for t in (also_known or ()) if t and t.strip()}
 
 
@@ -189,7 +196,8 @@ def probe(path: str | Path) -> Probe:
             title=str(tags.get("title", "")),
             default=bool((s.get("disposition") or {}).get("default")),
             handler=str(tags.get("handler_name", "")),
-            mark=str(tags.get(MARK_KEY, "")),
+            mark=str(tags.get(MARK_KEY) or next(
+                (tags[k] for k in OLD_MARK_KEYS if tags.get(k)), "")),
             start=_seconds(s.get("start_time")),
         ))
         ai += 1
@@ -528,7 +536,7 @@ def check_interleave(path: Path, cleaned_index: int, duration: float,
         gap = abs(here - there)
         if gap > INTERLEAVE_TOLERANCE:
             raise MediaError(
-                f"the cleaned track is badly interleaved - at {at:.0f}s it sits "
+                f"the censored track is badly interleaved - at {at:.0f}s it sits "
                 f"{gap / 1e6:.0f}MB away from the other audio, which stalls "
                 f"playback over a share")
 
@@ -596,7 +604,7 @@ def swap_in(new_file: Path, original: Path, keep_backup: bool = False) -> None:
     every cleaned episode is new would reorder itself on every run.
     """
     st = original.stat()
-    backup = original.with_suffix(original.suffix + ".cleanarr-backup")
+    backup = original.with_suffix(original.suffix + ".censarr-backup")
     if keep_backup:
         shutil.copy2(original, backup)
     os.replace(new_file, original)

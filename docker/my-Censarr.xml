@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <!--
-  Unraid user template for Cleanarr.
+  Unraid user template for Cens-arr.
 
   Lives on the flash at:
-    /boot/config/plugins/dockerMan/templates-user/my-Cleanarr.xml
+    /boot/config/plugins/dockerMan/templates-user/my-Censarr.xml
 
   It gives the container an icon, a WebUI link and a working Edit dialog in the
   Docker tab. The settings here mirror docker/docker-compose.yml exactly - if
@@ -18,28 +18,28 @@
   the image yourself from the docker/ folder of the repository.
 -->
 <Container version="2">
-  <Name>cleanarr</Name>
-  <Repository>ghcr.io/geoguy89/cleanarr:latest</Repository>
-  <Registry>https://github.com/geoguy89/cleanarr/pkgs/container/cleanarr</Registry>
+  <Name>censarr</Name>
+  <Repository>ghcr.io/geoguy89/censarr:latest</Repository>
+  <Registry>https://github.com/geoguy89/censarr/pkgs/container/censarr</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/geoguy89/cleanarr/issues</Support>
-  <Project>https://github.com/geoguy89/cleanarr</Project>
+  <Support>https://github.com/geoguy89/censarr/issues</Support>
+  <Project>https://github.com/geoguy89/censarr</Project>
   <Overview>
-    Adds a second audio track, "Cleaned - English", to shows and films from
+    Adds a second audio track, "Censored - English", to shows and films from
     Plex or Jellyfin (and Sonarr, if you use it), with the profanity muted. One file,
     one extra track: the original audio is untouched and stays the default,
-    and the clean one is picked from the audio menu in Plex or Jellyfin.
+    and the censored one is picked from the audio menu in Plex or Jellyfin.
 
     Runs on the CPU as it comes. With an NVIDIA GPU and the Nvidia Driver
     plugin, add --runtime=nvidia to Extra Parameters (Advanced View).
   </Overview>
   <Category>MediaApp:Video Tools:Utilities</Category>
   <WebUI>http://[IP]:[PORT:8477]/</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/geoguy89/cleanarr/main/docker/my-Cleanarr.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/geoguy89/cleanarr/main/web/icon.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/geoguy89/censarr/main/docker/my-Censarr.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/geoguy89/censarr/main/web/icon.png</Icon>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
   <PostArgs/>
   <CPUset/>
@@ -47,18 +47,22 @@
   <DonateLink/>
   <Date>2026-09-18</Date>
   <Changes>
+### 1.1.0
+- Renamed from Cleanarr to Cens-arr. The image is now ghcr.io/geoguy89/censarr;
+  the old cleanarr name keeps getting updates, and settings, history and tracks
+  already censored carry over unchanged.
 ### 1.0.0
 - First public release.
   </Changes>
   <Requires>Plex or Jellyfin (Sonarr optional, for shows), with the media mounted at the paths it reports. An NVIDIA GPU and Ollama are optional.</Requires>
   <Config Name="WebUI" Target="8477" Default="8477" Mode="tcp"
-          Description="The Cleanarr web interface." Type="Port"
+          Description="The Cens-arr web interface." Type="Port"
           Display="always" Required="true" Mask="false">8477</Config>
-  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/cleanarr" Mode="rw"
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/censarr" Mode="rw"
           Description="Settings, the job database and the cached transcripts."
-          Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/cleanarr</Config>
+          Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/censarr</Config>
   <Config Name="Media" Target="/data" Default="/mnt/user/data" Mode="rw"
-          Description="The CONTAINER PATH must be what your library reports. Sonarr and Plex in containers usually report /data/media/..., so /data is right for them. Cleanarr opens those paths unchanged - there is no path rewriting."
+          Description="The CONTAINER PATH must be what your library reports. Sonarr and Plex in containers usually report /data/media/..., so /data is right for them. Cens-arr opens those paths unchanged - there is no path rewriting."
           Type="Path" Display="always" Required="true" Mask="false">/mnt/user/data</Config>
   <Config Name="TZ" Target="TZ" Default="America/New_York" Mode=""
           Description="Timezone." Type="Variable"

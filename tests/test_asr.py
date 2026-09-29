@@ -7,7 +7,7 @@ import struct
 
 import pytest
 
-from cleanarr import asr
+from censarr import asr
 
 
 @pytest.fixture(autouse=True)

@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from cleanarr import db, words
+from censarr import db, words
 
 
 def q(path: str, **kw) -> int | None:

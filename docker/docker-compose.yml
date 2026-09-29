@@ -1,29 +1,29 @@
 services:
-  cleanarr:
+  censarr:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: cleanarr:latest
-    container_name: cleanarr
+    image: censarr:latest
+    container_name: censarr
     restart: unless-stopped
     # Docker's default is 10 seconds and then SIGKILL. A job in the middle of
     # ffmpeg will not be done in ten, so a redeploy used to kill the worker
     # partway through and leave the write-ahead log to be recovered on the way
     # back up. Nothing is corrupted by that - WAL is crash-safe - but it makes
-    # a redeploy during a clean messier than it needs to be.
+    # a redeploy during a censor run messier than it needs to be.
     stop_grace_period: 45s
     ports:
       - "8477:8477"
     volumes:
-      - /mnt/user/appdata/cleanarr:/config
+      - /mnt/user/appdata/censarr:/config
       # The RIGHT-hand side has to be what your library reports, because
-      # Cleanarr opens those paths unchanged - there is nothing to
+      # Cens-arr opens those paths unchanged - there is nothing to
       # translate them with, on purpose. Sonarr and Plex both run
       # in containers here and report /data/media/..., so the media is
       # mounted as /data. Check yours in Settings -> Your library.
       - /mnt/user/data:/data
     # Under contention the server should favour Plex, not this. Shares only
-    # matter when the CPU is actually full, so cleaning still gets the whole
+    # matter when the CPU is actually full, so censoring still gets the whole
     # machine when nothing else wants it.
     cpu_shares: 512
     environment:
@@ -33,11 +33,11 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     # Unraid reads these off the container itself, so the Docker tab shows the
     # icon and a working WebUI link even for a container it did not create.
-    # The matching user template (my-Cleanarr.xml on the flash) is what makes
+    # The matching user template (my-Censarr.xml on the flash) is what makes
     # the Edit dialog work; keep the two in step if you change ports or paths.
     labels:
       net.unraid.docker.webui: "http://[IP]:[PORT:8477]/"
-      net.unraid.docker.icon: "https://raw.githubusercontent.com/geoguy89/cleanarr/main/web/icon.png"
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/geoguy89/censarr/main/web/icon.png"
     # ---- NVIDIA GPU: uncomment these six lines if you have one ----
     #
     # Off by default: Docker will not start a container whose device
@@ -45,7 +45,7 @@ services:
     # NVIDIA GPU or no container toolkit. Without them Whisper runs on the CPU.
     #
     # An AMD GPU cannot be used either way - CTranslate2 has CUDA and CPU
-    # backends and no ROCm one. Point Cleanarr at a separate Whisper server
+    # backends and no ROCm one. Point Cens-arr at a separate Whisper server
     # instead, in Settings.
     #
     # deploy:

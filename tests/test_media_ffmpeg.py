@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from cleanarr import media
+from censarr import media
 from mediakit import audio_tags, make_media, rms, samples, streams
 
 pytestmark = pytest.mark.ffmpeg
@@ -204,7 +204,7 @@ def test_swap_in_keeps_times_and_mode(tmp_path, source):
     assert abs(st.st_mtime - old) < 1
     assert st.st_mode & 0o777 == 0o640
     assert media.probe(source).cleaned_track is not None
-    backup = source.with_suffix(source.suffix + ".cleanarr-backup")
+    backup = source.with_suffix(source.suffix + ".censarr-backup")
     assert backup.exists() and media.probe(backup).cleaned_track is None
     assert not out.exists()
 
@@ -288,3 +288,15 @@ def test_which_subtitles_are_used():
     assert media.pick_subtitles(p).sub_index == 1           # untagged beats forced
     p.subtitles = [sub(0, codec="dvd_subtitle")]
     assert media.pick_subtitles(p) is None                  # pictures cannot be read
+
+
+def test_a_track_marked_by_the_old_name_is_still_ours(tmp_path):
+    """Files censored as Cleanarr carry a "cleanarr" tag on the track it wrote."""
+    import subprocess
+    src = make_media(tmp_path / "e1.mkv", seconds=2.0, subtitles=False)
+    out = tmp_path / "old.mkv"
+    subprocess.run([media.FFMPEG, "-v", "error", "-y", "-i", str(src), "-map", "0:v", "-map", "0:a",
+                    "-map", "0:a", "-c", "copy", "-metadata:s:a:1", "title=Whatever",
+                    "-metadata:s:a:1", "cleanarr=1", str(out)], check=True)
+    p = media.probe(out)
+    assert p.audio[1].written_here and not p.audio[0].written_here

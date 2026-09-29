@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cleanarr import arr, config
+from censarr import arr, config
 
 
 def session(video="directplay", audio="copy", who="kid", what="Bluey"):
@@ -105,7 +105,7 @@ class _Stop(Exception):
 
 def test_worker_holds_and_unloads_while_the_server_is_busy(home, settings, stub, monkeypatch):
     """One pass of the worker loop with a job queued and a transcode running."""
-    from cleanarr import asr, db, pipeline, worker
+    from censarr import asr, db, pipeline, worker
 
     stub.route("GET", "/status/sessions", {"MediaContainer": {"Metadata": [
         {"title": "Film", "User": {"title": "dad"}, "Player": {"state": "playing"},

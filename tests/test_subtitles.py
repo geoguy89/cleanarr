@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from cleanarr import subtitles, words
+from censarr import subtitles, words
 
 SRT = """1
 00:00:00,500 --> 00:00:01,800

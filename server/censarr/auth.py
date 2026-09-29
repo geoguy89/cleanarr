@@ -26,7 +26,9 @@ import os
 import secrets
 import time
 
-COOKIE = "cleanarr_session"
+COOKIE = "censarr_session"
+# Set before the rename; still accepted so nobody is signed out by it.
+OLD_COOKIE = "cleanarr_session"
 SESSION_DAYS = 30
 
 # scrypt at these parameters takes roughly a tenth of a second per attempt,

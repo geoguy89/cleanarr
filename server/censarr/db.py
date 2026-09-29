@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from . import env
+
 import json
 import os
 import sqlite3
@@ -11,7 +13,13 @@ from pathlib import Path
 
 from .subtitles import LOW_CONFIDENCE
 
-DB_PATH = Path(os.environ.get("CLEANARR_DB", "/config/cleanarr.sqlite"))
+def _default_db() -> Path:
+    """The database under the new name, or the one an install made as Cleanarr."""
+    old = Path("/config/cleanarr.sqlite")
+    return old if old.exists() else Path("/config/censarr.sqlite")
+
+
+DB_PATH = Path(env.get("DB")) if env.get("DB") else _default_db()
 _local = threading.local()
 
 # queued -> running -> done | failed | skipped | cancelled

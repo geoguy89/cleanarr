@@ -1,6 +1,6 @@
 """Where the media actually is.
 
-Cleanarr was built against Sonarr and Radarr, which was a reasonable place to
+Cens-arr (first called Cleanarr) was built against Sonarr and Radarr, which was a reasonable place to
 start - they know every file's path, which is the one thing this needs. But
 plenty of people run Plex or Jellyfin and nothing else, and telling them to
 install two more services to mute swearing is not a reasonable answer.
@@ -56,8 +56,8 @@ def jellyfin_headers(api_key: str) -> dict:
     """
     return {
         "Authorization": f'MediaBrowser Token="{api_key}", '
-                         'Client="Cleanarr", Device="Cleanarr", '
-                         'DeviceId="cleanarr", Version="1.0"',
+                         'Client="Cens-arr", Device="Cens-arr", '
+                         'DeviceId="Cens-arr", Version="1.0"',
         "X-Emby-Token": api_key,
     }
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cleanarr.words import NEVER, Matcher, normalize, to_spans
+from censarr.words import NEVER, Matcher, normalize, to_spans
 
 
 def words(sentence: str, start: float = 0.0, step: float = 0.4) -> list[dict]:

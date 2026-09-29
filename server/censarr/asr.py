@@ -152,10 +152,10 @@ def _load_with_patience(name: str, device: str, compute_type: str,
                 try:
                     freed = free_vram() or []
                 except Exception as err:    # noqa: BLE001
-                    print(f"[cleanarr] could not ask Ollama to free the card: {err}",
+                    print(f"[censarr] could not ask Ollama to free the card: {err}",
                           flush=True)
             wait = OOM_WAIT_AFTER_EVICTION if freed else OOM_WAIT_SECONDS
-            print(f"[cleanarr] GPU full"
+            print(f"[censarr] GPU full"
                   + (f", unloaded {', '.join(freed)}" if freed else "")
                   + f"; retrying in {wait}s "
                   f"(attempt {attempt + 1} of {OOM_RETRIES})", flush=True)
@@ -217,7 +217,7 @@ def transcribe_remote(audio: Path, url: str, model: str, api_key: str = "",
             #
             # This was a list of 2-tuples, which httpx does not accept
             # alongside `files=` - it raised TypeError before the request was
-            # ever sent, so pointing Cleanarr at a Whisper server failed every
+            # ever sent, so pointing Cens-arr (then Cleanarr) at a Whisper server failed every
             # time with a message about bytes-like objects.
             "timestamp_granularities[]": ["word"],
         }
@@ -241,7 +241,7 @@ def transcribe_remote(audio: Path, url: str, model: str, api_key: str = "",
         # Falling back to segment timings would silently make every mute four
         # seconds long, so this stops instead.
         raise RemoteError(
-            "the server returned no word-level timestamps. Cleanarr needs them "
+            "the server returned no word-level timestamps. Cens-arr needs them "
             "to mute single words - check it supports "
             "timestamp_granularities[]=word")
 
